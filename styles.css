@@ -1,0 +1,277 @@
+/* ==========================================================================
+   Journal View
+   ========================================================================== */
+
+.journal-view .view-content {
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.journal-content {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+}
+
+/* ------------------------------------------------------------- toolbar --- */
+
+.journal-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+	padding: var(--size-4-2) var(--size-4-4);
+	border-bottom: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	flex: 0 0 auto;
+}
+
+.journal-toolbar-label {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-muted);
+	letter-spacing: 0.02em;
+}
+
+.journal-toolbar-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+/* -------------------------------------------------------------- scroller -- */
+
+.journal-scroll {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	overflow-x: hidden;
+	/* The view pins the scroll position to its own anchor day. Chromium's
+	   built-in scroll anchoring would correct for the same layout changes a
+	   second time, and the two corrections fight each other. */
+	overflow-anchor: none;
+	overscroll-behavior: contain;
+}
+
+.journal-days,
+.journal-day {
+	overflow-anchor: none;
+}
+
+.journal-days {
+	display: flex;
+	flex-direction: column;
+	/* Leaves room so the first and last day can still be centred. The view
+	   updates the custom property to absorb layout shifts above the reader
+	   without touching scrollTop. */
+	padding: var(--journal-padding-top, 40vh) var(--size-4-4) 40vh;
+	margin: 0 auto;
+	max-width: var(--file-line-width, 700px);
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.journal-days > .journal-day + .journal-day {
+	margin-top: var(--size-4-6);
+}
+
+/* ------------------------------------------------------------------ day --- */
+
+.journal-day {
+	position: relative;
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2) var(--size-4-3) var(--size-4-3);
+	transition: opacity 120ms ease-in-out, background-color 120ms ease-in-out;
+}
+
+.journal-day-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+	padding-bottom: var(--size-2-2);
+	margin-bottom: var(--size-2-3);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.journal-day-title {
+	display: flex;
+	align-items: baseline;
+	gap: var(--size-4-2);
+	min-width: 0;
+}
+
+.journal-day-date {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.journal-day-badge {
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	color: var(--text-on-accent);
+	background-color: var(--interactive-accent);
+	border-radius: var(--radius-s);
+	padding: 0 var(--size-2-2);
+	line-height: 1.5;
+	flex: 0 0 auto;
+}
+
+.journal-day-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	opacity: 0;
+	transition: opacity 120ms ease-in-out;
+	flex: 0 0 auto;
+}
+
+.journal-day:hover .journal-day-actions,
+.journal-day-focused .journal-day-actions {
+	opacity: 1;
+}
+
+button.journal-day-create {
+	font-size: var(--font-ui-smaller);
+	padding: 2px var(--size-2-3);
+	height: auto;
+	box-shadow: none;
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+	cursor: var(--cursor);
+}
+
+button.journal-day-create:hover {
+	color: var(--text-normal);
+}
+
+.journal-day-body {
+	position: relative;
+	/* A blank day still needs a line's worth of click target. */
+	min-height: calc(var(--line-height-normal) * 1em);
+}
+
+.journal-day-editing .journal-day-body {
+	min-height: var(--journal-held-height);
+}
+
+/* ------------------------------------------------------------- preview --- */
+
+/* Days not being edited are static rendered markdown - fixed layout, true
+   height, which is what keeps the journal's scrolling stable. */
+.journal-day-preview {
+	cursor: text;
+	font-family: var(--font-text);
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
+}
+
+.journal-day-preview > :first-child,
+.journal-day-preview > :first-child > :first-child {
+	margin-top: 0;
+}
+
+.journal-day-preview > :last-child,
+.journal-day-preview > :last-child > :last-child {
+	margin-bottom: 0;
+}
+
+/* Today gets a quiet highlight so the centre of the journal is obvious. */
+.journal-day-today {
+	background-color: var(--background-primary-alt);
+}
+
+.journal-day-today .journal-day-date {
+	color: var(--text-normal);
+}
+
+/* Days without a note yet: visible, but clearly not real content. */
+.journal-day-empty {
+	opacity: 0.45;
+}
+
+.journal-day-empty:hover,
+.journal-day-empty.journal-day-focused {
+	opacity: 1;
+}
+
+/* Placeholder, shown by the view while a day's editor is empty. */
+.journal-day-blank .journal-day-body::after {
+	content: attr(data-placeholder);
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	pointer-events: none;
+	color: var(--text-faint);
+	font-family: var(--font-text);
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
+}
+
+.journal-day-hidden {
+	display: none;
+}
+
+/* ---------------------------------------------------------------- editor -- */
+
+.journal-day-body .markdown-source-view,
+.journal-day-body .cm-editor {
+	background-color: transparent;
+}
+
+.journal-day-body .cm-editor {
+	min-height: unset;
+}
+
+.journal-day-body .cm-scroller {
+	padding: 0;
+	overflow: visible !important;
+}
+
+.journal-day-body .cm-contentContainer,
+.journal-day-body .cm-content {
+	padding: 0;
+}
+
+.journal-day-body .cm-gutters {
+	display: none;
+}
+
+.journal-plain-editor {
+	width: 100%;
+	height: var(--journal-editor-height, auto);
+	min-height: 3em;
+	resize: none;
+	border: none;
+	outline: none;
+	box-shadow: none;
+	padding: 0;
+	background-color: transparent;
+	color: var(--text-normal);
+	font-family: var(--font-text);
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
+	overflow: hidden;
+}
+
+.journal-plain-editor:focus,
+.journal-plain-editor:active {
+	border: none;
+	box-shadow: none;
+}
+
+/* -------------------------------------------------------------- settings -- */
+
+.journal-settings-note {
+	margin-top: 0;
+	margin-bottom: var(--size-4-3);
+}

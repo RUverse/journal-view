@@ -1,0 +1,10 @@
+{
+	"id": "journal-view",
+	"name": "Journal View",
+	"version": "1.0.0",
+	"minAppVersion": "1.5.7",
+	"description": "A continuous, scrollable journal view of your daily notes. Today sits in the centre, past days above, future days below.",
+	"author": "RUverse",
+	"authorUrl": "https://github.com/RUverse",
+	"isDesktopOnly": false
+}

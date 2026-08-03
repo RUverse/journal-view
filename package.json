@@ -1,0 +1,36 @@
+{
+	"name": "journal-view",
+	"version": "1.0.0",
+	"description": "Journal View - a continuous, scrollable journal view of your daily notes for Obsidian.",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"typecheck": "tsc -noEmit -skipLibCheck"
+	},
+	"keywords": [
+		"obsidian",
+		"obsidian-plugin",
+		"journal",
+		"daily-notes"
+	],
+	"author": "RUverse",
+	"license": "MIT",
+	"homepage": "https://github.com/RUverse/journal-view#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/RUverse/journal-view.git"
+	},
+	"bugs": {
+		"url": "https://github.com/RUverse/journal-view/issues"
+	},
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"builtin-modules": "^3.3.0",
+		"esbuild": "^0.20.0",
+		"moment": "^2.30.1",
+		"obsidian": "^1.5.7",
+		"tslib": "^2.6.2",
+		"typescript": "^5.3.3"
+	}
+}
