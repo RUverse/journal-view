@@ -1,6 +1,6 @@
 {
 	"name": "journal-view",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Journal View - a continuous, scrollable journal view of your daily notes for Obsidian.",
 	"main": "main.js",
 	"scripts": {

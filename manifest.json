@@ -1,7 +1,7 @@
 {
 	"id": "journal-view",
 	"name": "Journal View",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "1.5.7",
 	"description": "Browse and edit daily notes in a continuous, scrollable journal with past days above and future days below.",
 	"author": "RUverse",
