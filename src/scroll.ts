@@ -1,4 +1,18 @@
 /**
+ * Scroll geometry: pure measurements, no state and no DOM writes.
+ */
+
+/** Pixels between an element and the visible area; 0 means it is on screen. */
+export function distanceFromViewport(scroller: HTMLElement, el: HTMLElement): number {
+	const { scrollTop, clientHeight } = scroller;
+	const top = el.offsetTop;
+	const bottom = top + el.offsetHeight;
+	if (bottom < scrollTop) return scrollTop - bottom;
+	if (top > scrollTop + clientHeight) return top - (scrollTop + clientHeight);
+	return 0;
+}
+
+/**
  * Finds the last item whose top edge is at or above `position`.
  *
  * `topOf` returns an item's distance from the top of the scroller, or null if

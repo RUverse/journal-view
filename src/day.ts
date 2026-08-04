@@ -36,7 +36,7 @@ function replaceNoteBody(content: string, body: string): string {
  *   enough off screen that keeping an editor alive for them is waste. Static
  *   DOM costs nothing to keep and is laid out at its true height.
  *
- * The view decides which mode a day is in (see JournalView.updateEditors) and
+ * The view decides which mode a day is in (see `EditorWindow.update`) and
  * only ever changes it while the day is well outside the viewport, so a mode
  * change is never something the reader can watch happen.
  */

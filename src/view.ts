@@ -1,9 +1,12 @@
-import { ItemView, TAbstractFile, TFile, WorkspaceLeaf, moment, setIcon, setTooltip } from "obsidian";
+import { ItemView, TAbstractFile, TFile, WorkspaceLeaf, moment } from "obsidian";
 import type { Moment } from "moment";
 import type JournalViewPlugin from "./main";
+import { AnchorHost, ScrollAnchor } from "./anchor";
 import { DayHost, DaySection } from "./day";
-import { DAY_KEY_FORMAT } from "./noteIndex";
-import { findAnchorIndex } from "./scroll";
+import { DayWalker } from "./dayWalk";
+import { EditorWindow, EditorWindowHost } from "./editorWindow";
+import { distanceFromViewport } from "./scroll";
+import { JournalToolbar } from "./toolbar";
 
 export const VIEW_TYPE_JOURNAL = "journal-view";
 
@@ -11,23 +14,12 @@ export const VIEW_TYPE_JOURNAL = "journal-view";
 const INITIAL_RADIUS = 7;
 /** How close to an end (px) the reader must get before more days are loaded. */
 const LOAD_THRESHOLD = 1500;
-/** Hard stop so a runaway scroll cannot allocate forever (~13 years). */
-const MAX_OFFSET = 5000;
 /** Above this many live days, the end furthest from the reader is trimmed. */
 const MAX_SECTIONS = 60;
 /** How many days survive a trim. */
 const TRIM_KEEP = 48;
 /** Days closer than this (px) to the viewport are never trimmed. */
 const TRIM_DISTANCE = LOAD_THRESHOLD * 2;
-/**
- * How far beyond the viewport (px) days are kept as live editors. At least a
- * screenful, so a day is an editor well before the reader can scroll to it and
- * click. Days beyond twice this go back to a preview; the gap between the two
- * keeps a day sitting on the boundary from flipping back and forth.
- */
-const EDITOR_MARGIN = 800;
-/** Editors mounted per frame, so a burst of them cannot stall a scroll. */
-const MOUNTS_PER_FRAME = 2;
 /** Per-frame scroll step (px) above which the reader is still travelling. */
 const FLICK_STEP = 24;
 /** How long after the last scroll step the view still counts as moving (ms). */
@@ -36,52 +28,38 @@ const FLICK_IDLE = 120;
 const SETTLE_DELAY = 180;
 
 /**
- * Sets the first icon this Obsidian build actually ships. `setIcon` leaves the
- * element empty for a name its Lucide version does not have, which would show
- * as an invisible button; each name is tried until one draws.
- */
-function applyIcon(el: HTMLElement, ...names: string[]): void {
-	for (const name of names) {
-		setIcon(el, name);
-		if (el.querySelector("svg")) return;
-		el.empty();
-	}
-}
-
-/**
  * The journal is a window of consecutive days. Every day at or near the
  * viewport is a live editor: the reader can click straight into any text they
  * can see and the day does not change shape under the cursor. Days further out
  * are static markdown previews - fully laid out, at their true heights, with
  * nothing that re-measures itself while the reader scrolls, and far cheaper to
- * keep alive. Days cross between the two only while off screen.
+ * keep alive. Days cross between the two only while off screen (see
+ * `EditorWindow`).
  *
  * The window grows before the reader reaches its edge. A day is prepared
  * asynchronously (file read + preview render, off-DOM), then committed
  * synchronously: insert, measure, and - when it landed above the reader -
  * move the scroll position down by exactly the height that appeared, all
  * inside one task. The browser never paints a frame where the content sits
- * in the wrong place.
+ * in the wrong place. Whatever height still drifts in afterwards is cancelled
+ * out by `ScrollAnchor`.
  */
-export class JournalView extends ItemView implements DayHost {
-	private scrollEl!: HTMLElement;
-	private daysEl!: HTMLElement;
-	private headerLabelEl!: HTMLElement;
-	private filterButton!: HTMLElement;
+export class JournalView extends ItemView implements DayHost, AnchorHost, EditorWindowHost {
+	scrollEl!: HTMLElement;
+	daysEl!: HTMLElement;
+	sections: DaySection[] = [];
 
-	private sections: DaySection[] = [];
+	private toolbar?: JournalToolbar;
+	private readonly anchoring = new ScrollAnchor(this);
+	private readonly editors = new EditorWindow(this);
+	private walker!: DayWalker;
+
 	private byPath = new Map<string, DaySection>();
 	private today: Moment = moment().startOf("day");
 
 	private resizeObserver: ResizeObserver | null = null;
-	private anchor: { el: HTMLElement; section: DaySection; top: number } | null = null;
 	private scrollFrame = 0;
 	private animFrame = 0;
-	private editorFrame = 0;
-	private guardFrame = 0;
-	/** Scroll position a freshly mounted editor must not move the view away from. */
-	private guardExpected: number | null = null;
-	private guardFrames = 0;
 	/** True while a pointer is held down in the scroller (scrollbar, selection). */
 	private pointerHeld = false;
 	/** Scroll position and pace, used to keep editor work out of a gesture. */
@@ -91,8 +69,6 @@ export class JournalView extends ItemView implements DayHost {
 	private settleTimer = 0;
 	private loading = { past: false, future: false };
 	private exhausted = { past: false, future: false };
-	/** Current height (px) of the padding above the first day; null = untouched CSS. */
-	private spacerPx: number | null = null;
 	/** Bumped on teardown so in-flight loads know to abandon their work. */
 	private epoch = 0;
 	/** False until the view has centred on today in a laid-out pane. */
@@ -134,18 +110,11 @@ export class JournalView extends ItemView implements DayHost {
 		this.contentEl.empty();
 		this.contentEl.addClass("journal-content");
 
-		const toolbar = this.contentEl.createDiv({ cls: "journal-toolbar" });
-		this.headerLabelEl = toolbar.createDiv({ cls: "journal-toolbar-label", text: "Journal" });
-		const actions = toolbar.createDiv({ cls: "journal-toolbar-actions" });
-
-		this.filterButton = actions.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
-		this.filterButton.addEventListener("click", () => void this.toggleHideEmptyDays());
+		this.toolbar = new JournalToolbar(this.contentEl, {
+			onToggleFilter: () => void this.toggleHideEmptyDays(),
+			onGoToToday: () => this.goToToday(true),
+		});
 		this.syncFilterButton();
-
-		const todayButton = actions.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
-		applyIcon(todayButton, "calendar-plus", "calendar-check");
-		setTooltip(todayButton, "Go to today");
-		todayButton.addEventListener("click", () => this.goToToday(true));
 
 		this.scrollEl = this.contentEl.createDiv({ cls: "journal-scroll" });
 
@@ -169,15 +138,12 @@ export class JournalView extends ItemView implements DayHost {
 		this.epoch++;
 		this.resizeObserver?.disconnect();
 		this.resizeObserver = null;
-		this.anchor = null;
+		this.anchoring.clear();
+		this.editors.destroy();
 		if (this.scrollFrame) window.cancelAnimationFrame(this.scrollFrame);
 		this.scrollFrame = 0;
 		if (this.animFrame) window.cancelAnimationFrame(this.animFrame);
 		this.animFrame = 0;
-		if (this.editorFrame) window.cancelAnimationFrame(this.editorFrame);
-		this.editorFrame = 0;
-		if (this.guardFrame) window.cancelAnimationFrame(this.guardFrame);
-		this.guardFrame = 0;
 		window.clearTimeout(this.settleTimer);
 		this.settleTimer = 0;
 		for (const section of this.sections) section.destroy();
@@ -204,6 +170,7 @@ export class JournalView extends ItemView implements DayHost {
 		this.configSignature = JSON.stringify(this.plugin.daily.config());
 		this.plugin.index.ensureCurrent();
 		this.indexVersion = this.plugin.index.version;
+		this.walker = new DayWalker(this.today, this.plugin.index, () => this.plugin.settings.hideEmptyDays);
 		this.exhausted = { past: false, future: false };
 		this.loading = { past: false, future: false };
 		const epoch = ++this.epoch;
@@ -212,16 +179,16 @@ export class JournalView extends ItemView implements DayHost {
 		this.lastScrollTop = 0;
 		this.lastScrollAt = 0;
 		this.scrollStep = 0;
-		this.spacerPx = null;
-		if (this.scrollEl.clientHeight > 0) this.setSpacer(this.spacerBase());
+		this.anchoring.resetSpacer();
+		if (this.scrollEl.clientHeight > 0) this.anchoring.setSpacer(this.anchoring.spacerBase());
 		this.attachResizeObserver();
 
 		// The chosen day, plus a few days either side.
-		const origin = (this.origin = this.originOffset(around));
+		const origin = (this.origin = this.walker.origin(around));
 		const past: number[] = [];
 		let edge = origin;
 		for (let i = 0; i < INITIAL_RADIUS; i++) {
-			const next = this.nextOffset(edge, -1);
+			const next = this.walker.next(edge, -1);
 			if (next === null) {
 				this.exhausted.past = true;
 				break;
@@ -232,7 +199,7 @@ export class JournalView extends ItemView implements DayHost {
 		const future: number[] = [];
 		edge = origin;
 		for (let i = 0; i < INITIAL_RADIUS; i++) {
-			const next = this.nextOffset(edge, 1);
+			const next = this.walker.next(edge, 1);
 			if (next === null) {
 				this.exhausted.future = true;
 				break;
@@ -256,7 +223,7 @@ export class JournalView extends ItemView implements DayHost {
 			this.centered = true;
 			// The days on screen become editors before the reader has looked at
 			// them; that changes their heights, so aim at the origin again.
-			this.updateEditors({ includeVisible: true });
+			this.editors.update({ includeVisible: true });
 			this.centerOn(this.sectionAt(origin), "instant");
 		} // else: the pane is hidden; the first real resize centres it.
 		this.updateHeaderLabel();
@@ -290,73 +257,22 @@ export class JournalView extends ItemView implements DayHost {
 		await this.build(around, focusToday);
 	}
 
-	/**
-	 * The offset the window should be built around. Hiding empty days can take
-	 * away the very day the reader was looking at, so an anchor that will not
-	 * survive is moved to whichever surviving day is closest to it.
-	 */
-	private originOffset(around?: Moment): number {
-		if (!around) return 0;
-		const offset = around.clone().startOf("day").diff(this.today, "days");
-		if (Math.abs(offset) > MAX_OFFSET) return 0;
-		if (!this.plugin.settings.hideEmptyDays) return offset;
-		if (offset === 0 || this.plugin.index.has(this.keyForOffset(offset))) return offset;
-
-		const before = this.nextOffset(offset, -1);
-		const after = this.nextOffset(offset, 1);
-		if (before === null) return after ?? 0;
-		if (after === null) return before;
-		return offset - before <= after - offset ? before : after;
-	}
-
 	/** The day the reader is currently looking at, if the view has one. */
 	private visibleDate(): Moment | undefined {
 		if (!this.ready) return undefined;
 		// A hidden pane measures as zero-height, so nothing can be located in
 		// it; the anchor still names the day it was left on.
 		const measurable = this.scrollEl && this.scrollEl.clientHeight > 0;
-		const section = (measurable ? this.sectionNear(this.scrollEl.scrollTop) : null) ?? this.anchor?.section;
-		return section?.date;
+		const near = measurable ? this.anchoring.sectionNear(this.scrollEl.scrollTop) : null;
+		return (near ?? this.anchoring.section)?.date;
 	}
 
 	private createSection(offset: number): DaySection {
-		return new DaySection(this, this.today.clone().add(offset, "days"), offset);
+		return new DaySection(this, this.walker.dateFor(offset), offset);
 	}
 
 	private sectionAt(offset: number): DaySection | undefined {
 		return this.sections.find((section) => section.offset === offset);
-	}
-
-	private keyForOffset(offset: number): string {
-		return this.today.clone().add(offset, "days").format(DAY_KEY_FORMAT);
-	}
-
-	private offsetForKey(key: string): number {
-		return moment(key, DAY_KEY_FORMAT).startOf("day").diff(this.today, "days");
-	}
-
-	/**
-	 * The next day the view should render in `direction`. With empty days
-	 * hidden this skips straight to the next day that actually has a note, so
-	 * the view never has to materialise a run of blank days to cross a gap -
-	 * except for today, which belongs in the journal whether it has a note or
-	 * not, so a walk that would step over it stops there instead.
-	 */
-	private nextOffset(from: number, direction: -1 | 1): number | null {
-		let offset: number;
-		if (this.plugin.settings.hideEmptyDays) {
-			const key = this.keyForOffset(from);
-			const found = direction < 0 ? this.plugin.index.prev(key) : this.plugin.index.next(key);
-			const next = found ? this.offsetForKey(found) : null;
-			const skipsToday =
-				direction < 0 ? from > 0 && (next === null || next < 0) : from < 0 && (next === null || next > 0);
-			if (skipsToday) offset = 0;
-			else if (next === null) return null;
-			else offset = next;
-		} else {
-			offset = from + direction;
-		}
-		return Math.abs(offset) > MAX_OFFSET ? null : offset;
 	}
 
 	private indexPaths(): void {
@@ -388,7 +304,7 @@ export class JournalView extends ItemView implements DayHost {
 		if (where === "start") this.sections.unshift(...sections);
 		else this.sections.push(...sections);
 		// A day can land inside the editor window on a tall pane.
-		this.scheduleEditors();
+		this.editors.schedule();
 	}
 
 	/** True while the viewport is within loading distance of `direction`'s end. */
@@ -415,7 +331,7 @@ export class JournalView extends ItemView implements DayHost {
 			for (let i = 0; i < 50 && this.needsMore(direction); i++) {
 				const edge =
 					direction === "past" ? this.sections[0].offset : this.sections[this.sections.length - 1].offset;
-				const next = this.nextOffset(edge, step);
+				const next = this.walker.next(edge, step);
 				if (next === null) {
 					this.exhausted[direction] = true;
 					return;
@@ -437,13 +353,13 @@ export class JournalView extends ItemView implements DayHost {
 					// absorbs late height changes (images loading, the day
 					// being edited growing) without touching the scroll
 					// position.
-					const base = this.spacerBase();
-					if (this.spacerHeight() < base) this.setSpacer(base);
+					const base = this.anchoring.spacerBase();
+					if (this.anchoring.spacerHeight() < base) this.anchoring.setSpacer(base);
 					this.commit([section], "start");
 					const delta = ref.offsetTop - before;
 					if (delta !== 0) this.scrollEl.scrollTop += delta;
-					this.scrollMoved();
-					this.updateAnchor();
+					this.editors.declareScroll();
+					this.anchoring.pin();
 				} else {
 					this.commit([section], "end");
 				}
@@ -477,7 +393,7 @@ export class JournalView extends ItemView implements DayHost {
 		if (end === "future") {
 			for (let i = this.sections.length - 1; i >= 0 && budget > 0; i--, budget--) {
 				const section = this.sections[i];
-				if (section.hasFocus || this.distanceFromViewport(section) < TRIM_DISTANCE) break;
+				if (section.hasFocus || this.distanceFrom(section) < TRIM_DISTANCE) break;
 				victims.push(section);
 			}
 			if (!victims.length) return;
@@ -486,7 +402,7 @@ export class JournalView extends ItemView implements DayHost {
 		} else {
 			for (let i = 0; i < this.sections.length && budget > 0; i++, budget--) {
 				const section = this.sections[i];
-				if (section.hasFocus || this.distanceFromViewport(section) < TRIM_DISTANCE) break;
+				if (section.hasFocus || this.distanceFrom(section) < TRIM_DISTANCE) break;
 				victims.push(section);
 			}
 			const ref = this.sections[victims.length]?.el;
@@ -496,8 +412,8 @@ export class JournalView extends ItemView implements DayHost {
 			for (const section of victims) this.forget(section);
 			const delta = ref.offsetTop - before;
 			if (delta !== 0) this.scrollEl.scrollTop += delta;
-			this.scrollMoved();
-			this.updateAnchor();
+			this.editors.declareScroll();
+			this.anchoring.pin();
 		}
 		this.exhausted[end] = false;
 	}
@@ -506,7 +422,7 @@ export class JournalView extends ItemView implements DayHost {
 		this.resizeObserver?.unobserve(section.el);
 		this.byPath.delete(section.path);
 		if (section.file) this.byPath.delete(section.file.path);
-		if (this.anchor?.section === section) this.anchor = null;
+		this.anchoring.forget(section);
 		section.destroy();
 	}
 
@@ -517,136 +433,39 @@ export class JournalView extends ItemView implements DayHost {
 	 */
 	isOffScreen(day: DaySection): boolean {
 		if (!this.scrollEl || this.scrollEl.clientHeight === 0) return true;
-		return this.distanceFromViewport(day) > 0;
+		return this.distanceFrom(day) > 0;
 	}
 
-	/** Pixels between a day and the visible area; 0 means it is on screen. */
-	private distanceFromViewport(section: DaySection): number {
-		const { scrollTop, clientHeight } = this.scrollEl;
-		const top = section.el.offsetTop;
-		const bottom = top + section.el.offsetHeight;
-		if (bottom < scrollTop) return scrollTop - bottom;
-		if (top > scrollTop + clientHeight) return top - (scrollTop + clientHeight);
-		return 0;
+	private distanceFrom(section: DaySection): number {
+		return distanceFromViewport(this.scrollEl, section.el);
 	}
 
-	/* ------------------------------------------------------------- editors */
+	/* --------------------------------------------------- collaborator hooks */
 
-	/**
-	 * Brings every day's mode in line with where it sits: a live editor at and
-	 * around the viewport, a static preview further out.
-	 *
-	 * A day on screen is never touched. Swapping its body would move text the
-	 * reader is looking at, and no scroll correction can undo that - a
-	 * correction can only hold a fixed point, and the reader's eye is not on
-	 * it. Days become editors while they are still out of sight, a screenful
-	 * ahead of wherever the viewport is, which is the side scrolling brings
-	 * them in from anyway. Above the viewport the height that costs is taken
-	 * out of the spacer by the anchor; below it, nobody is looking.
-	 *
-	 * `includeVisible` is for the one moment that rule cannot hold: the view
-	 * has just been built and the days on screen have never been anything but
-	 * previews. The reader has not seen them yet either, so the swap is free -
-	 * as long as the view re-centres afterwards.
-	 */
-	private updateEditors(options?: { includeVisible?: boolean }): void {
-		if (!this.ready || !this.scrollEl || this.scrollEl.clientHeight === 0) return;
-		const includeVisible = options?.includeVisible ?? false;
-		const near = Math.max(EDITOR_MARGIN, this.scrollEl.clientHeight);
-		const far = near * 2;
-		const flicking = this.isFlicking();
-
-		// Every distance is measured before anything moves: mounting an editor
-		// changes the layout the remaining measurements would come from.
-		const mount: { section: DaySection; distance: number }[] = [];
-		const unmount: DaySection[] = [];
-		for (const section of this.sections) {
-			// A hidden day reports its position as 0, and needs no editor.
-			if (!section.isLaidOut) {
-				if (section.isEditing) unmount.push(section);
-				continue;
-			}
-			const distance = this.distanceFromViewport(section);
-			if (distance > far) {
-				if (section.isEditing) unmount.push(section);
-				continue;
-			}
-			if (section.isEditing || distance > near) continue;
-			if (distance === 0 && !includeVisible) continue;
-			mount.push({ section, distance });
-		}
-		if (!mount.length && !unmount.length) return;
-
-		// Giving a day back to a preview is pure housekeeping; it can wait for
-		// a gap in the gesture.
-		if (!flicking) for (const section of unmount) void section.unmountEditor();
-
-		// Nearest first, so what the reader is about to reach is ready first.
-		mount.sort((a, b) => a.distance - b.distance);
-		// An editor costs a few milliseconds to build, so they go up one or two
-		// a frame - fewer while a gesture is in flight, but never none: falling
-		// behind a fast scroll is what leaves a preview on screen, and once it
-		// is on screen this pass will not touch it.
-		let budget = flicking ? 1 : MOUNTS_PER_FRAME;
-		if (includeVisible) budget = Math.max(budget, mount.filter((entry) => entry.distance === 0).length);
-		const before = this.scrollEl.scrollTop;
-		for (const entry of mount.slice(0, budget)) entry.section.mountEditor();
-		if (mount.length) this.guardMountScroll(before);
-		// A fresh editor is held at the height of the preview it replaced, so
-		// this should find nothing to correct - but it is not free to assume.
-		this.reanchor();
-		if (mount.length > budget || (flicking && unmount.length)) this.scheduleEditors();
-	}
-
-	/**
-	 * Watches the scroll position over the frames after an editor was built.
-	 *
-	 * A new editor asks to be scrolled into view; `JournalEditor` withdraws
-	 * that request, but it reaches into Obsidian's editor to do it, so this
-	 * catches what gets through. The tell is the size: the request lands in a
-	 * single frame and moves the view by more than a screen, to a day that was
-	 * off screen on purpose. Nothing but a scrollbar drag moves that far in one
-	 * frame, and the guard is only alive for the two frames where it can
-	 * happen. Running before paint, undoing it costs nothing.
-	 */
-	private guardMountScroll(top: number): void {
-		this.guardExpected = top;
-		this.guardFrames = 2;
-		if (!this.guardFrame) this.guardFrame = window.requestAnimationFrame(() => this.checkMountScroll());
-	}
-
-	private checkMountScroll(): void {
-		this.guardFrame = 0;
-		if (!this.scrollEl || !this.ready || this.guardExpected === null) return;
-		// A held pointer is a scrollbar drag or a text selection dragging the
-		// view along - the one other thing that moves this far in a frame, and
-		// unmistakably the reader's own doing. The guard stands down for it.
-		const limit = this.pointerHeld ? Infinity : Math.max(this.scrollEl.clientHeight, 400);
-		if (Math.abs(this.scrollEl.scrollTop - this.guardExpected) > limit) {
-			this.scrollEl.scrollTop = this.guardExpected;
-			this.lastScrollTop = this.guardExpected;
-			this.guardExpected = null;
-			this.updateAnchor();
-			return;
-		}
-		// Anything smaller is the reader, and is now where the view is.
-		this.guardExpected = this.scrollEl.scrollTop;
-		if (--this.guardFrames > 0) this.guardFrame = window.requestAnimationFrame(() => this.checkMountScroll());
-		else this.guardExpected = null;
-	}
-
-	/**
-	 * Every scroll the view makes on purpose - compensating an insert, a trim,
-	 * an anchor correction - is declared here, so the guard above only ever
-	 * sees movement that came from somewhere else.
-	 */
-	private scrollMoved(): void {
-		if (this.guardExpected !== null) this.guardExpected = this.scrollEl.scrollTop;
+	isReady(): boolean {
+		return this.ready;
 	}
 
 	/** True while the view is moving fast enough that the reader is still travelling. */
-	private isFlicking(): boolean {
+	isFlicking(): boolean {
 		return this.scrollStep > FLICK_STEP && performance.now() - this.lastScrollAt < FLICK_IDLE;
+	}
+
+	isPointerHeld(): boolean {
+		return this.pointerHeld;
+	}
+
+	settleAnchor(): void {
+		this.anchoring.settle();
+	}
+
+	onAnchorScroll(): void {
+		this.editors.declareScroll();
+	}
+
+	onGuardScroll(top: number): void {
+		this.lastScrollTop = top;
+		this.anchoring.pin();
 	}
 
 	/**
@@ -657,140 +476,13 @@ export class JournalView extends ItemView implements DayHost {
 	private onSettle(): void {
 		this.settleTimer = 0;
 		if (!this.ready || !this.scrollEl || this.scrollEl.clientHeight === 0) return;
-		this.replenishSpacer();
-		this.updateEditors();
+		// Whatever the spacer had to spend on corrections is put back here, and
+		// the position that leaves is the one the reader is now at.
+		if (this.anchoring.replenishSpacer()) this.lastScrollTop = this.scrollEl.scrollTop;
+		this.editors.update();
 	}
 
-	/**
-	 * Tops the padding above the first day back up to its resting height. The
-	 * spacer is what lets layout changes above the reader be absorbed without
-	 * touching the scroll position, so a run of them can spend it - and once it
-	 * is gone, corrections start writing scrollTop instead, which is what a
-	 * scroll feels as a stutter. Putting it back moves the scroll position by
-	 * exactly the height added, in the same task, so nothing on screen moves.
-	 */
-	private replenishSpacer(): void {
-		const base = this.spacerBase();
-		if (this.spacerHeight() >= base) return;
-		const ref = this.sections.find((section) => section.isLaidOut)?.el;
-		if (!ref) return;
-		const before = ref.offsetTop;
-		this.setSpacer(base);
-		const delta = ref.offsetTop - before;
-		if (delta !== 0) this.scrollEl.scrollTop += delta;
-		this.lastScrollTop = this.scrollEl.scrollTop;
-		this.scrollMoved();
-		this.updateAnchor();
-	}
-
-	private scheduleEditors(): void {
-		if (this.editorFrame) return;
-		this.editorFrame = window.requestAnimationFrame(() => {
-			this.editorFrame = 0;
-			this.updateEditors();
-		});
-	}
-
-	/* ----------------------------------------------------------- anchoring */
-
-	/**
-	 * Batches are compensated exactly at commit time, but heights can still
-	 * drift afterwards: CodeMirror measures asynchronously, and images inside
-	 * a note load whenever they load. The anchor covers that residue - the
-	 * first day starting at or below the viewport top is pinned, and whenever
-	 * layout above it changes, the difference is cancelled out before paint.
-	 */
-	private updateAnchor(): void {
-		if (!this.scrollEl || this.scrollEl.clientHeight === 0 || !this.sections.length) {
-			this.anchor = null;
-			return;
-		}
-		const section = this.sectionNear(this.scrollEl.scrollTop);
-		this.anchor = section ? { el: section.el, section, top: section.el.offsetTop } : null;
-	}
-
-	/** The day the anchor should pin for a viewport whose top sits at `position`. */
-	private sectionNear(position: number): DaySection | null {
-		const topOf = (index: number) => {
-			const el = this.sections[index].el;
-			return el.offsetParent === null ? null : el.offsetTop;
-		};
-		const at = findAnchorIndex(this.sections.length, topOf, position);
-		if (at < 0) return null;
-
-		// `at` is the day straddling the viewport top. Anchoring to it is
-		// unstable: any height change lands below its own top edge, invisible
-		// to a top-edge anchor, and shoves everything the reader sees. The
-		// next day's top edge is inside the viewport; pinning that one also
-		// pins the visible tail of the straddling day, so corrections extend
-		// upwards, out of view.
-		const top = topOf(at);
-		if (top !== null && top >= position) return this.sections[at];
-		for (let next = at + 1; next < this.sections.length; next++) {
-			if (topOf(next) !== null) return this.sections[next];
-		}
-		return this.sections[at];
-	}
-
-	/**
-	 * Re-pins the anchor after a residual layout change. The correction
-	 * prefers resizing the spacer above the first day over writing scrollTop:
-	 * wheel and momentum scrolling run on the compositor thread, and a
-	 * main-thread scrollTop write commits a stale position - the deltas still
-	 * in flight are lost, which the reader feels as a stutter. Resizing the
-	 * spacer moves the content back under the reader without touching the
-	 * scroll position at all; only what the spacer cannot absorb falls
-	 * through to scrollTop.
-	 */
-	private reanchor(): void {
-		if (!this.scrollEl || this.scrollEl.clientHeight === 0) return;
-		if (!this.anchor || !this.anchor.el.isConnected || this.anchor.el.offsetParent === null) {
-			this.updateAnchor();
-			return;
-		}
-
-		const top = this.anchor.el.offsetTop;
-		const delta = top - this.anchor.top;
-		if (delta === 0) return;
-		const absorbed = this.absorbWithSpacer(delta);
-		this.anchor.top = top - absorbed;
-		const rest = delta - absorbed;
-		if (rest !== 0) {
-			this.scrollEl.scrollTop += rest;
-			this.scrollMoved();
-		}
-	}
-
-	/**
-	 * Takes as much of a layout shift as possible out of the top spacer.
-	 * Returns the pixels absorbed (same sign as `delta`).
-	 */
-	private absorbWithSpacer(delta: number): number {
-		const spacer = this.spacerHeight();
-		const max = Math.max(this.spacerBase(), this.scrollEl.clientHeight);
-		const next = Math.min(max, Math.max(0, spacer - delta));
-		if (next === spacer) return 0;
-		this.setSpacer(next);
-		return spacer - next;
-	}
-
-	/** The spacer's resting height - the breathing room above the first day. */
-	private spacerBase(): number {
-		const height = this.scrollEl?.clientHeight ?? 0;
-		return height > 0 ? Math.round(height * 0.4) : this.spacerHeight();
-	}
-
-	private spacerHeight(): number {
-		if (this.spacerPx !== null) return this.spacerPx;
-		const computed = parseFloat(getComputedStyle(this.daysEl).paddingTop);
-		this.spacerPx = Number.isFinite(computed) ? computed : 0;
-		return this.spacerPx;
-	}
-
-	private setSpacer(px: number): void {
-		this.spacerPx = px;
-		this.daysEl.setCssProps({ "--journal-padding-top": `${px}px` });
-	}
+	/* ---------------------------------------------------------- pane layout */
 
 	private attachResizeObserver(): void {
 		this.resizeObserver?.disconnect();
@@ -804,20 +496,20 @@ export class JournalView extends ItemView implements DayHost {
 			// The view was built while its pane was hidden; centre it on the
 			// first frame it actually has a size.
 			if (this.scrollEl.clientHeight === 0) return;
-			this.spacerPx = null;
-			this.setSpacer(this.spacerBase());
+			this.anchoring.resetSpacer();
+			this.anchoring.setSpacer(this.anchoring.spacerBase());
 			const section = this.sectionAt(this.origin) ?? this.sections[0];
 			this.centerOn(section, "instant");
 			this.centered = true;
-			this.updateEditors({ includeVisible: true });
+			this.editors.update({ includeVisible: true });
 			this.centerOn(section, "instant");
 			this.onScroll();
 			return;
 		}
-		this.reanchor();
+		this.anchoring.settle();
 		// A pane that changed size has a different set of days near enough to
 		// the viewport to be worth an editor.
-		this.scheduleEditors();
+		this.editors.schedule();
 	}
 
 	/* ------------------------------------------------------------ scrolling */
@@ -841,15 +533,15 @@ export class JournalView extends ItemView implements DayHost {
 		// shift out of the reader's view; re-anchoring straight away would
 		// accept the shifted layout as truth, which reads as the view jumping
 		// by exactly the amount the day grew.
-		this.reanchor();
-		this.updateAnchor();
+		this.anchoring.settle();
+		this.anchoring.pin();
 
 		if (this.scrollFrame) return;
 		this.scrollFrame = window.requestAnimationFrame(() => {
 			this.scrollFrame = 0;
 			if (!this.scrollEl || !this.ready) return;
 			this.updateHeaderLabel();
-			this.updateEditors();
+			this.editors.update();
 			if (this.needsMore("past")) void this.extend("past");
 			if (this.needsMore("future")) void this.extend("future");
 		});
@@ -870,8 +562,8 @@ export class JournalView extends ItemView implements DayHost {
 		}
 		if (behavior === "instant") {
 			this.scrollEl.scrollTop = this.centerTarget(section);
-			this.scrollMoved();
-			this.updateAnchor();
+			this.editors.declareScroll();
+			this.anchoring.pin();
 			onArrive?.();
 			return;
 		}
@@ -889,14 +581,14 @@ export class JournalView extends ItemView implements DayHost {
 			const remaining = target - this.scrollEl.scrollTop;
 			if (Math.abs(remaining) < 4 || performance.now() - started > 1500) {
 				this.scrollEl.scrollTop = target;
-				this.scrollMoved();
-				this.updateAnchor();
+				this.editors.declareScroll();
+				this.anchoring.pin();
 				onArrive?.();
 				return;
 			}
 			this.scrollEl.scrollTop += remaining * 0.22;
-			this.scrollMoved();
-			this.updateAnchor();
+			this.editors.declareScroll();
+			this.anchoring.pin();
 			this.animFrame = window.requestAnimationFrame(step);
 		};
 		this.animFrame = window.requestAnimationFrame(step);
@@ -919,11 +611,11 @@ export class JournalView extends ItemView implements DayHost {
 	}
 
 	private updateHeaderLabel(): void {
-		if (!this.ready || !this.headerLabelEl) return;
+		if (!this.ready || !this.toolbar) return;
 		// Reuses the anchor rather than measuring again - this runs every frame
 		// while scrolling.
-		const label = this.anchor ? this.anchor.section.date.format("MMMM YYYY") : "Journal";
-		if (this.headerLabelEl.getText() !== label) this.headerLabelEl.setText(label);
+		const section = this.anchoring.section;
+		this.toolbar.setLabel(section ? section.date.format("MMMM YYYY") : "Journal");
 	}
 
 	/* -------------------------------------------------------- vault events */
@@ -992,7 +684,7 @@ export class JournalView extends ItemView implements DayHost {
 			// A note can appear for a day the view skipped over (sync, another
 			// window, "hide empty days" turned on). Slot it into place.
 			const key = this.plugin.index.keyForPath(file.path);
-			section = key ? this.ensureSectionFor(this.offsetForKey(key)) : undefined;
+			section = key ? this.ensureSectionFor(this.walker.offsetFor(key)) : undefined;
 		}
 		if (!section || section.file?.path === file.path) return;
 		if (section.path !== file.path) return;
@@ -1029,8 +721,8 @@ export class JournalView extends ItemView implements DayHost {
 		this.byPath.set(section.path, section);
 		if (section.file) this.byPath.set(section.file.path, section);
 		this.resizeObserver?.observe(section.el);
-		this.reanchor();
-		this.scheduleEditors();
+		this.anchoring.settle();
+		this.editors.schedule();
 		return section;
 	}
 
@@ -1073,12 +765,7 @@ export class JournalView extends ItemView implements DayHost {
 
 	private syncFilterButton(): void {
 		// Settings can be saved from elsewhere before this view has a toolbar.
-		if (!this.filterButton) return;
-		const on = this.plugin.settings.hideEmptyDays;
-		applyIcon(this.filterButton, on ? "filter" : "filter-x", "filter");
-		setTooltip(this.filterButton, on ? "Showing only days with notes" : "Showing every day");
-		this.filterButton.toggleClass("is-active", on);
-		this.filterButton.setAttribute("aria-pressed", String(on));
+		this.toolbar?.setFilter(this.plugin.settings.hideEmptyDays);
 	}
 
 	async onSettingsChanged(): Promise<void> {
