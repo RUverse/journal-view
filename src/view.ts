@@ -36,6 +36,19 @@ const FLICK_IDLE = 120;
 const SETTLE_DELAY = 180;
 
 /**
+ * Sets the first icon this Obsidian build actually ships. `setIcon` leaves the
+ * element empty for a name its Lucide version does not have, which would show
+ * as an invisible button; each name is tried until one draws.
+ */
+function applyIcon(el: HTMLElement, ...names: string[]): void {
+	for (const name of names) {
+		setIcon(el, name);
+		if (el.querySelector("svg")) return;
+		el.empty();
+	}
+}
+
+/**
  * The journal is a window of consecutive days. Every day at or near the
  * viewport is a live editor: the reader can click straight into any text they
  * can see and the day does not change shape under the cursor. Days further out
@@ -54,6 +67,7 @@ export class JournalView extends ItemView implements DayHost {
 	private scrollEl!: HTMLElement;
 	private daysEl!: HTMLElement;
 	private headerLabelEl!: HTMLElement;
+	private filterButton!: HTMLElement;
 
 	private sections: DaySection[] = [];
 	private byPath = new Map<string, DaySection>();
@@ -84,6 +98,10 @@ export class JournalView extends ItemView implements DayHost {
 	/** False until the view has centred on today in a laid-out pane. */
 	private centered = false;
 	private ready = false;
+	/** Offset of the day the current window was built around. */
+	private origin = 0;
+	/** A settings change that arrived while a build was in flight. */
+	private settingsPending = false;
 	private configSignature = "";
 	private indexVersion = -1;
 
@@ -120,8 +138,12 @@ export class JournalView extends ItemView implements DayHost {
 		this.headerLabelEl = toolbar.createDiv({ cls: "journal-toolbar-label", text: "Journal" });
 		const actions = toolbar.createDiv({ cls: "journal-toolbar-actions" });
 
+		this.filterButton = actions.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
+		this.filterButton.addEventListener("click", () => void this.toggleHideEmptyDays());
+		this.syncFilterButton();
+
 		const todayButton = actions.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
-		setIcon(todayButton, "calendar-check");
+		applyIcon(todayButton, "calendar-plus", "calendar-check");
 		setTooltip(todayButton, "Go to today");
 		todayButton.addEventListener("click", () => this.goToToday(true));
 
@@ -135,7 +157,7 @@ export class JournalView extends ItemView implements DayHost {
 		this.registerDomEvent(window, "pointerup", () => (this.pointerHeld = false), { passive: true });
 		this.registerVaultEvents();
 
-		await this.build();
+		await this.build(undefined, true);
 	}
 
 	async onClose(): Promise<void> {
@@ -170,7 +192,12 @@ export class JournalView extends ItemView implements DayHost {
 
 	/* --------------------------------------------------------------- build */
 
-	private async build(): Promise<void> {
+	/**
+	 * Builds a window of days centred on `around`, or on today when the caller
+	 * has no day in mind. `focusToday` belongs to the initial open: any later
+	 * rebuild happens under the reader, and taking their cursor would be theft.
+	 */
+	private async build(around?: Moment, focusToday = false): Promise<void> {
 		this.ready = false;
 		this.centered = false;
 		this.today = moment().startOf("day");
@@ -189,9 +216,10 @@ export class JournalView extends ItemView implements DayHost {
 		if (this.scrollEl.clientHeight > 0) this.setSpacer(this.spacerBase());
 		this.attachResizeObserver();
 
-		// Today, plus a few days either side.
+		// The chosen day, plus a few days either side.
+		const origin = (this.origin = this.originOffset(around));
 		const past: number[] = [];
-		let edge = 0;
+		let edge = origin;
 		for (let i = 0; i < INITIAL_RADIUS; i++) {
 			const next = this.nextOffset(edge, -1);
 			if (next === null) {
@@ -202,7 +230,7 @@ export class JournalView extends ItemView implements DayHost {
 			edge = next;
 		}
 		const future: number[] = [];
-		edge = 0;
+		edge = origin;
 		for (let i = 0; i < INITIAL_RADIUS; i++) {
 			const next = this.nextOffset(edge, 1);
 			if (next === null) {
@@ -212,7 +240,7 @@ export class JournalView extends ItemView implements DayHost {
 			future.push(next);
 			edge = next;
 		}
-		const offsets = [...past.reverse(), 0, ...future];
+		const offsets = [...past.reverse(), origin, ...future];
 
 		const sections = offsets.map((offset) => this.createSection(offset));
 		await Promise.all(sections.map((section) => section.prepare()));
@@ -224,27 +252,71 @@ export class JournalView extends ItemView implements DayHost {
 
 		this.ready = true;
 		if (this.scrollEl.clientHeight > 0) {
-			this.centerOn(this.sectionAt(0), "instant");
+			this.centerOn(this.sectionAt(origin), "instant");
 			this.centered = true;
 			// The days on screen become editors before the reader has looked at
-			// them; that changes their heights, so aim at today again.
+			// them; that changes their heights, so aim at the origin again.
 			this.updateEditors({ includeVisible: true });
-			this.centerOn(this.sectionAt(0), "instant");
+			this.centerOn(this.sectionAt(origin), "instant");
 		} // else: the pane is hidden; the first real resize centres it.
 		this.updateHeaderLabel();
 
-		if (this.plugin.settings.focusTodayOnOpen && this.app.workspace.getActiveViewOfType(JournalView) === this) {
+		if (
+			focusToday &&
+			this.plugin.settings.focusTodayOnOpen &&
+			this.app.workspace.getActiveViewOfType(JournalView) === this
+		) {
 			window.setTimeout(() => this.sectionAt(0)?.focusEditor(), 50);
 		}
 		// A short viewport may already sit near an end.
 		this.onScroll();
+
+		// A settings change that landed mid-build was read against the values
+		// this window was built from; redo it now the view is whole again.
+		if (this.settingsPending) {
+			this.settingsPending = false;
+			await this.rebuild(this.visibleDate(), focusToday);
+		}
 	}
 
 	/** Rebuilds everything, e.g. after the daily-note format changed. */
-	async rebuild(): Promise<void> {
+	async rebuild(around?: Moment, focusToday = false): Promise<void> {
+		// Closed for business from here on: flushing is asynchronous, and a
+		// change arriving during it must queue rather than start a second
+		// rebuild alongside this one.
+		this.ready = false;
 		await this.flushAll();
 		this.teardown();
-		await this.build();
+		await this.build(around, focusToday);
+	}
+
+	/**
+	 * The offset the window should be built around. Hiding empty days can take
+	 * away the very day the reader was looking at, so an anchor that will not
+	 * survive is moved to whichever surviving day is closest to it.
+	 */
+	private originOffset(around?: Moment): number {
+		if (!around) return 0;
+		const offset = around.clone().startOf("day").diff(this.today, "days");
+		if (Math.abs(offset) > MAX_OFFSET) return 0;
+		if (!this.plugin.settings.hideEmptyDays) return offset;
+		if (offset === 0 || this.plugin.index.has(this.keyForOffset(offset))) return offset;
+
+		const before = this.nextOffset(offset, -1);
+		const after = this.nextOffset(offset, 1);
+		if (before === null) return after ?? 0;
+		if (after === null) return before;
+		return offset - before <= after - offset ? before : after;
+	}
+
+	/** The day the reader is currently looking at, if the view has one. */
+	private visibleDate(): Moment | undefined {
+		if (!this.ready) return undefined;
+		// A hidden pane measures as zero-height, so nothing can be located in
+		// it; the anchor still names the day it was left on.
+		const measurable = this.scrollEl && this.scrollEl.clientHeight > 0;
+		const section = (measurable ? this.sectionNear(this.scrollEl.scrollTop) : null) ?? this.anchor?.section;
+		return section?.date;
 	}
 
 	private createSection(offset: number): DaySection {
@@ -266,15 +338,21 @@ export class JournalView extends ItemView implements DayHost {
 	/**
 	 * The next day the view should render in `direction`. With empty days
 	 * hidden this skips straight to the next day that actually has a note, so
-	 * the view never has to materialise a run of blank days to cross a gap.
+	 * the view never has to materialise a run of blank days to cross a gap -
+	 * except for today, which belongs in the journal whether it has a note or
+	 * not, so a walk that would step over it stops there instead.
 	 */
 	private nextOffset(from: number, direction: -1 | 1): number | null {
 		let offset: number;
 		if (this.plugin.settings.hideEmptyDays) {
 			const key = this.keyForOffset(from);
 			const found = direction < 0 ? this.plugin.index.prev(key) : this.plugin.index.next(key);
-			if (!found) return null;
-			offset = this.offsetForKey(found);
+			const next = found ? this.offsetForKey(found) : null;
+			const skipsToday =
+				direction < 0 ? from > 0 && (next === null || next < 0) : from < 0 && (next === null || next > 0);
+			if (skipsToday) offset = 0;
+			else if (next === null) return null;
+			else offset = next;
 		} else {
 			offset = from + direction;
 		}
@@ -728,7 +806,7 @@ export class JournalView extends ItemView implements DayHost {
 			if (this.scrollEl.clientHeight === 0) return;
 			this.spacerPx = null;
 			this.setSpacer(this.spacerBase());
-			const section = this.sectionAt(0) ?? this.sections[0];
+			const section = this.sectionAt(this.origin) ?? this.sections[0];
 			this.centerOn(section, "instant");
 			this.centered = true;
 			this.updateEditors({ includeVisible: true });
@@ -983,10 +1061,37 @@ export class JournalView extends ItemView implements DayHost {
 
 	/* ------------------------------------------------------------ settings */
 
+	/**
+	 * Flips the same setting the settings tab owns, so every open journal - and
+	 * the tab itself, next time it is drawn - follows along.
+	 */
+	private async toggleHideEmptyDays(): Promise<void> {
+		this.plugin.settings.hideEmptyDays = !this.plugin.settings.hideEmptyDays;
+		this.syncFilterButton();
+		await this.plugin.saveSettings();
+	}
+
+	private syncFilterButton(): void {
+		// Settings can be saved from elsewhere before this view has a toolbar.
+		if (!this.filterButton) return;
+		const on = this.plugin.settings.hideEmptyDays;
+		applyIcon(this.filterButton, on ? "filter" : "filter-x", "filter");
+		setTooltip(this.filterButton, on ? "Showing only days with notes" : "Showing every day");
+		this.filterButton.toggleClass("is-active", on);
+		this.filterButton.setAttribute("aria-pressed", String(on));
+	}
+
 	async onSettingsChanged(): Promise<void> {
-		if (!this.ready) return;
-		// The editor kind, date format and hidden-day handling all affect
-		// every day, so the honest answer is to rebuild around today.
-		await this.rebuild();
+		this.syncFilterButton();
+		if (!this.ready) {
+			// A build is in flight against the old values - dropping the change
+			// here would leave the toolbar and the days disagreeing.
+			this.settingsPending = true;
+			return;
+		}
+		// The editor kind, date format and hidden-day handling all affect every
+		// day, so the honest answer is a rebuild - but around the day the
+		// reader was on, not today, so their place in the journal survives.
+		await this.rebuild(this.visibleDate());
 	}
 }
