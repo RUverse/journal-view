@@ -271,6 +271,176 @@ button.journal-day-create:hover {
 	box-shadow: none;
 }
 
+/* ----------------------------------------------------------- date picker -- */
+
+/* The calendar is one continuous column of months, the same shape as the
+   journal it moves around in: a week per row, months stacked below each other,
+   and a dot under every day that has a note. */
+
+.journal-picker-modal {
+	width: min(420px, 92vw);
+}
+
+.journal-picker-modal .modal-content {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	margin-top: var(--size-4-2);
+}
+
+.journal-picker-weekdays {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 2px;
+	/* Matches the months' own gutter, so the labels stay over their columns. */
+	padding: 0 var(--size-2-2) var(--size-2-2) 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	color: var(--text-faint);
+	text-align: center;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	flex: 0 0 auto;
+}
+
+.journal-picker-scroll {
+	/* Positioned so a month's `offsetTop` is measured against the scroller
+	   itself, which is what the picker centres and compensates against. */
+	position: relative;
+	height: min(58vh, 480px);
+	overflow-y: auto;
+	overflow-x: hidden;
+	overscroll-behavior: contain;
+	flex: 1 1 auto;
+	min-height: 0;
+	/* The picker compensates for a month built above the reader itself.
+	   Chromium's built-in scroll anchoring corrects for the same insertion a
+	   second time, which lands the reader a month away from where they were. */
+	overflow-anchor: none;
+}
+
+.journal-picker-months,
+.journal-picker-month {
+	overflow-anchor: none;
+}
+
+/* Keeps the scrollbar off the last column. */
+.journal-picker-months {
+	padding-right: var(--size-2-2);
+}
+
+.journal-picker-month-label {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	display: flex;
+	align-items: baseline;
+	gap: var(--size-2-2);
+	padding: var(--size-4-2) 0 var(--size-2-2);
+	background-color: var(--background-primary);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.journal-picker-month-year {
+	font-weight: var(--font-normal);
+	color: var(--text-faint);
+}
+
+.journal-picker-grid {
+	display: grid;
+	grid-template-columns: repeat(7, 1fr);
+	gap: 2px;
+}
+
+button.journal-picker-day {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 34px;
+	padding: 0 0 5px;
+	border: none;
+	border-radius: var(--radius-s);
+	box-shadow: none;
+	background-color: transparent;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-variant-numeric: tabular-nums;
+	cursor: var(--cursor);
+}
+
+/* The dot sits under the number in every cell, so the numbers never shift
+   between a day that has a note and one that does not. */
+button.journal-picker-day::after {
+	content: "";
+	position: absolute;
+	bottom: 5px;
+	left: 50%;
+	width: 4px;
+	height: 4px;
+	transform: translateX(-50%);
+	border-radius: 50%;
+	background-color: currentColor;
+	opacity: 0;
+}
+
+button.journal-picker-day.has-note {
+	color: var(--text-normal);
+	font-weight: var(--font-medium);
+}
+
+button.journal-picker-day.has-note::after {
+	opacity: 0.6;
+}
+
+button.journal-picker-day:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+button.journal-picker-day.is-today {
+	color: var(--text-accent);
+	font-weight: var(--font-semibold);
+	box-shadow: inset 0 0 0 1px var(--interactive-accent);
+}
+
+button.journal-picker-day.is-current,
+button.journal-picker-day.is-current:hover {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-weight: var(--font-semibold);
+	box-shadow: none;
+}
+
+button.journal-picker-day.is-current::after {
+	opacity: 0;
+}
+
+button.journal-picker-day.is-current.has-note::after {
+	opacity: 0.8;
+}
+
+button.journal-picker-day:focus-visible {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+button.journal-picker-day.is-out-of-range {
+	opacity: 0.25;
+	cursor: default;
+}
+
+button.journal-picker-day.is-out-of-range:hover {
+	background-color: transparent;
+	color: var(--text-muted);
+}
+
+.journal-picker-blank {
+	height: 34px;
+}
+
 /* -------------------------------------------------------------- settings -- */
 
 .journal-settings-note {

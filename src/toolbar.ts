@@ -16,6 +16,7 @@ function applyIcon(el: HTMLElement, ...names: string[]): void {
 /** What the toolbar's controls ask the view to do. */
 export interface ToolbarActions {
 	onToggleFilter(): void;
+	onGoToDate(): void;
 	onGoToToday(): void;
 }
 
@@ -35,6 +36,11 @@ export class JournalToolbar {
 
 		this.filterButton = buttons.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
 		this.filterButton.addEventListener("click", () => actions.onToggleFilter());
+
+		const dateButton = buttons.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
+		applyIcon(dateButton, "calendar-search", "calendar-days", "calendar");
+		setTooltip(dateButton, "Go to date");
+		dateButton.addEventListener("click", () => actions.onGoToDate());
 
 		const todayButton = buttons.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
 		applyIcon(todayButton, "calendar-plus", "calendar-check");

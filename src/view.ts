@@ -2,8 +2,9 @@ import { ItemView, TAbstractFile, TFile, WorkspaceLeaf, moment } from "obsidian"
 import type { Moment } from "moment";
 import type JournalViewPlugin from "./main";
 import { AnchorHost, ScrollAnchor } from "./anchor";
+import { DatePickerModal } from "./datePicker";
 import { DayHost, DaySection } from "./day";
-import { DayWalker } from "./dayWalk";
+import { DayWalker, MAX_OFFSET } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
 import { distanceFromViewport } from "./scroll";
 import { JournalToolbar } from "./toolbar";
@@ -50,6 +51,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	sections: DaySection[] = [];
 
 	private toolbar?: JournalToolbar;
+	/** The open date picker, which has to go when the view does. */
+	private picker: DatePickerModal | null = null;
 	private readonly anchoring = new ScrollAnchor(this);
 	private readonly editors = new EditorWindow(this);
 	private walker!: DayWalker;
@@ -112,6 +115,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 		this.toolbar = new JournalToolbar(this.contentEl, {
 			onToggleFilter: () => void this.toggleHideEmptyDays(),
+			onGoToDate: () => this.openDatePicker(),
 			onGoToToday: () => this.goToToday(true),
 		});
 		this.syncFilterButton();
@@ -130,6 +134,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	async onClose(): Promise<void> {
+		// The picker holds this view in its callback, so a leaf that closes
+		// while it is open would leave it able to navigate a dead journal.
+		this.picker?.close();
 		await this.flushAll();
 		this.teardown();
 	}
@@ -608,6 +615,51 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// Focus only once the animation has arrived: focusing an editor makes
 		// the browser scroll it into view, which would fight the animation.
 		this.centerOn(section, "smooth", focus ? () => section.focusEditor() : undefined);
+	}
+
+	/** Opens the calendar, on the day the reader is currently looking at. */
+	private openDatePicker(): void {
+		// The dots come straight from the index, so it has to agree with the
+		// vault's current daily-note configuration before any of them are drawn.
+		this.plugin.index.ensureCurrent();
+		this.picker?.close();
+		const picker = new DatePickerModal(this.app, {
+			index: this.plugin.index,
+			today: moment().startOf("day"),
+			current: this.visibleDate(),
+			onPick: (date) => this.goToDate(date),
+			onDismiss: () => {
+				if (this.picker === picker) this.picker = null;
+			},
+		});
+		this.picker = picker;
+		picker.open();
+	}
+
+	/**
+	 * Moves the journal to `date`. A day already in the window is scrolled to;
+	 * anything further away is a rebuild around that day, which is also what
+	 * resolves a day the current filter hides - the walker lands on the nearest
+	 * day that survives it.
+	 */
+	goToDate(date: Moment, focus = true): void {
+		// A date can arrive from a picker that outlived the view it was opened
+		// from - the plugin reloading under it, say.
+		if (!this.scrollEl?.isConnected) return;
+		const day = date.clone().startOf("day");
+		const offset = day.diff(this.today, "days");
+		if (Math.abs(offset) > MAX_OFFSET) return;
+
+		const section = moment().startOf("day").isSame(this.today, "day") ? this.sectionAt(offset) : undefined;
+		if (section) {
+			// Focusing only once the animation has arrived: focus scrolls the
+			// editor into view, which would fight it. Same as `goToToday`.
+			this.centerOn(section, "smooth", focus ? () => section.focusEditor() : undefined);
+			return;
+		}
+		void this.rebuild(day).then(() => {
+			if (focus) this.sectionAt(this.origin)?.focusEditor();
+		});
 	}
 
 	private updateHeaderLabel(): void {

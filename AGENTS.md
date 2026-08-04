@@ -58,3 +58,6 @@ host interface it implements:
   scroll position while one is mounted
 - `src/dayWalk.ts`: day offsets, dates and index keys, including hidden days
 - `src/toolbar.ts`: the toolbar strip; `src/scroll.ts`: pure scroll geometry
+
+`src/datePicker.ts` is the toolbar's calendar: a scrolling column of months that
+hangs off the view rather than being part of it, and moves the journal by date.
