@@ -32,6 +32,8 @@ export interface JournalEditor {
 interface InternalCodeMirror {
 	posAtCoords?(coords: { x: number; y: number }, precise: boolean): number | null;
 	dispatch?(spec: { selection: { anchor: number } }): void;
+	/** CodeMirror's pending "bring the cursor into view" request, if any. */
+	viewState?: { scrollTarget?: unknown };
 }
 
 interface InternalEditorApi {
@@ -141,6 +143,7 @@ class RichEditor implements JournalEditor {
 		};
 
 		this.instance.set?.(options.value, true);
+		this.dropScrollRequest();
 
 		this.focusIn = () => {
 			this.claimActiveEditor(true);
@@ -177,8 +180,27 @@ class RichEditor implements JournalEditor {
 	setValue(value: string): void {
 		try {
 			this.instance?.set?.(value, true);
+			this.dropScrollRequest();
 		} catch (error) {
 			console.warn("Journal View: could not update editor contents", error);
+		}
+	}
+
+	/**
+	 * Giving an editor its content asks CodeMirror to scroll the cursor into
+	 * view. The journal builds editors for days that are deliberately off
+	 * screen, and CodeMirror obliges by scrolling the whole pane to them -
+	 * which reads as the journal lurching to a day the reader was only
+	 * approaching. The request is only carried out in a later measure pass, so
+	 * dropping it here is enough. Focusing a day still scrolls to it, which is
+	 * the one case that is meant to.
+	 */
+	private dropScrollRequest(): void {
+		try {
+			const viewState = this.instance?.editor?.cm?.viewState;
+			if (viewState && "scrollTarget" in viewState) viewState.scrollTarget = null;
+		} catch {
+			/* the view's own guard catches the scroll if this ever stops working */
 		}
 	}
 

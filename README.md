@@ -14,9 +14,12 @@ shown faded; the moment you type in one, the file is created.
   The toolbar button (and the `Go to today` command) brings you back.
 - **Infinite in both directions.** Scroll up for older days, down for future ones. More days are
   appended a batch at a time as you approach either end.
-- **Only a window of days is live.** The view keeps a bounded window of rendered previews and drops
-  days far from the viewport. Only the day being edited has a live editor, so long journal sessions
-  stay responsive without keeping an editor open for every note.
+- **Everything you can see is editable in place.** Every day at or near the viewport is already a
+  live editor, so clicking into any day just moves the cursor — nothing switches mode or reflows
+  under the click.
+- **Only a window of days is live.** The view keeps a bounded window of days and drops the ones far
+  from the viewport. Days well outside the viewport are kept as static previews rather than editors,
+  so long journal sessions stay responsive without an editor open for every note.
 
 ## Where the days come from
 
@@ -55,8 +58,10 @@ folder.
 
 ## Notes on internals
 
-Days are rendered as static Markdown previews until you edit them; this keeps their layout stable
-while scrolling. Obsidian does not export an embeddable Markdown editor, so the optional rich editor
+Days near the viewport hold a live editor; days further out are static Markdown previews, which are
+laid out at their true height and cost nothing to keep. A day only ever changes between the two well
+off screen, so the swap is never something you can watch happen, and the scroll position is pinned
+to an anchor day throughout. Obsidian does not export an embeddable Markdown editor, so the rich editor
 uses the app's internal embed registry. That integration is isolated and guarded: if an Obsidian
 update changes it, Journal View falls back to a plain-text editor. Disable `Rich editor` to use the
 public-API-only fallback directly.

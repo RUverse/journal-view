@@ -10,6 +10,8 @@ export interface DayHost {
 	plugin: JournalViewPlugin;
 	/** Called when a day's underlying file appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
+	/** True while a day is out of sight, where its body can be swapped unseen. */
+	isOffScreen(day: DaySection): boolean;
 }
 
 /**
@@ -27,12 +29,16 @@ function replaceNoteBody(content: string, body: string): string {
 /**
  * One day in the journal. A day has two modes:
  *
- * - Preview: the note rendered as static markdown. Static DOM is fully laid
- *   out at its true height, which is what makes the journal scroll dead
- *   stable - an editor, by contrast, renders lazily and keeps re-measuring
- *   the parts of a long note that scroll into view.
- * - Edit: a real editor, entered by clicking into the day. Only the day
- *   being written in is ever an editor; it returns to a preview on blur.
+ * - Edit: a real editor. Every day the reader can see is in this mode, so
+ *   clicking into text only moves the cursor - nothing is swapped out from
+ *   under the click and nothing reflows.
+ * - Preview: the note rendered as static markdown, used for days that are far
+ *   enough off screen that keeping an editor alive for them is waste. Static
+ *   DOM costs nothing to keep and is laid out at its true height.
+ *
+ * The view decides which mode a day is in (see JournalView.updateEditors) and
+ * only ever changes it while the day is well outside the viewport, so a mode
+ * change is never something the reader can watch happen.
  */
 export class DaySection {
 	readonly el: HTMLElement;
@@ -45,6 +51,16 @@ export class DaySection {
 	private editor: JournalEditor | null = null;
 	private previewComponent: Component | null = null;
 	private destroyed = false;
+	/**
+	 * Bumped whenever the day's mode is asked to change. A preview is built
+	 * asynchronously, so the token tells a finished build whether the mode it
+	 * was rendered for is still the one wanted.
+	 */
+	private modeToken = 0;
+	/** True while a preview is being built to replace this day's editor. */
+	private unmounting = false;
+	/** Preview height (px) the editor is held at until the reader types. */
+	private heldHeight = 0;
 
 	private lastKnownContent = "";
 	private saveTimer = 0;
@@ -82,9 +98,23 @@ export class DaySection {
 		const target = event.target as HTMLElement;
 		if (target.closest(".journal-day-actions")) return;
 
+		if (this.editor) {
+			// The editor handles clicks that land in its own text, links
+			// included. A click on the day's padding does not reach it, so
+			// place the cursor at the nearest position by hand.
+			if (this.editor.hasFocus() || !target.closest(".journal-day-body")) return;
+			if (window.getSelection()?.toString()) return;
+			this.focusAt(event);
+			return;
+		}
+
+		// The rest only applies to days far enough off screen to still be a
+		// preview - the reader has to arrive there faster than the view can
+		// mount an editor, so it is rare but has to keep working.
+
 		// Links in the preview navigate; they should not start an edit.
 		const link = target.closest("a");
-		if (link && !this.editor) {
+		if (link) {
 			event.preventDefault();
 			const href = link.getAttribute("data-href") ?? link.getAttribute("href");
 			if (!href) return;
@@ -96,14 +126,19 @@ export class DaySection {
 			return;
 		}
 
-		if (this.editor) {
-			if (!this.editor.hasFocus() && event.target === this.bodyEl) this.editor.focus();
-			return;
-		}
 		if (!target.closest(".journal-day-body")) return;
 		// A click that ends a text selection is a copy gesture, not an edit.
 		if (window.getSelection()?.toString()) return;
-		this.beginEdit(event);
+		this.focusAt(event);
+	}
+
+	/** Puts the cursor where the day was clicked, mounting an editor if needed. */
+	private focusAt(event: MouseEvent): void {
+		this.mountEditor();
+		const editor = this.editor;
+		if (!editor) return;
+		editor.focus();
+		editor.placeCursor?.(event.clientX, event.clientY);
 	}
 
 	/* ---------------------------------------------------------------- state */
@@ -116,8 +151,14 @@ export class DaySection {
 		return this.file !== null;
 	}
 
+	/** True while this day holds a live editor rather than a static preview. */
 	get isEditing(): boolean {
 		return this.editor !== null;
+	}
+
+	/** False for a day the layout is ignoring, e.g. a hidden empty day. */
+	get isLaidOut(): boolean {
+		return this.el.offsetParent !== null;
 	}
 
 	private formatHeader(): string {
@@ -249,6 +290,7 @@ export class DaySection {
 		this.previewComponent?.unload();
 		this.previewComponent = built.component;
 		this.bodyEl.empty();
+		this.releaseHeight();
 		this.el.removeClass("journal-day-editing");
 		this.bodyEl.appendChild(built.container);
 		this.el.toggleClass("journal-day-blank", noteBody(content).trim().length === 0);
@@ -256,10 +298,11 @@ export class DaySection {
 
 	private async renderPreview(content: string): Promise<void> {
 		if (this.destroyed || this.editor) return;
+		const token = ++this.modeToken;
 		const built = await this.buildPreview(content);
 		if (!built) return;
-		if (this.editor) {
-			// The reader started editing while the preview rendered; theirs wins.
+		if (token !== this.modeToken || this.editor) {
+			// An editor was mounted while the preview rendered; theirs wins.
 			built.component.unload();
 			return;
 		}
@@ -268,78 +311,109 @@ export class DaySection {
 
 	/* -------------------------------------------------------------- editing */
 
-	/** Swaps the preview for a live editor and puts the cursor in it. */
-	beginEdit(event?: MouseEvent): void {
-		if (this.destroyed) return;
-		if (this.editor) {
-			this.editor.focus();
-			return;
-		}
-		// Hold the day at least at its preview height while it is edited: a
-		// fresh editor renders a long note lazily and would briefly collapse
-		// it, reflowing everything below the click.
-		const held = this.bodyEl.offsetHeight;
+	/**
+	 * Swaps the preview for a live editor, without taking focus. The view
+	 * mounts editors ahead of the reader, so by the time a day is close enough
+	 * to click it is already one.
+	 *
+	 * The day is held at its preview height until someone types in it: an
+	 * editor lays out the parts of a long note it cannot see lazily, and its
+	 * first guess at their height is only a guess.
+	 */
+	mountEditor(): void {
+		if (this.destroyed || this.editor) return;
+		this.modeToken++;
+		this.heldHeight = this.bodyEl.offsetHeight;
 		this.previewComponent?.unload();
 		this.previewComponent = null;
 		this.bodyEl.empty();
-		if (held > 0) this.bodyEl.setCssProps({ "--journal-held-height": `${held}px` });
+		if (this.heldHeight > 0) this.bodyEl.setCssProps({ "--journal-held-height": `${this.heldHeight}px` });
 		this.el.addClass("journal-day-editing");
 		const body = noteBody(this.lastKnownContent);
 		const placeholder = this.exists ? "Empty note" : "Start typing to create this note";
-		this.editor = createJournalEditor(
-			{
-				app: this.host.app,
-				container: this.bodyEl,
-				value: body,
-				placeholder,
-				file: this.file,
-				onChange: () => {
-					this.updateBlankState();
-					this.scheduleSave();
+		try {
+			this.editor = createJournalEditor(
+				{
+					app: this.host.app,
+					container: this.bodyEl,
+					value: body,
+					placeholder,
+					file: this.file,
+					onChange: () => {
+						this.releaseHeight();
+						this.updateBlankState();
+						this.scheduleSave();
+					},
+					onFocus: () => {
+						this.focused = true;
+						// The day is on screen and the editor has measured what
+						// it shows, so its own height can be trusted from here.
+						this.releaseHeight();
+						this.el.addClass("journal-day-focused");
+					},
+					onBlur: () => this.onEditorBlur(),
 				},
-				onFocus: () => {
-					this.focused = true;
-					this.el.addClass("journal-day-focused");
-				},
-				onBlur: () => this.onEditorBlur(),
-			},
-			this.host.plugin.settings.richEditor,
-		);
+				this.host.plugin.settings.richEditor,
+			);
+		} catch (error) {
+			// The day has already given up its preview; put one back rather
+			// than leave it blank.
+			console.error(`Journal View: could not open an editor for ${this.path}`, error);
+			this.el.removeClass("journal-day-editing");
+			this.bodyEl.empty();
+			void this.renderPreview(this.lastKnownContent);
+			return;
+		}
 		this.updateBlankState();
-		this.editor.focus();
-		if (event) this.editor.placeCursor?.(event.clientX, event.clientY);
 	}
 
 	/**
-	 * Leaving the editor returns the day to a static preview, so its height
-	 * goes back to being fixed. Losing focus to another window is not
-	 * leaving - the reader expects their cursor to survive a cmd-tab.
+	 * Returns a day to a static preview. Only ever called for days far off
+	 * screen, and never for one that is being written in - the preview is
+	 * built from the content on disk, so anything unsaved would be lost.
 	 */
+	async unmountEditor(): Promise<void> {
+		if (this.destroyed || !this.editor || this.unmounting) return;
+		if (this.hasFocus || this.isDirty) return;
+		const content = this.lastKnownContent;
+		const token = ++this.modeToken;
+		this.unmounting = true;
+		try {
+			// Built while the editor still stands, then swapped in one step, so
+			// the day never spends a frame at zero height.
+			const built = await this.buildPreview(content);
+			if (!built) return;
+			// Rendering takes long enough for the day to have been scrolled back
+			// into sight, or for the note to have changed under it. Either way
+			// this preview is not the one to show; the day stays an editor and
+			// the view asks again when it is out of sight.
+			const stale =
+				token !== this.modeToken ||
+				this.hasFocus ||
+				this.lastKnownContent !== content ||
+				!this.host.isOffScreen(this);
+			if (stale) {
+				built.component.unload();
+				return;
+			}
+			this.applyPreview(built, content);
+		} finally {
+			this.unmounting = false;
+		}
+	}
+
+	/** Lets the day's height follow the editor again. */
+	private releaseHeight(): void {
+		if (this.heldHeight === 0) return;
+		this.heldHeight = 0;
+		this.bodyEl.setCssProps({ "--journal-held-height": "0px" });
+	}
+
+	/** Blurring an editor is not leaving the day, but it is a good time to save. */
 	private onEditorBlur(): void {
 		this.focused = false;
 		this.el.removeClass("journal-day-focused");
-		if (!this.el.ownerDocument.hasFocus()) return;
-		if (!this.editor) return;
-		const value = replaceNoteBody(this.lastKnownContent, this.editor.getValue());
 		void this.flush();
-		this.lastKnownContent = value;
-		void this.swapToPreview(value);
-	}
-
-	/**
-	 * Builds the preview while the editor still stands, then swaps the two in
-	 * one step - the day never spends a frame at zero height.
-	 */
-	private async swapToPreview(value: string): Promise<void> {
-		const built = await this.buildPreview(value);
-		if (!built) return;
-		if (!this.editor || this.hasFocus) {
-			// Editing resumed (or ended another way) while the preview
-			// rendered; keep the editor.
-			built.component.unload();
-			return;
-		}
-		this.applyPreview(built, value);
 	}
 
 	/**
@@ -352,7 +426,8 @@ export class DaySection {
 	}
 
 	focusEditor(): void {
-		this.beginEdit();
+		this.mountEditor();
+		this.editor?.focus();
 	}
 
 	/** Applies a change that happened outside the journal (sync, another tab). */
@@ -370,6 +445,9 @@ export class DaySection {
 
 		this.editor.setValue(body);
 		this.lastKnownContent = content;
+		// The held height belongs to content that is no longer what the day
+		// holds; the editor's own height is the honest one now.
+		this.releaseHeight();
 		this.updateBlankState();
 	}
 
@@ -440,7 +518,7 @@ export class DaySection {
 			const file = await this.host.plugin.daily.create(this.date);
 			this.setFile(file);
 			await this.reload();
-			this.beginEdit();
+			this.focusEditor();
 		} catch (error) {
 			console.error(`Journal View: could not create ${this.path}`, error);
 			new Notice(`Journal View: could not create ${this.path}`);

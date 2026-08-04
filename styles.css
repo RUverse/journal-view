@@ -159,8 +159,10 @@ button.journal-day-create:hover {
 	min-height: calc(var(--line-height-normal) * 1em);
 }
 
+/* A day that has just become an editor is held at the height of the preview it
+   replaced, until the editor has measured itself or the reader types. */
 .journal-day-editing .journal-day-body {
-	min-height: var(--journal-held-height);
+	min-height: max(calc(var(--line-height-normal) * 1em), var(--journal-held-height, 0px));
 }
 
 /* ------------------------------------------------------------- preview --- */
