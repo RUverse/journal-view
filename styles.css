@@ -120,13 +120,14 @@
 	text-overflow: ellipsis;
 }
 
+/* A quiet marker, not a call to action: today is already highlighted by its
+   background, so the badge only has to name it. */
 .journal-day-badge {
 	font-size: var(--font-ui-smaller);
-	font-weight: var(--font-medium);
-	color: var(--text-on-accent);
-	background-color: var(--interactive-accent);
+	font-weight: var(--font-normal);
+	color: var(--text-faint);
 	border-radius: var(--radius-s);
-	padding: 0 var(--size-2-2);
+	padding: 0 var(--size-2-1);
 	line-height: 1.5;
 	flex: 0 0 auto;
 }
@@ -160,15 +161,21 @@ button.journal-day-create:hover {
 }
 
 .journal-day-body {
+	/* Breathing room above and below the text; zero for an ordinary day. */
+	--journal-body-pad: 0px;
 	position: relative;
+	padding-block: var(--journal-body-pad);
 	/* A blank day still needs a line's worth of click target. */
-	min-height: calc(var(--line-height-normal) * 1em);
+	min-height: calc(var(--line-height-normal) * 1em + 2 * var(--journal-body-pad));
 }
 
 /* A day that has just become an editor is held at the height of the preview it
    replaced, until the editor has measured itself or the reader types. */
 .journal-day-editing .journal-day-body {
-	min-height: max(calc(var(--line-height-normal) * 1em), var(--journal-held-height, 0px));
+	min-height: max(
+		calc(var(--line-height-normal) * 1em + 2 * var(--journal-body-pad)),
+		var(--journal-held-height, 0px)
+	);
 }
 
 /* ------------------------------------------------------------- preview --- */
@@ -197,8 +204,9 @@ button.journal-day-create:hover {
 	background-color: var(--background-primary-alt);
 }
 
-.journal-day-today .journal-day-date {
-	color: var(--text-normal);
+/* ...and a little more room around its text than the days around it. */
+.journal-day-today .journal-day-body {
+	--journal-body-pad: var(--size-4-2);
 }
 
 /* Days without a note yet: visible, but clearly not real content. */
@@ -215,7 +223,9 @@ button.journal-day-create:hover {
 .journal-day-blank .journal-day-body::after {
 	content: attr(data-placeholder);
 	position: absolute;
-	top: 0;
+	/* Absolute children sit against the padding box, so pay the padding back
+	   to keep the placeholder on the first line of the editor. */
+	top: var(--journal-body-pad);
 	left: 0;
 	right: 0;
 	pointer-events: none;
