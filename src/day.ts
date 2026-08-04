@@ -1,7 +1,7 @@
 import { App, Component, MarkdownRenderer, Notice, TFile, getFrontMatterInfo, setIcon, setTooltip } from "obsidian";
-import type { Moment } from "moment";
 import type JournalViewPlugin from "./main";
 import { JournalEditor, createJournalEditor } from "./editor";
+import type { Moment } from "./moment";
 import { SaveQueue } from "./saveQueue";
 
 /** The bits of the journal view a day needs to talk to. */
@@ -276,10 +276,8 @@ export class DaySection {
 		try {
 			const fileManager = this.host.app.fileManager;
 			if (!(await fileManager.promptForDeletion(file))) return;
-			// `trashFile` honors the configured trash destination. The fallback keeps
-			// compatibility with the plugin's Obsidian 1.5.7 minimum.
-			if (typeof fileManager.trashFile === "function") await fileManager.trashFile(file);
-			else await this.host.app.vault.trash(file, true);
+			// Honor the user's configured trash destination.
+			await fileManager.trashFile(file);
 		} catch (error) {
 			console.error(`Journal View: could not delete ${file.path}`, error);
 			new Notice(`Journal View: could not delete ${file.path}`);

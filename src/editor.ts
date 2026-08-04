@@ -49,7 +49,7 @@ interface InternalEditorInstance {
 	editor?: InternalEditorApi;
 	get?(): string | null;
 	set?(value: string, clear: boolean): void;
-	onUpdate?(update: unknown, changed: boolean): void;
+	onUpdate?: (update: unknown, changed: boolean) => void;
 	destroy?(): void;
 	unload?(): void;
 }
@@ -92,9 +92,11 @@ function resolveEditorCtor(app: App): EditorCtor | null {
 		if (typeof probe.showEditor === "function") probe.showEditor.call(probe);
 		const editMode = probe.editMode;
 		if (editMode) {
-			const proto = Object.getPrototypeOf(Object.getPrototypeOf(editMode));
-			if (typeof proto?.constructor === "function") {
-				cachedCtor = proto.constructor as EditorCtor;
+			const parent: unknown = Object.getPrototypeOf(editMode);
+			const proto: unknown = parent && typeof parent === "object" ? Object.getPrototypeOf(parent) : null;
+			if (proto && typeof proto === "object") {
+				const ctor: unknown = (proto as Record<string, unknown>).constructor;
+				if (typeof ctor === "function") cachedCtor = ctor as EditorCtor;
 			}
 		}
 		if (typeof probe.unload === "function") probe.unload.call(probe);
@@ -138,9 +140,10 @@ class RichEditor implements JournalEditor {
 			get: () => this.instance?.editor,
 		});
 
-		const original = this.instance.onUpdate?.bind(this.instance);
-		this.instance.onUpdate = (update: unknown, changed: boolean) => {
-			original?.(update, changed);
+		const instance = this.instance;
+		const original = instance.onUpdate;
+		instance.onUpdate = (update: unknown, changed: boolean) => {
+			original?.call(instance, update, changed);
 			if (changed) this.options.onChange();
 		};
 

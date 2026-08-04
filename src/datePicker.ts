@@ -1,6 +1,6 @@
 import { App, Modal, moment } from "obsidian";
-import type { Moment } from "moment";
 import { MAX_OFFSET } from "./dayWalk";
+import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
 
 /** Months built either side of the current one when the picker opens. */

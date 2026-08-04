@@ -1,5 +1,5 @@
-import { moment } from "obsidian";
-import type { Moment } from "moment";
+import { createMoment } from "./moment";
+import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
 
 /** Hard stop so a runaway scroll cannot allocate forever (~13 years). */
@@ -42,7 +42,7 @@ export class DayWalker {
 	}
 
 	offsetFor(key: string): number {
-		return moment(key, DAY_KEY_FORMAT).startOf("day").diff(this.today, "days");
+		return createMoment(key, DAY_KEY_FORMAT).startOf("day").diff(this.today, "days");
 	}
 
 	/**

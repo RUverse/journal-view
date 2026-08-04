@@ -1,7 +1,12 @@
 import { Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
 import { DailyNoteIndex } from "./noteIndex";
-import { DEFAULT_SETTINGS, JournalViewSettingTab, JournalViewSettings } from "./settings";
+import {
+	DEFAULT_SETTINGS,
+	JournalViewSettingTab,
+	JournalViewSettings,
+	clampSaveDelay,
+} from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 
 export default class JournalViewPlugin extends Plugin {
@@ -71,15 +76,17 @@ export default class JournalViewPlugin extends Plugin {
 		this.addSettingTab(new JournalViewSettingTab(this.app, this));
 	}
 
-	async onunload(): Promise<void> {
+	onunload(): void {
 		// Views clean themselves up in onClose; make sure nothing typed in the
 		// last moment is lost when the plugin is disabled or reloaded.
-		await Promise.all(
-			this.app.workspace.getLeavesOfType(VIEW_TYPE_JOURNAL).map((leaf) => {
-				const view = leaf.view;
-				return view instanceof JournalView ? view.flushAll() : Promise.resolve();
-			}),
-		);
+		const flushes: Promise<void>[] = [];
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_JOURNAL)) {
+			const view = leaf.view;
+			if (view instanceof JournalView) flushes.push(view.flushAll());
+		}
+		void Promise.all(flushes).catch((error: unknown) => {
+			console.error("Journal View: could not flush all pending edits during unload", error);
+		});
 	}
 
 	async activateView(forceNewTab = false): Promise<void> {
@@ -97,11 +104,42 @@ export default class JournalViewPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const saved: unknown = await this.loadData();
+		if (!isRecord(saved)) {
+			this.settings = { ...DEFAULT_SETTINGS };
+			return;
+		}
+		this.settings = {
+			dateFormat: stringSetting(saved.dateFormat, DEFAULT_SETTINGS.dateFormat),
+			folder: stringSetting(saved.folder, DEFAULT_SETTINGS.folder),
+			templatePath: stringSetting(saved.templatePath, DEFAULT_SETTINGS.templatePath),
+			headerFormat: stringSetting(saved.headerFormat, DEFAULT_SETTINGS.headerFormat),
+			saveDelay: saveDelaySetting(saved.saveDelay),
+			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
+			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
+			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
+		};
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 		this.notifyViews();
 	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function stringSetting(value: unknown, fallback: string): string {
+	return typeof value === "string" ? value : fallback;
+}
+
+function saveDelaySetting(value: unknown): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SETTINGS.saveDelay;
+	return clampSaveDelay(value);
+}
+
+function booleanSetting(value: unknown, fallback: boolean): boolean {
+	return typeof value === "boolean" ? value : fallback;
 }

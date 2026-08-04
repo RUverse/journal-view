@@ -1,5 +1,4 @@
-import { ItemView, TAbstractFile, TFile, WorkspaceLeaf, moment } from "obsidian";
-import type { Moment } from "moment";
+import { ItemView, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { AnchorHost, ScrollAnchor } from "./anchor";
 import { DatePickerModal } from "./datePicker";
@@ -8,6 +7,8 @@ import { DayWalker, MAX_OFFSET } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
 import { distanceFromViewport } from "./scroll";
 import { JournalToolbar } from "./toolbar";
+import { createMoment } from "./moment";
+import type { Moment } from "./moment";
 
 export const VIEW_TYPE_JOURNAL = "journal-view";
 
@@ -58,7 +59,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private walker!: DayWalker;
 
 	private byPath = new Map<string, DaySection>();
-	private today: Moment = moment().startOf("day");
+	private today: Moment = createMoment().startOf("day");
 	/**
 	 * A day the reader went to by date. It stays in the journal even with empty
 	 * days hidden - being asked for by name is reason enough to show a day.
@@ -178,7 +179,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private async build(around?: Moment, focusToday = false): Promise<void> {
 		this.ready = false;
 		this.centered = false;
-		this.today = moment().startOf("day");
+		this.today = createMoment().startOf("day");
 		this.configSignature = JSON.stringify(this.plugin.daily.config());
 		this.plugin.index.ensureCurrent();
 		this.indexVersion = this.plugin.index.version;
@@ -309,7 +310,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 * half-committed batch.
 	 */
 	private commit(sections: DaySection[], where: "start" | "end"): void {
-		const fragment = document.createDocumentFragment();
+		const fragment = createFragment();
 		for (const section of sections) fragment.appendChild(section.el);
 		if (where === "start") this.daysEl.insertBefore(fragment, this.daysEl.firstChild);
 		else this.daysEl.appendChild(fragment);
@@ -612,7 +613,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	goToToday(focus = false): void {
-		const now = moment().startOf("day");
+		const now = createMoment().startOf("day");
 		// Coming home also gives up the day the reader went to by date; today
 		// is pinned in its own right.
 		const droppedVisited = this.visited !== null && !this.visited.isSame(now, "day");
@@ -645,7 +646,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.picker?.close();
 		const picker = new DatePickerModal(this.app, {
 			index: this.plugin.index,
-			today: moment().startOf("day"),
+			today: createMoment().startOf("day"),
 			current: this.visibleDate(),
 			onPick: (date) => this.goToDate(date),
 			onDismiss: () => {
@@ -678,7 +679,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			return;
 		}
 
-		const section = moment().startOf("day").isSame(this.today, "day") ? this.sectionAt(offset) : undefined;
+		const section = createMoment().startOf("day").isSame(this.today, "day") ? this.sectionAt(offset) : undefined;
 		if (section) {
 			// Focusing only once the animation has arrived: focus scrolls the
 			// editor into view, which would fight it. Same as `goToToday`.
@@ -752,7 +753,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private checkDayRollover(): void {
 		if (!this.ready) return;
-		if (moment().startOf("day").isSame(this.today, "day")) return;
+		if (createMoment().startOf("day").isSame(this.today, "day")) return;
 		if (this.sections.some((section) => section.hasFocus)) return;
 		void this.rebuild();
 	}

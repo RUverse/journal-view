@@ -1,5 +1,5 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
-import type { Moment } from "moment";
+import type { Moment } from "./moment";
 import type { JournalViewSettings } from "./settings";
 
 export interface ResolvedDailyConfig {

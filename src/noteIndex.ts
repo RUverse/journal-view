@@ -1,5 +1,6 @@
-import { App, TFile, moment } from "obsidian";
+import { App, TFile } from "obsidian";
 import type { DailyNoteResolver, ResolvedDailyConfig } from "./dailyNotes";
+import { createMoment } from "./moment";
 
 export const DAY_KEY_FORMAT = "YYYY-MM-DD";
 
@@ -51,7 +52,7 @@ export class DailyNoteIndex {
 			relative = relative.slice(folder.length + 1);
 		}
 
-		const parsed = moment(relative, format, true);
+		const parsed = createMoment(relative, format, true);
 		return parsed.isValid() ? parsed.format(DAY_KEY_FORMAT) : null;
 	}
 

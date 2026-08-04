@@ -1,5 +1,10 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting, requireApiVersion } from "obsidian";
+import type { SettingDefinitionItem } from "obsidian";
 import type JournalViewPlugin from "./main";
+
+export const MIN_SAVE_DELAY = 200;
+export const MAX_SAVE_DELAY = 3000;
+const SAVE_DELAY_STEP = 100;
 
 export interface JournalViewSettings {
 	/** Overrides the daily-note date format. Empty = inherit from the vault. */
@@ -31,131 +36,237 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	hideEmptyDays: true,
 };
 
+type SettingKey = keyof JournalViewSettings;
+type TextSettingKey = "dateFormat" | "folder" | "templatePath" | "headerFormat";
+type ToggleSettingKey = "richEditor" | "focusTodayOnOpen" | "hideEmptyDays";
+
+interface JournalSettingBase {
+	name: string;
+	desc: string;
+	searchable?: boolean;
+}
+
+interface JournalInfoSetting extends JournalSettingBase {
+	control?: never;
+}
+
+interface JournalTextSetting extends JournalSettingBase {
+	control: { type: "text"; key: TextSettingKey; placeholder: string };
+}
+
+interface JournalToggleSetting extends JournalSettingBase {
+	control: { type: "toggle"; key: ToggleSettingKey };
+}
+
+interface JournalSliderSetting extends JournalSettingBase {
+	control: { type: "slider"; key: "saveDelay"; min: number; max: number; step: number };
+}
+
+type JournalSetting = JournalInfoSetting | JournalTextSetting | JournalToggleSetting | JournalSliderSetting;
+
+interface JournalSettingGroup {
+	type: "group";
+	heading: string;
+	items: JournalSetting[];
+}
+
+interface LegacySliderTooltip {
+	setDynamicTooltip(): void;
+}
+
 export class JournalViewSettingTab extends PluginSettingTab {
 	constructor(app: App, private plugin: JournalViewPlugin) {
 		super(app, plugin);
 	}
 
+	/** Declarative settings used for settings search in Obsidian 1.13+. */
+	getSettingDefinitions(): SettingDefinitionItem<SettingKey>[] {
+		return this.definitions();
+	}
+
+	private definitions(): JournalSettingGroup[] {
+		const resolved = this.plugin.daily.config();
+		return [
+			{
+				type: "group",
+				heading: "Daily notes",
+				items: [
+					{
+						name: "Current configuration",
+						desc:
+							`Leave the fields below empty to follow your vault's daily-note settings. ` +
+							`Currently resolving to: format "${resolved.format}", folder "${resolved.folder || "/"}"` +
+							(resolved.template ? `, template "${resolved.template}".` : "."),
+						searchable: false,
+					},
+					{
+						name: "Date format",
+						desc: "Moment.js format used for the file name of each day.",
+						control: { type: "text", key: "dateFormat", placeholder: resolved.format },
+					},
+					{
+						name: "Folder",
+						desc: "Folder that holds the daily notes.",
+						control: { type: "text", key: "folder", placeholder: resolved.folder || "vault root" },
+					},
+					{
+						name: "Template",
+						desc: "Applied to every note this view creates, including when you write in an empty day.",
+						control: { type: "text", key: "templatePath", placeholder: resolved.template || "none" },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Display",
+				items: [
+					{
+						name: "Header date format",
+						desc: "Moment.js format for the date shown above each day.",
+						control: {
+							type: "text",
+							key: "headerFormat",
+							placeholder: DEFAULT_SETTINGS.headerFormat,
+						},
+					},
+					{
+						name: "Focus today on open",
+						desc: "Automatically place the insertion point in today's note when the journal opens.",
+						control: { type: "toggle", key: "focusTodayOnOpen" },
+					},
+					{
+						name: "Only show days that have a note",
+						desc:
+							"Days with no file are skipped entirely, so the journal jumps from one note to the next. " +
+							"Today is always shown. When off, every day appears, faded until you type in it.",
+						control: { type: "toggle", key: "hideEmptyDays" },
+					},
+					{
+						name: "Rich editor",
+						desc:
+							"Use Obsidian's own markdown editor (live preview, links, formatting) for each day. " +
+							"Turn off to fall back to a plain text editor.",
+						control: { type: "toggle", key: "richEditor" },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Performance",
+				items: [
+					{
+						name: "Autosave delay",
+						desc: "Milliseconds of inactivity before an edited day is written to disk.",
+						control: {
+							type: "slider",
+							key: "saveDelay",
+							min: MIN_SAVE_DELAY,
+							max: MAX_SAVE_DELAY,
+							step: SAVE_DELAY_STEP,
+						},
+					},
+				],
+			},
+		];
+	}
+
+	getControlValue(key: string): unknown {
+		return isSettingKey(key) ? this.plugin.settings[key] : undefined;
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (!isSettingKey(key)) return;
+		let changed = false;
+		switch (key) {
+			case "dateFormat":
+			case "folder":
+			case "templatePath":
+				if (typeof value === "string") {
+					this.plugin.settings[key] = value.trim();
+					changed = true;
+				}
+				break;
+			case "headerFormat":
+				if (typeof value === "string") {
+					this.plugin.settings[key] = value.trim() || DEFAULT_SETTINGS.headerFormat;
+					changed = true;
+				}
+				break;
+			case "saveDelay":
+				if (typeof value === "number" && Number.isFinite(value)) {
+					this.plugin.settings[key] = clampSaveDelay(value);
+					changed = true;
+				}
+				break;
+			case "richEditor":
+			case "focusTodayOnOpen":
+			case "hideEmptyDays":
+				if (typeof value === "boolean") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
+		}
+		if (changed) await this.plugin.saveSettings();
+	}
+
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-
-		const resolved = this.plugin.daily.config();
-
-		new Setting(containerEl).setName("Daily notes").setHeading();
-
-		containerEl.createEl("p", {
-			cls: "setting-item-description journal-settings-note",
-			text:
-				`Leave the fields below empty to follow your vault's daily-note settings. ` +
-				`Currently resolving to: format "${resolved.format}", folder "${resolved.folder || "/"}"` +
-				(resolved.template ? `, template "${resolved.template}".` : "."),
-		});
-
-		new Setting(containerEl)
-			.setName("Date format")
-			.setDesc("Moment.js format used for the file name of each day.")
-			.addText((text) =>
-				text
-					.setPlaceholder(resolved.format)
-					.setValue(this.plugin.settings.dateFormat)
-					.onChange(async (value) => {
-						this.plugin.settings.dateFormat = value.trim();
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName("Folder")
-			.setDesc("Folder that holds the daily notes.")
-			.addText((text) =>
-				text
-					.setPlaceholder(resolved.folder || "vault root")
-					.setValue(this.plugin.settings.folder)
-					.onChange(async (value) => {
-						this.plugin.settings.folder = value.trim();
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName("Template")
-			.setDesc("Applied to every note this view creates, including when you write in an empty day.")
-			.addText((text) =>
-				text
-					.setPlaceholder(resolved.template || "none")
-					.setValue(this.plugin.settings.templatePath)
-					.onChange(async (value) => {
-						this.plugin.settings.templatePath = value.trim();
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl).setName("Journal view").setHeading();
-
-		new Setting(containerEl)
-			.setName("Header date format")
-			.setDesc("Moment.js format for the date shown above each day.")
-			.addText((text) =>
-				text
-					.setPlaceholder(DEFAULT_SETTINGS.headerFormat)
-					.setValue(this.plugin.settings.headerFormat)
-					.onChange(async (value) => {
-						this.plugin.settings.headerFormat = value.trim() || DEFAULT_SETTINGS.headerFormat;
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName("Focus today on open")
-			.setDesc("Place the cursor in today's note as soon as the journal opens.")
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.focusTodayOnOpen).onChange(async (value) => {
-					this.plugin.settings.focusTodayOnOpen = value;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName("Only show days that have a note")
-			.setDesc(
-				"Days with no file are skipped entirely, so the journal jumps from one note to the next. " +
-					"Today is always shown. When off, every day appears, faded until you type in it.",
-			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.hideEmptyDays).onChange(async (value) => {
-					this.plugin.settings.hideEmptyDays = value;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName("Rich editor")
-			.setDesc(
-				"Use Obsidian's own markdown editor (live preview, links, formatting) for each day. " +
-					"Turn off to fall back to a plain text editor.",
-			)
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.richEditor).onChange(async (value) => {
-					this.plugin.settings.richEditor = value;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl).setName("Performance").setHeading();
-
-		new Setting(containerEl)
-			.setName("Autosave delay")
-			.setDesc("Milliseconds of inactivity before an edited day is written to disk.")
-			.addSlider((slider) =>
-				slider
-					.setLimits(200, 3000, 100)
-					.setValue(this.plugin.settings.saveDelay)
-					.setDynamicTooltip()
-					.onChange(async (value) => {
-						this.plugin.settings.saveDelay = value;
-						await this.plugin.saveSettings();
-					}),
-			);
+		for (const group of this.definitions()) {
+			new Setting(containerEl).setName(group.heading).setHeading();
+			for (const definition of group.items) this.renderSetting(definition);
+		}
 	}
+
+	private renderSetting(definition: JournalSetting): void {
+		if (!definition.control) {
+			this.containerEl.createEl("p", {
+				cls: "setting-item-description journal-settings-note",
+				text: definition.desc,
+			});
+			return;
+		}
+
+		const setting = new Setting(this.containerEl).setName(definition.name).setDesc(definition.desc);
+		const control = definition.control;
+		switch (control.type) {
+			case "text":
+				setting.addText((text) =>
+					text
+						.setPlaceholder(control.placeholder)
+						.setValue(this.plugin.settings[control.key])
+						.onChange((value) => this.setControlValue(control.key, value)),
+				);
+				break;
+			case "toggle":
+				setting.addToggle((toggle) =>
+					toggle
+						.setValue(this.plugin.settings[control.key])
+						.onChange((value) => this.setControlValue(control.key, value)),
+				);
+				break;
+			case "slider":
+				setting.addSlider((slider) => {
+					slider
+						.setLimits(control.min, control.max, control.step)
+						.setValue(this.plugin.settings[control.key])
+						.onChange((value) => this.setControlValue(control.key, value));
+					if (!requireApiVersion("1.13.0")) showLegacySliderTooltip(slider);
+				});
+				break;
+		}
+	}
+}
+
+function isSettingKey(key: string): key is keyof JournalViewSettings {
+	return key in DEFAULT_SETTINGS;
+}
+
+export function clampSaveDelay(value: number): number {
+	return Math.max(MIN_SAVE_DELAY, Math.min(MAX_SAVE_DELAY, value));
+}
+
+function showLegacySliderTooltip(slider: unknown): void {
+	(slider as LegacySliderTooltip).setDynamicTooltip();
 }
