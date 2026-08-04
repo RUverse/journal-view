@@ -10,6 +10,8 @@ export interface DayHost {
 	plugin: JournalViewPlugin;
 	/** Called when a day's underlying file appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
+	/** True for a day that stays in the journal even with empty days hidden. */
+	isPinnedDay(day: DaySection): boolean;
 	/** True while a day is out of sight, where its body can be swapped unseen. */
 	isOffScreen(day: DaySection): boolean;
 }
@@ -231,7 +233,7 @@ export class DaySection {
 		this.el.toggleClass("journal-day-future", this.offset > 0);
 		this.el.toggleClass(
 			"journal-day-hidden",
-			!this.exists && !this.isToday && this.host.plugin.settings.hideEmptyDays,
+			!this.exists && !this.host.isPinnedDay(this) && this.host.plugin.settings.hideEmptyDays,
 		);
 
 		this.bodyEl.dataset.placeholder = this.exists ? "Empty note" : "Start typing to create this note";

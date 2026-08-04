@@ -59,6 +59,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private byPath = new Map<string, DaySection>();
 	private today: Moment = moment().startOf("day");
+	/**
+	 * A day the reader went to by date. It stays in the journal even with empty
+	 * days hidden - being asked for by name is reason enough to show a day.
+	 */
+	private visited: Moment | null = null;
 
 	private resizeObserver: ResizeObserver | null = null;
 	private scrollFrame = 0;
@@ -177,7 +182,12 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.configSignature = JSON.stringify(this.plugin.daily.config());
 		this.plugin.index.ensureCurrent();
 		this.indexVersion = this.plugin.index.version;
-		this.walker = new DayWalker(this.today, this.plugin.index, () => this.plugin.settings.hideEmptyDays);
+		this.walker = new DayWalker(
+			this.today,
+			this.plugin.index,
+			() => this.plugin.settings.hideEmptyDays,
+			this.visited ?? undefined,
+		);
 		this.exhausted = { past: false, future: false };
 		this.loading = { past: false, future: false };
 		const epoch = ++this.epoch;
@@ -603,6 +613,16 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	goToToday(focus = false): void {
 		const now = moment().startOf("day");
+		// Coming home also gives up the day the reader went to by date; today
+		// is pinned in its own right.
+		const droppedVisited = this.visited !== null && !this.visited.isSame(now, "day");
+		this.visited = null;
+		if (droppedVisited && this.plugin.settings.hideEmptyDays) {
+			void this.rebuild().then(() => {
+				if (focus) this.sectionAt(0)?.focusEditor();
+			});
+			return;
+		}
 		const section = this.sectionAt(0);
 		if (!now.isSame(this.today, "day") || !section) {
 			// Midnight has passed, or today was trimmed away after a long
@@ -638,9 +658,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	/**
 	 * Moves the journal to `date`. A day already in the window is scrolled to;
-	 * anything further away is a rebuild around that day, which is also what
-	 * resolves a day the current filter hides - the walker lands on the nearest
-	 * day that survives it.
+	 * anything further away is a rebuild around that day. A day with no note is
+	 * shown either way, empty days hidden or not - it is where the reader asked
+	 * to be, and it is where they would start writing.
 	 */
 	goToDate(date: Moment, focus = true): void {
 		// A date can arrive from a picker that outlived the view it was opened
@@ -649,6 +669,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const day = date.clone().startOf("day");
 		const offset = day.diff(this.today, "days");
 		if (Math.abs(offset) > MAX_OFFSET) return;
+		const changedVisited = !this.visited?.isSame(day, "day");
+		this.visited = day;
+		if (changedVisited && this.plugin.settings.hideEmptyDays) {
+			void this.rebuild(day).then(() => {
+				if (focus) this.sectionAt(this.origin)?.focusEditor();
+			});
+			return;
+		}
 
 		const section = moment().startOf("day").isSame(this.today, "day") ? this.sectionAt(offset) : undefined;
 		if (section) {
@@ -776,6 +804,15 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.anchoring.settle();
 		this.editors.schedule();
 		return section;
+	}
+
+	/**
+	 * Today, and a day the reader went to by date, are the journal's own days
+	 * rather than the index's - the walker decides which, so a day it built
+	 * against the filter is not then hidden by the day itself.
+	 */
+	isPinnedDay(day: DaySection): boolean {
+		return this.walker ? this.walker.isPinned(day.offset) : day.offset === 0;
 	}
 
 	onDayFileChanged(day: DaySection, previousPath: string | null): void {
