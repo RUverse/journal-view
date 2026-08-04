@@ -32,6 +32,9 @@ Journal View follows your vault's daily-note configuration, in this order:
 
 So a day's file is just `<folder>/<date formatted>.md`; nothing extra is stored anywhere.
 
+Entering a day that has no note yet fills it with the configured template, ready to write into.
+Nothing is written to the vault until you actually type: leave the day untouched and it stays empty.
+
 ## Settings
 
 | Setting | Default | What it does |

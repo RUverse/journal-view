@@ -21,6 +21,8 @@ export interface JournalEditor {
 	destroy(): void;
 	/** Moves the cursor to the position nearest the given window coordinates. */
 	placeCursor?(x: number, y: number): void;
+	/** Moves the cursor past everything the editor holds. */
+	placeCursorAtEnd?(): void;
 	/** True when this is Obsidian's own editor rather than the plain fallback. */
 	rich: boolean;
 }
@@ -227,6 +229,15 @@ class RichEditor implements JournalEditor {
 		}
 	}
 
+	placeCursorAtEnd(): void {
+		try {
+			this.instance?.editor?.cm?.dispatch?.({ selection: { anchor: this.getValue().length } });
+			this.dropScrollRequest();
+		} catch {
+			/* the cursor stays wherever focus put it */
+		}
+	}
+
 	hasFocus(): boolean {
 		const active = this.options.container.ownerDocument.activeElement;
 		return !!active && this.options.container.contains(active);
@@ -288,6 +299,11 @@ class PlainEditor implements JournalEditor {
 		if (this.textarea.value === value) return;
 		this.textarea.value = value;
 		this.autoGrow();
+	}
+
+	placeCursorAtEnd(): void {
+		const end = this.textarea.value.length;
+		this.textarea.setSelectionRange(end, end);
 	}
 
 	setFile(): void {

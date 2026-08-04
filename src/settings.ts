@@ -80,7 +80,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Template")
-			.setDesc('Applied when a note is created with the "Create note" button in a day header.')
+			.setDesc("Applied to every note this view creates, including when you write in an empty day.")
 			.addText((text) =>
 				text
 					.setPlaceholder(resolved.template || "none")

@@ -63,6 +63,8 @@ export class DaySection {
 	private heldHeight = 0;
 
 	private lastKnownContent = "";
+	/** Template text shown in an empty day but not yet accepted by the reader. */
+	private pendingTemplate: string | null = null;
 	private saveTimer = 0;
 	private focused = false;
 	private readonly queue = new SaveQueue((value) => this.writeValue(value));
@@ -139,6 +141,56 @@ export class DaySection {
 		if (!editor) return;
 		editor.focus();
 		editor.placeCursor?.(event.clientX, event.clientY);
+	}
+
+	/**
+	 * Lays the configured template into a day that has no note yet, so the
+	 * reader writes into the same skeleton the "Create note" button would have
+	 * produced. Driven by focus, so it happens when the reader enters the day
+	 * themselves - the view mounts editors ahead of them, and those are left
+	 * alone until one is entered.
+	 *
+	 * The text is an offer, not content: `pendingTemplate` keeps it out of the
+	 * save queue until the reader edits it, so clicking through an empty day
+	 * still leaves nothing behind in the vault.
+	 */
+	private async offerTemplate(): Promise<void> {
+		if (this.file || !this.editor || this.editor.getValue().length > 0) return;
+		const body = noteBody(await this.host.plugin.daily.templateContent(this.date));
+		// Reading the template yields, so everything above is re-checked: the
+		// reader may have typed, left, or the note may have appeared, in
+		// between. An offer landing after they left would have nothing to
+		// withdraw it.
+		if (!body || this.destroyed || !this.hasFocus) return;
+		if (this.file || !this.editor || this.editor.getValue().length > 0) return;
+
+		// Set first: filling the editor reports a change, and the save that
+		// follows has to already know the text is only an offer.
+		this.pendingTemplate = body;
+		this.editor.setValue(body);
+		this.editor.placeCursorAtEnd?.();
+		this.releaseHeight();
+		this.updateBlankState();
+	}
+
+	/** Takes back an untouched template offer, leaving the day empty again. */
+	private withdrawTemplate(): boolean {
+		const pending = this.pendingTemplate;
+		if (pending === null) return false;
+		if (!this.editor || this.editor.getValue() !== pending) {
+			// The reader made it their own; it saves like anything they wrote.
+			this.pendingTemplate = null;
+			return false;
+		}
+
+		this.pendingTemplate = null;
+		this.editor.setValue(noteBody(this.lastKnownContent));
+		this.updateBlankState();
+		// A note can appear under an offer that is still standing - Sync, or
+		// another view. Its content was held off while the day had focus, so
+		// the day asks for it now rather than saving the offer over it.
+		if (this.file) void this.reload();
+		return true;
 	}
 
 	/* ---------------------------------------------------------------- state */
@@ -239,7 +291,12 @@ export class DaySection {
 
 	get isDirty(): boolean {
 		if (this.queue.hasPending) return true;
-		return !!this.editor && this.editor.getValue() !== noteBody(this.lastKnownContent);
+		if (!this.editor) return false;
+		const value = this.editor.getValue();
+		// An untouched template offer is not the reader's work, so it must not
+		// pin the day to edit mode or fend off content arriving from the vault.
+		if (value === this.pendingTemplate) return false;
+		return value !== noteBody(this.lastKnownContent);
 	}
 
 	/** Reads the day's note; days without a note are simply empty. */
@@ -323,6 +380,7 @@ export class DaySection {
 	mountEditor(): void {
 		if (this.destroyed || this.editor) return;
 		this.modeToken++;
+		this.pendingTemplate = null;
 		this.heldHeight = this.bodyEl.offsetHeight;
 		this.previewComponent?.unload();
 		this.previewComponent = null;
@@ -350,6 +408,9 @@ export class DaySection {
 						// it shows, so its own height can be trusted from here.
 						this.releaseHeight();
 						this.el.addClass("journal-day-focused");
+						// Focus is the one signal every way in shares - a click
+						// the editor swallowed, a keyboard tab, a jump to a date.
+						void this.offerTemplate();
 					},
 					onBlur: () => this.onEditorBlur(),
 				},
@@ -413,6 +474,8 @@ export class DaySection {
 	private onEditorBlur(): void {
 		this.focused = false;
 		this.el.removeClass("journal-day-focused");
+		// Leaving a day the reader only looked at costs them nothing.
+		if (this.withdrawTemplate()) return;
 		void this.flush();
 	}
 
@@ -443,6 +506,7 @@ export class DaySection {
 		}
 		if (this.hasFocus || this.isDirty) return; // never clobber the user's typing
 
+		this.pendingTemplate = null;
 		this.editor.setValue(body);
 		this.lastKnownContent = content;
 		// The held height belongs to content that is no longer what the day
@@ -478,6 +542,8 @@ export class DaySection {
 	private capture(): void {
 		if (!this.editor) return;
 		const body = this.editor.getValue();
+		if (body === this.pendingTemplate) return; // an offer nobody accepted
+		this.pendingTemplate = null;
 		if (body !== noteBody(this.lastKnownContent)) void this.queue.submit(body);
 	}
 
@@ -496,7 +562,10 @@ export class DaySection {
 					this.lastKnownContent = body;
 					return true;
 				}
-				file = await this.host.plugin.daily.create(this.date, body);
+				// Created from the template, then written over below: the reader
+				// is already typing into the template's body, and going through
+				// it here is what carries its frontmatter onto the new note.
+				file = await this.host.plugin.daily.create(this.date);
 				this.setFile(file);
 			}
 			// The callback receives the latest vault content, so frontmatter changes

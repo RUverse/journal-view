@@ -6,7 +6,8 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"typecheck": "tsc -noEmit -skipLibCheck"
+		"typecheck": "tsc -noEmit -skipLibCheck",
+		"test-vault": "bash scripts/setup-test-vault.sh"
 	},
 	"keywords": [
 		"obsidian",

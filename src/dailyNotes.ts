@@ -91,17 +91,17 @@ export class DailyNoteResolver {
 	}
 
 	/**
-	 * Creates the note for `date`. When `content` is given it is written as-is
-	 * (this is the "user started typing" path); otherwise the configured
-	 * template is used.
+	 * Creates the note for `date` from the configured template. Callers that
+	 * have body text of their own write it over the result, which keeps the
+	 * template's frontmatter without duplicating it.
 	 */
-	async create(date: Moment, content?: string): Promise<TFile> {
+	async create(date: Moment): Promise<TFile> {
 		const path = this.pathFor(date);
 		const existing = this.app.vault.getAbstractFileByPath(path);
 		if (existing instanceof TFile) return existing;
 
 		await this.ensureFolder(path);
-		const body = content ?? (await this.templateContent(date));
+		const body = await this.templateContent(date);
 		try {
 			return await this.app.vault.create(path, body);
 		} catch (error) {
@@ -132,7 +132,12 @@ export class DailyNoteResolver {
 		}
 	}
 
-	private async templateContent(date: Moment): Promise<string> {
+	/**
+	 * The configured template, with its date placeholders filled in for `date`.
+	 * Empty when no template is set, or when the file it names cannot be read -
+	 * a day without a template is a working day, so this never rejects.
+	 */
+	async templateContent(date: Moment): Promise<string> {
 		const { template } = this.config();
 		if (!template) return "";
 
@@ -143,7 +148,16 @@ export class DailyNoteResolver {
 			return "";
 		}
 
-		const raw = await this.app.vault.cachedRead(file);
+		let raw: string;
+		try {
+			// The template can be deleted or renamed between the lookup above
+			// and the read - by the reader, or by Sync.
+			raw = await this.app.vault.cachedRead(file);
+		} catch (error) {
+			console.warn(`Journal View: could not read the template at "${path}"`, error);
+			return "";
+		}
+
 		return raw
 			.replace(/{{\s*(date|time)\s*:\s*([^}]+)}}/gi, (_match, _kind: string, format: string) =>
 				date.format(format.trim()),
