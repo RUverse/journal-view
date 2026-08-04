@@ -42,6 +42,12 @@
 	gap: var(--size-2-2);
 }
 
+.journal-toolbar-labeled-button {
+	width: auto;
+	gap: var(--size-2-2);
+	padding-inline: var(--size-4-2);
+}
+
 /* -------------------------------------------------------------- scroller -- */
 
 .journal-scroll {

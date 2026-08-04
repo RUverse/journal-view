@@ -220,10 +220,7 @@ export class DaySection {
 	}
 
 	private relativeLabel(): string | null {
-		if (this.offset === 0) return "Today";
-		if (this.offset === -1) return "Yesterday";
-		if (this.offset === 1) return "Tomorrow";
-		return null;
+		return this.offset === 0 ? "Today" : null;
 	}
 
 	/** Re-applies the classes and header buttons that depend on the file. */
@@ -241,6 +238,14 @@ export class DaySection {
 		setTooltip(this.headerEl, this.path, { placement: "right" });
 
 		if (this.exists) {
+			const remove = this.actionsEl.createEl("button", { cls: "clickable-icon journal-day-action" });
+			setIcon(remove, "trash-2");
+			setTooltip(remove, "Delete note");
+			remove.addEventListener("click", (event) => {
+				event.stopPropagation();
+				void this.deleteNote();
+			});
+
 			const open = this.actionsEl.createEl("button", { cls: "clickable-icon journal-day-action" });
 			setIcon(open, "file-text");
 			setTooltip(open, "Open note in a tab");
@@ -258,6 +263,26 @@ export class DaySection {
 				event.stopPropagation();
 				void this.createNow();
 			});
+		}
+	}
+
+	private async deleteNote(): Promise<void> {
+		await this.flush();
+		if (this.queue.hasPending) return; // the failed save already showed a notice
+
+		const file = this.file;
+		if (!file) return;
+
+		try {
+			const fileManager = this.host.app.fileManager;
+			if (!(await fileManager.promptForDeletion(file))) return;
+			// `trashFile` honors the configured trash destination. The fallback keeps
+			// compatibility with the plugin's Obsidian 1.5.7 minimum.
+			if (typeof fileManager.trashFile === "function") await fileManager.trashFile(file);
+			else await this.host.app.vault.trash(file, true);
+		} catch (error) {
+			console.error(`Journal View: could not delete ${file.path}`, error);
+			new Notice(`Journal View: could not delete ${file.path}`);
 		}
 	}
 

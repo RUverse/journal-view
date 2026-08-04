@@ -37,13 +37,19 @@ export class JournalToolbar {
 		this.filterButton = buttons.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
 		this.filterButton.addEventListener("click", () => actions.onToggleFilter());
 
-		const dateButton = buttons.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
+		const dateButton = buttons.createEl("button", {
+			cls: "clickable-icon journal-toolbar-button journal-toolbar-labeled-button",
+		});
 		applyIcon(dateButton, "calendar-search", "calendar-days", "calendar");
+		dateButton.createSpan({ text: "Go to" });
 		setTooltip(dateButton, "Go to date");
 		dateButton.addEventListener("click", () => actions.onGoToDate());
 
-		const todayButton = buttons.createEl("button", { cls: "clickable-icon journal-toolbar-button" });
+		const todayButton = buttons.createEl("button", {
+			cls: "clickable-icon journal-toolbar-button journal-toolbar-labeled-button",
+		});
 		applyIcon(todayButton, "calendar-plus", "calendar-check");
+		todayButton.createSpan({ text: "Today" });
 		setTooltip(todayButton, "Go to today");
 		todayButton.addEventListener("click", () => actions.onGoToToday());
 	}
