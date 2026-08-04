@@ -150,7 +150,7 @@ The `obsidian` CLI reaches the vault by name, which beats clicking for anything
 repeatable:
 
 ```bash
-obsidian vault=test-vault command id=journal-view:open-journal-view
+obsidian vault=test-vault command id=journal-view:open
 ```
 
 `eval` runs JavaScript inside the vault's window, so a day can be inspected

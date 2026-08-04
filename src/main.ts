@@ -46,14 +46,14 @@ export default class JournalViewPlugin extends Plugin {
 		this.addRibbonIcon("calendar-days", "Open journal", () => void this.activateView());
 
 		this.addCommand({
-			id: "open-journal-view",
-			name: "Open journal view",
+			id: "open",
+			name: "Open",
 			callback: () => void this.activateView(),
 		});
 
 		this.addCommand({
-			id: "open-journal-view-new-tab",
-			name: "Open journal view in a new tab",
+			id: "open-new-tab",
+			name: "Open in a new tab",
 			callback: () => void this.activateView(true),
 		});
 

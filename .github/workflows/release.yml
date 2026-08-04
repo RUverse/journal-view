@@ -1,0 +1,49 @@
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check release version
+        run: >-
+          node -e 'const manifest = require("./manifest.json");
+          if (process.env.GITHUB_REF_NAME !== manifest.version)
+          throw new Error(`Tag ${process.env.GITHUB_REF_NAME} does not match manifest version ${manifest.version}`)'
+
+      - name: Build plugin
+        run: |
+          npm ci
+          npm run build
+
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            main.js
+            styles.css
+
+      - name: Create draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title="$GITHUB_REF_NAME" \
+            --draft \
+            main.js manifest.json styles.css

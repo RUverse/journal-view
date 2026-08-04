@@ -49,7 +49,15 @@ Nothing is written to the vault until you actually type: leave the day untouched
 | Rich editor | on | Use Obsidian's markdown editor per day; off falls back to a plain text editor |
 | Autosave delay | 600ms | Inactivity before an edited day is written to disk |
 
-## Install (manual)
+## Installation
+
+Once Journal View is listed in the Community plugins directory:
+
+1. Open **Settings → Community plugins** in Obsidian.
+2. Select **Browse**, search for **Journal View**, and select **Install**.
+3. Select **Enable**.
+
+### Manual installation
 
 ```bash
 npm install
@@ -61,6 +69,11 @@ Then copy `main.js`, `manifest.json` and `styles.css` into
 
 For development, `npm run dev` rebuilds on change — point it at a vault by symlinking the plugin
 folder.
+
+## Privacy
+
+Journal View works locally with files in your Obsidian vault. It does not make network requests,
+collect telemetry, require an account, or access files outside the vault.
 
 ## Notes on internals
 
