@@ -375,9 +375,9 @@ button.journal-day-create:hover {
 	min-height: unset;
 }
 
-.journal-day-body .cm-scroller {
+.journal-day-body .markdown-source-view .cm-editor .cm-scroller {
 	padding: 0;
-	overflow: visible !important;
+	overflow: visible;
 }
 
 .journal-day-body .cm-contentContainer,

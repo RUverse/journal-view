@@ -61,3 +61,35 @@ host interface it implements:
 
 `src/datePicker.ts` is the toolbar's calendar: a scrolling column of months that
 hangs off the view rather than being part of it, and moves the journal by date.
+
+## Preparing a release
+
+When the user asks to prepare a release:
+
+- Confirm the intended semantic version; do not guess the release version when
+  the user has not specified it.
+- Update all version files with
+  `npm version <version> --no-git-tag-version`. Run `npm run typecheck` and
+  `npm run build`, then commit the release changes.
+- Push the current branch and its commits first with
+  `git push origin <branch>`.
+- Create an annotated tag on the pushed release commit with
+  `git tag -a <version> -m "Release <version>"`, then push it with
+  `git push origin <version>`. The tag must be the exact version from
+  `manifest.json`, without a `v` prefix; pushing it triggers the GitHub Action
+  that builds the plugin and creates the draft GitHub release.
+- Verify that the tag push succeeded and report whether the release workflow was
+  triggered. Do not publish the draft release unless the user explicitly asks.
+- Provide copy-ready release notes based on user-visible changes since the
+  previous tag. Put new features before fixes, use bullet points, and omit an
+  empty section:
+
+  ```markdown
+  ## New features
+
+  - Added ...
+
+  ## Fixes
+
+  - Fixed ...
+  ```

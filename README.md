@@ -1,92 +1,47 @@
 # Journal View
 
-An Obsidian plugin that adds a **Journal** view — a first-class view like Graph or Canvas, but for
-your daily notes.
+Give your daily notes a sense of continuity. Journal View brings them together in one scrollable,
+editable timeline, so revisiting the past and writing today feel like part of the same story.
 
-Every day is stacked vertically in one continuous, editable page. Today sits in the centre when the
-view opens, past days run upwards, future days run downwards. Days that do not have a note yet are
-shown faded; the moment you type in one, the file is created.
+<p align="center">
+  <img src="assets/journal-view.png" alt="Journal View open in Obsidian">
+</p>
 
-## What it does
+Open Journal View from the sidebar or run **Open journal** from the command palette.
 
-- **One view, every day.** Opens from the ribbon (`Open journal`) or the command palette.
-- **Today is the anchor.** The view scrolls today into the centre on open and puts the cursor there.
-  The toolbar button (and the `Go to today` command) brings you back.
-- **Infinite in both directions.** Scroll up for older days, down for future ones. More days are
-  appended a batch at a time as you approach either end.
-- **Go to any date.** The calendar button opens one continuous column of months — a week per row, a
-  dot under every day that has a note — scrolling as far back or forward as you like. Click a day and
-  the journal moves there.
-- **Find across the journal.** Press `Cmd+F` on macOS or `Ctrl+F` elsewhere to search every loaded
-  day. Moving past the loaded results finds and opens matching daily notes further away.
-- **Everything you can see is editable in place.** Every day at or near the viewport is already a
-  live editor, so clicking into any day just moves the cursor — nothing switches mode or reflows
-  under the click.
-- **Only a window of days is live.** The view keeps a bounded window of days and drops the ones far
-  from the viewport. Days well outside the viewport are kept as static previews rather than editors,
-  so long journal sessions stay responsive without an editor open for every note.
-
-## Where the days come from
-
-Journal View follows your vault's daily-note configuration, in this order:
-
-1. Journal View's own overrides (Settings → Journal View)
-2. **Periodic Notes**, if it has daily notes enabled
-3. the core **Daily notes** plugin
-4. `YYYY-MM-DD.md` in the vault root
-
-So a day's file is just `<folder>/<date formatted>.md`; nothing extra is stored anywhere.
-
-Entering a day that has no note yet fills it with the configured template, ready to write into.
-Nothing is written to the vault until you actually type: leave the day untouched and it stays empty.
+- **Use the daily notes you already have.** Journal View works with your existing notes and daily-note
+  settings—no plugin-specific formats, duplicate files, or lock-in.
+- **Navigate through time with ease.** Scroll through your journal, jump to any date with the calendar,
+  or return to today in one click.
+- **Edit directly in the timeline.** Read and write without switching between files, views, or editing
+  modes.
+- **Write only when there is something to say.** Start typing on an empty day and Journal View creates
+  the daily note only when you need it.
+- **Rediscover past entries.** Search across your journal to quickly find notes, ideas, and memories
+  from any day.
+- **Stay responsive across years of notes.** Journal View keeps the days around you ready to edit
+  while efficiently handling the rest of your timeline.
 
 ## Settings
 
+Journal View uses your existing daily-note configuration by default. You can override the date
+format, folder, and template in **Settings → Journal View** without changing how the rest of your
+vault handles daily notes.
+
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Date format / Folder / Template | inherited | Override the vault's daily-note settings for this view only |
-| Group days by month | off | Show month and year once above each month; grouped day labels stay compact |
-| Daily header format | `dddd, D MMMM` | How each day's date reads when month grouping is off |
-| Focus today on open | on | Put the cursor in today's note when the view opens |
-| Only show days that have a note | on | Skip empty days entirely and jump directly between existing notes, however far apart; today is always shown. Off shows every day, faded until you type |
-| Rich editor | on | Use Obsidian's markdown editor per day; off falls back to a plain text editor |
-| Autosave delay | 600ms | Inactivity before an edited day is written to disk |
-
-## Installation
-
-Once Journal View is listed in the Community plugins directory:
-
-1. Open **Settings → Community plugins** in Obsidian.
-2. Select **Browse**, search for **Journal View**, and select **Install**.
-3. Select **Enable**.
-
-### Manual installation
-
-```bash
-npm install
-npm run build
-```
-
-Then copy `main.js`, `manifest.json` and `styles.css` into
-`<your vault>/.obsidian/plugins/journal-view/` and enable **Journal View** in Settings → Community plugins.
-
-For development, `npm run dev` rebuilds on change — point it at a vault by symlinking the plugin
-folder.
+| Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View |
+| Group days by month | Off | Groups daily entries beneath compact month and year headings |
+| Daily header format | `dddd, D MMMM` | Controls how each date appears when month grouping is off |
+| Focus today on open | On | Opens the journal at today's note and places the cursor there |
+| Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |
+| Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
+| Autosave delay | 600 ms | Sets how long Journal View waits after typing before saving |
 
 ## Privacy
 
 Journal View works locally with files in your Obsidian vault. It does not make network requests,
-collect telemetry, require an account, or access files outside the vault.
-
-## Notes on internals
-
-Days near the viewport hold a live editor; days further out are static Markdown previews, which are
-laid out at their true height and cost nothing to keep. A day only ever changes between the two well
-off screen, so the swap is never something you can watch happen, and the scroll position is pinned
-to an anchor day throughout. Obsidian does not export an embeddable Markdown editor, so the rich editor
-uses the app's internal embed registry. That integration is isolated and guarded: if an Obsidian
-update changes it, Journal View falls back to a plain-text editor. Disable `Rich editor` to use the
-public-API-only fallback directly.
+collect telemetry, require an account, or access files outside your vault.
 
 ## License
 
