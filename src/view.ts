@@ -3,7 +3,7 @@ import type JournalViewPlugin from "./main";
 import { AnchorHost, ScrollAnchor } from "./anchor";
 import { DatePickerModal } from "./datePicker";
 import { DayHost, DaySection } from "./day";
-import { DayWalker, MAX_OFFSET } from "./dayWalk";
+import { DayWalker, isOffsetReachable } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
 import { distanceFromViewport } from "./scroll";
 import { JournalToolbar } from "./toolbar";
@@ -716,6 +716,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			index: this.plugin.index,
 			today: createMoment().startOf("day"),
 			current: this.visibleDate(),
+			allowDistantNotes: this.plugin.settings.hideEmptyDays,
 			onPick: (date) => this.goToDate(date),
 			onDismiss: () => {
 				if (this.picker === picker) this.picker = null;
@@ -737,7 +738,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (!this.scrollEl?.isConnected) return;
 		const day = date.clone().startOf("day");
 		const offset = day.diff(this.today, "days");
-		if (Math.abs(offset) > MAX_OFFSET) return;
+		const indexed = this.plugin.index.has(this.walker.keyFor(offset));
+		if (!isOffsetReachable(offset, this.plugin.settings.hideEmptyDays, indexed)) return;
 		const changedVisited = !this.visited?.isSame(day, "day");
 		this.visited = day;
 		if (changedVisited && this.plugin.settings.hideEmptyDays) {

@@ -84,6 +84,13 @@ export class DailyNoteIndex {
 		return this.keys.size;
 	}
 
+	/** The first and last indexed day, or null when the vault has no daily notes. */
+	range(): { first: string; last: string } | null {
+		const list = this.list();
+		if (!list.length) return null;
+		return { first: list[0], last: list[list.length - 1] };
+	}
+
 	/** The first day with a note strictly after `key`. */
 	next(key: string): string | null {
 		const list = this.list();

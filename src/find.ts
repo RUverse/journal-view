@@ -1,7 +1,7 @@
 import { App, getFrontMatterInfo, setIcon, setTooltip } from "obsidian";
 import type JournalViewPlugin from "./main";
 import type { DaySection } from "./day";
-import { MAX_OFFSET } from "./dayWalk";
+import { isOffsetReachable } from "./dayWalk";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 import { createMoment } from "./moment";
@@ -228,6 +228,7 @@ export class JournalFind {
 		const loadedKeys = new Set(this.host.sections.map((section) => section.key));
 		const edge = direction > 0 ? this.host.sections[this.host.sections.length - 1].key : this.host.sections[0].key;
 		const keys = this.host.plugin.index.keysFrom(edge, direction);
+		const today = createMoment().startOf("day");
 
 		try {
 			for (let index = 0; index < keys.length; index++) {
@@ -235,7 +236,9 @@ export class JournalFind {
 				const key = keys[index];
 				if (loadedKeys.has(key)) continue;
 				const date = createMoment(key, "YYYY-MM-DD", true).startOf("day");
-				if (!date.isValid() || Math.abs(date.diff(createMoment().startOf("day"), "days")) > MAX_OFFSET) continue;
+				if (!date.isValid()) continue;
+				const offset = date.diff(today, "days");
+				if (!isOffsetReachable(offset, this.host.plugin.settings.hideEmptyDays, true)) continue;
 				const file = this.host.plugin.daily.fileFor(date);
 				if (!file) continue;
 				let content: string;

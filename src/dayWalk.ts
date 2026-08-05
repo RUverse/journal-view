@@ -2,8 +2,17 @@ import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
 
-/** Hard stop so a runaway scroll cannot allocate forever (~13 years). */
+/** Hard stop so empty-day scrolling cannot allocate forever (~13 years). */
 export const MAX_OFFSET = 5000;
+
+/**
+ * Empty calendar days stay inside the hard stop. When they are hidden, an
+ * indexed note is safe at any distance because the walker jumps straight to
+ * it rather than materialising every date in between.
+ */
+export function isOffsetReachable(offset: number, hideEmpty: boolean, indexed: boolean): boolean {
+	return Number.isFinite(offset) && (Math.abs(offset) <= MAX_OFFSET || (hideEmpty && indexed));
+}
 
 /**
  * The journal addresses days by their distance from today, so the day the view
@@ -29,7 +38,7 @@ export class DayWalker {
 		pinned?: Moment,
 	) {
 		const offset = pinned ? pinned.clone().startOf("day").diff(today, "days") : 0;
-		const kept = Math.abs(offset) <= MAX_OFFSET ? [0, offset] : [0];
+		const kept = this.isReachable(offset) ? [0, offset] : [0];
 		this.pinned = Array.from(new Set(kept)).sort((a, b) => a - b);
 	}
 
@@ -53,7 +62,6 @@ export class DayWalker {
 	 * note or not, so a walk that would step over one stops there instead.
 	 */
 	next(from: number, direction: -1 | 1): number | null {
-		let offset: number;
 		if (this.hideEmpty()) {
 			const key = this.keyFor(from);
 			const found = direction < 0 ? this.index.prev(key) : this.index.next(key);
@@ -64,11 +72,12 @@ export class DayWalker {
 				(value): value is number => value !== null,
 			);
 			if (!candidates.length) return null;
-			offset = direction < 0 ? Math.max(...candidates) : Math.min(...candidates);
-		} else {
-			offset = from + direction;
+			// Indexed candidates are reachable at any distance; pinned candidates
+			// were checked when the walker was built.
+			return direction < 0 ? Math.max(...candidates) : Math.min(...candidates);
 		}
-		return Math.abs(offset) > MAX_OFFSET ? null : offset;
+		const offset = from + direction;
+		return isOffsetReachable(offset, false, false) ? offset : null;
 	}
 
 	/** True for a day that is shown whether or not it has a note. */
@@ -95,7 +104,7 @@ export class DayWalker {
 	origin(around?: Moment): number {
 		if (!around) return 0;
 		const offset = around.clone().startOf("day").diff(this.today, "days");
-		if (Math.abs(offset) > MAX_OFFSET) return 0;
+		if (!this.isReachable(offset)) return 0;
 		if (!this.hideEmpty()) return offset;
 		if (this.isPinned(offset) || this.index.has(this.keyFor(offset))) return offset;
 
@@ -104,5 +113,9 @@ export class DayWalker {
 		if (before === null) return after ?? 0;
 		if (after === null) return before;
 		return offset - before <= after - offset ? before : after;
+	}
+
+	private isReachable(offset: number): boolean {
+		return isOffsetReachable(offset, this.hideEmpty(), this.index.has(this.keyFor(offset)));
 	}
 }

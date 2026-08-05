@@ -1,5 +1,6 @@
 import { App, Modal, moment } from "obsidian";
 import { MAX_OFFSET } from "./dayWalk";
+import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
 
@@ -9,6 +10,8 @@ const INITIAL_MONTHS = 6;
 const LOAD_THRESHOLD = 400;
 /** A generous cap per scroll event, in case the loop cannot converge. */
 const MAX_PER_PASS = 24;
+/** Months kept alive while crossing a large gap between distant notes. */
+const MAX_MONTHS = 36;
 
 export interface DatePickerOptions {
 	/** Which days have a note, for the dots under the numbers. */
@@ -17,17 +20,18 @@ export interface DatePickerOptions {
 	today: Moment;
 	/** The day the journal is currently showing, if it has one. */
 	current?: Moment;
+	/** Indexed notes beyond the empty-day safety range can be opened. */
+	allowDistantNotes: boolean;
 	onPick(date: Moment): void;
 	/** Called whenever the picker goes away, however it was dismissed. */
 	onDismiss?(): void;
 }
 
 /**
- * A calendar that is one continuous column rather than one month at a time: the
- * months run below each other, each row is a week, and a day with a note carries
- * a dot under its number. The journal itself has no page boundaries, so neither
- * does the way you move around it - scrolling up reaches last year the same way
- * scrolling the journal up does.
+ * A calendar column where each row is a week and a day with a note carries a dot
+ * under its number. Months are consecutive inside the ordinary empty-day range;
+ * beyond it, the column jumps between months with indexed notes just as the
+ * filtered journal jumps between noted days.
  *
  * Months are built as the reader approaches either end. Building above them
  * moves the scroll position down by exactly the height that appeared, in the
@@ -43,9 +47,9 @@ export class DatePickerModal extends Modal {
 	/** The range the journal itself can reach, as month starts. */
 	private earliest: Moment;
 	private latest: Moment;
-	/** Day keys outside the journal's reach are not offered. */
-	private minKey: string;
-	private maxKey: string;
+	/** Ordinary empty days are only offered inside these bounds. */
+	private standardMinKey: string;
+	private standardMaxKey: string;
 
 	private todayKey: string;
 	private currentKey: string | null;
@@ -68,10 +72,20 @@ export class DatePickerModal extends Modal {
 
 		const min = today.clone().subtract(MAX_OFFSET, "days");
 		const max = today.clone().add(MAX_OFFSET, "days");
-		this.minKey = min.format(DAY_KEY_FORMAT);
-		this.maxKey = max.format(DAY_KEY_FORMAT);
+		this.standardMinKey = min.format(DAY_KEY_FORMAT);
+		this.standardMaxKey = max.format(DAY_KEY_FORMAT);
 		this.earliest = min.clone().startOf("month");
 		this.latest = max.clone().startOf("month");
+
+		const range = options.allowDistantNotes ? options.index.range() : null;
+		if (range) {
+			if (range.first < this.standardMinKey) {
+				this.earliest = createMoment(range.first, DAY_KEY_FORMAT, true).startOf("month");
+			}
+			if (range.last > this.standardMaxKey) {
+				this.latest = createMoment(range.last, DAY_KEY_FORMAT, true).startOf("month");
+			}
+		}
 	}
 
 	onOpen(): void {
@@ -171,7 +185,8 @@ export class DatePickerModal extends Modal {
 	 */
 	private growEarlier(): boolean {
 		if (!this.first.isAfter(this.earliest)) return false;
-		const month = this.first.clone().subtract(1, "month");
+		const month = this.monthBefore();
+		if (!month || !month.isBefore(this.first)) return false;
 		const ref = this.listEl.firstElementChild as HTMLElement | null;
 		const before = ref?.offsetTop ?? 0;
 		this.listEl.insertBefore(this.buildMonth(month), ref);
@@ -180,15 +195,75 @@ export class DatePickerModal extends Modal {
 			const delta = ref.offsetTop - before;
 			if (delta !== 0) this.scrollEl.scrollTop += delta;
 		}
+		this.trimMonths("later");
 		return true;
 	}
 
 	private growLater(): boolean {
 		if (!this.last.isBefore(this.latest)) return false;
-		const month = this.last.clone().add(1, "month");
+		const month = this.monthAfter();
+		if (!month || !month.isAfter(this.last)) return false;
 		this.listEl.appendChild(this.buildMonth(month));
 		this.last = month;
+		this.trimMonths("earlier");
 		return true;
+	}
+
+	/** Previous month, skipping an out-of-range gap to the next indexed month. */
+	private monthBefore(): Moment | null {
+		const adjacent = this.first.clone().subtract(1, "month");
+		if (!this.options.allowDistantNotes || this.isStandardMonth(adjacent)) return adjacent;
+		const key = this.options.index.prev(this.first.format(DAY_KEY_FORMAT));
+		return key ? createMoment(key, DAY_KEY_FORMAT, true).startOf("month") : null;
+	}
+
+	/** Next month, skipping an out-of-range gap to the next indexed month. */
+	private monthAfter(): Moment | null {
+		const adjacent = this.last.clone().add(1, "month");
+		if (!this.options.allowDistantNotes || this.isStandardMonth(adjacent)) return adjacent;
+		const endKey = this.last.clone().date(this.last.daysInMonth()).format(DAY_KEY_FORMAT);
+		const key = this.options.index.next(endKey);
+		return key ? createMoment(key, DAY_KEY_FORMAT, true).startOf("month") : null;
+	}
+
+	private isStandardMonth(month: Moment): boolean {
+		const first = month.format(DAY_KEY_FORMAT);
+		const last = month.clone().date(month.daysInMonth()).format(DAY_KEY_FORMAT);
+		return last >= this.standardMinKey && first <= this.standardMaxKey;
+	}
+
+	/** Keeps long-distance calendar navigation bounded, just like the journal. */
+	private trimMonths(end: "earlier" | "later"): void {
+		if (this.listEl.childElementCount <= MAX_MONTHS) return;
+		if (end === "later") {
+			const victim = this.listEl.lastElementChild;
+			if (!victim) return;
+			this.removeMonth(victim);
+			const last = this.listEl.lastElementChild;
+			if (last) this.last = this.monthFor(last);
+			return;
+		}
+
+		const victim = this.listEl.firstElementChild;
+		const ref = victim?.nextElementSibling as HTMLElement | null;
+		if (!victim || !ref) return;
+		const before = ref.offsetTop;
+		this.removeMonth(victim);
+		this.first = this.monthFor(ref);
+		const delta = ref.offsetTop - before;
+		if (delta !== 0) this.scrollEl.scrollTop += delta;
+	}
+
+	private monthFor(el: Element): Moment {
+		return createMoment((el as HTMLElement).dataset.month, DAY_KEY_FORMAT, true).startOf("month");
+	}
+
+	/** Removes stale element references along with a trimmed month. */
+	private removeMonth(el: Element): void {
+		if (this.currentEl && el.contains(this.currentEl)) this.currentEl = null;
+		if (this.anchorEl && el.contains(this.anchorEl)) this.anchorEl = null;
+		if (this.centreEl && el.contains(this.centreEl)) this.centreEl = null;
+		el.remove();
 	}
 
 	/**
@@ -198,7 +273,10 @@ export class DatePickerModal extends Modal {
 	 * ambiguous about which day it marks.
 	 */
 	private buildMonth(month: Moment): HTMLElement {
-		const el = createDiv({ cls: "journal-picker-month" });
+		const el = createDiv({
+			cls: "journal-picker-month",
+			attr: { "data-month": month.format(DAY_KEY_FORMAT) },
+		});
 		const heading = el.createDiv({ cls: "journal-picker-month-label" });
 		heading.createSpan({ cls: "journal-picker-month-name", text: month.format("MMMM") });
 		heading.createSpan({ cls: "journal-picker-month-year", text: month.format("YYYY") });
@@ -234,8 +312,9 @@ export class DatePickerModal extends Modal {
 			cell.addClass("is-current");
 			this.currentEl = cell;
 		}
-		// Beyond the journal's own reach there is nowhere to go.
-		if (key < this.minKey || key > this.maxKey) {
+		const inStandardRange = key >= this.standardMinKey && key <= this.standardMaxKey;
+		const isDistantNote = this.options.allowDistantNotes && this.options.index.has(key);
+		if (!inStandardRange && !isDistantNote) {
 			cell.addClass("is-out-of-range");
 			cell.disabled = true;
 			return cell;
