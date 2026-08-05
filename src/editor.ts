@@ -13,6 +13,8 @@ export interface JournalEditorOptions {
 	/** The note being edited, when it already exists. Used for link resolution. */
 	file: TFile | null;
 	onChange: () => void;
+	/** Called after the editor has completed its first real layout pass. */
+	onReady: () => void;
 	onFocus: () => void;
 	onBlur: () => void;
 	onFind: () => void;
@@ -45,6 +47,7 @@ export interface JournalEditor {
 interface InternalCodeMirror {
 	posAtCoords?(coords: { x: number; y: number }, precise: boolean): number | null;
 	dispatch?(spec: TransactionSpec): void;
+	requestMeasure?(request: { read: () => null; write: () => void }): void;
 	state?: EditorState;
 	/** CodeMirror's pending "bring the cursor into view" request, if any. */
 	viewState?: { scrollTarget?: unknown };
@@ -138,6 +141,9 @@ class RichEditor implements JournalEditor {
 	private owner: InternalEditorOwner;
 	private focusIn: () => void;
 	private focusOut: () => void;
+	private readyFrame = 0;
+	private readyReported = false;
+	private destroyed = false;
 
 	constructor(
 		private options: JournalEditorOptions,
@@ -174,6 +180,7 @@ class RichEditor implements JournalEditor {
 
 		this.instance.set?.(options.value, true);
 		this.dropScrollRequest();
+		this.reportInitialLayout();
 
 		this.focusIn = () => {
 			this.claimActiveEditor(true);
@@ -185,6 +192,29 @@ class RichEditor implements JournalEditor {
 		};
 		options.container.addEventListener("focusin", this.focusIn);
 		options.container.addEventListener("focusout", this.focusOut);
+	}
+
+	/** Releases the preview-height guard only after CodeMirror has measured its DOM. */
+	private reportInitialLayout(): void {
+		try {
+			const cm = this.instance?.editor?.cm;
+			if (cm?.requestMeasure) {
+				cm.requestMeasure({ read: () => null, write: () => this.reportReady() });
+				return;
+			}
+		} catch {
+			/* fall through to a frame when the internal measurement API is unavailable */
+		}
+		this.readyFrame = window.requestAnimationFrame(() => {
+			this.readyFrame = 0;
+			this.reportReady();
+		});
+	}
+
+	private reportReady(): void {
+		if (this.destroyed || this.readyReported) return;
+		this.readyReported = true;
+		this.options.onReady();
 	}
 
 	private claimActiveEditor(claim: boolean): void {
@@ -321,6 +351,9 @@ class RichEditor implements JournalEditor {
 	}
 
 	destroy(): void {
+		this.destroyed = true;
+		if (this.readyFrame) window.cancelAnimationFrame(this.readyFrame);
+		this.readyFrame = 0;
 		this.claimActiveEditor(false);
 		this.options.container.removeEventListener("focusin", this.focusIn);
 		this.options.container.removeEventListener("focusout", this.focusOut);
@@ -347,6 +380,7 @@ class PlainEditor implements JournalEditor {
 	readonly rich = false;
 	private textarea: HTMLTextAreaElement;
 	private findLayer: HTMLElement | null = null;
+	private readyTimer = 0;
 
 	constructor(private options: JournalEditorOptions) {
 		this.textarea = options.container.createEl("textarea", {
@@ -361,7 +395,11 @@ class PlainEditor implements JournalEditor {
 		this.textarea.addEventListener("focus", () => this.options.onFocus());
 		this.textarea.addEventListener("blur", () => this.options.onBlur());
 		// The element has no layout yet on the frame it is created.
-		window.setTimeout(() => this.autoGrow(), 0);
+		this.readyTimer = window.setTimeout(() => {
+			this.readyTimer = 0;
+			this.autoGrow();
+			this.options.onReady();
+		}, 0);
 	}
 
 	private autoGrow(): void {
@@ -442,6 +480,8 @@ class PlainEditor implements JournalEditor {
 	}
 
 	destroy(): void {
+		window.clearTimeout(this.readyTimer);
+		this.readyTimer = 0;
 		this.clearFindMatches();
 		this.textarea.remove();
 		this.options.container.empty();

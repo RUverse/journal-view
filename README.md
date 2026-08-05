@@ -12,7 +12,7 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
 - **Use the daily notes you already have.** Journal View works with your existing notes and daily-note
   settings—no plugin-specific formats, duplicate files, or lock-in.
 - **Navigate through time with ease.** Scroll through your journal, jump to any date with the calendar,
-  or return to today in one click.
+  return to today in one click, or open the surrounding days from the notebook button on a daily note.
 - **Edit directly in the timeline.** Read and write without switching between files, views, or editing
   modes.
 - **Write only when there is something to say.** Start typing on an empty day and Journal View creates

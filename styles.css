@@ -289,7 +289,7 @@ button.journal-day-create:hover {
 }
 
 /* A day that has just become an editor is held at the height of the preview it
-   replaced, until the editor has measured itself or the reader types. */
+   replaced until the editor completes its first real layout pass. */
 .journal-day-editing .journal-day-body {
 	min-height: max(
 		calc(var(--line-height-normal) * 1em + var(--journal-body-pad-top) + var(--journal-body-pad-bottom)),

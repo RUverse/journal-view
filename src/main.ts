@@ -1,6 +1,8 @@
-import { Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
+import { MarkdownView, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
-import { DailyNoteIndex } from "./noteIndex";
+import { createMoment } from "./moment";
+import type { Moment } from "./moment";
+import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
 import {
 	DEFAULT_SETTINGS,
 	JournalViewSettingTab,
@@ -15,6 +17,9 @@ export default class JournalViewPlugin extends Plugin {
 	settings: JournalViewSettings = { ...DEFAULT_SETTINGS };
 	daily!: DailyNoteResolver;
 	index!: DailyNoteIndex;
+	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
+	/** Target dates handed to journal views before Obsidian constructs them. */
+	private initialDates = new Map<WorkspaceLeaf, Moment>();
 
 	private notifyViews = debounce(
 		() => {
@@ -34,19 +39,30 @@ export default class JournalViewPlugin extends Plugin {
 
 		// The index has to be registered before any view, so it is already up to
 		// date by the time a view reacts to the same vault event.
-		this.app.workspace.onLayoutReady(() => this.index.rebuild());
+		this.app.workspace.onLayoutReady(() => {
+			this.index.rebuild();
+			this.syncDailyNoteActions();
+		});
 		this.registerEvent(
 			this.app.vault.on("create", (file) => {
 				if (file instanceof TFile) this.index.handleCreate(file);
 			}),
 		);
-		this.registerEvent(this.app.vault.on("delete", (file) => this.index.handleDelete(file.path)));
+		this.registerEvent(
+			this.app.vault.on("delete", (file) => {
+				this.index.handleDelete(file.path);
+			}),
+		);
 		this.registerEvent(
 			this.app.vault.on("rename", (file, oldPath) => {
 				this.index.handleDelete(oldPath);
 				if (file instanceof TFile) this.index.handleCreate(file);
+				this.syncDailyNoteActions();
 			}),
 		);
+		this.registerEvent(this.app.workspace.on("file-open", () => this.syncDailyNoteActions()));
+		this.registerEvent(this.app.workspace.on("layout-change", () => this.syncDailyNoteActions()));
+		this.register(() => this.clearDailyNoteActions());
 
 		this.registerView(VIEW_TYPE_JOURNAL, (leaf) => new JournalView(leaf, this));
 
@@ -91,18 +107,79 @@ export default class JournalViewPlugin extends Plugin {
 		});
 	}
 
-	async activateView(forceNewTab = false): Promise<void> {
+	async activateView(forceNewTab = false, date?: Moment): Promise<void> {
 		const { workspace } = this.app;
 		const existing = workspace.getLeavesOfType(VIEW_TYPE_JOURNAL);
 
 		let leaf: WorkspaceLeaf;
+		let created = false;
 		if (existing.length > 0 && !forceNewTab) {
 			leaf = existing[0];
 		} else {
 			leaf = workspace.getLeaf(true);
-			await leaf.setViewState({ type: VIEW_TYPE_JOURNAL, active: true });
+			created = true;
+			if (date) this.initialDates.set(leaf, date.clone().startOf("day"));
+			try {
+				await leaf.setViewState({ type: VIEW_TYPE_JOURNAL, active: true });
+			} finally {
+				// The view normally consumes this during construction; also clear it
+				// when construction fails so a leaf is never left holding stale state.
+				this.initialDates.delete(leaf);
+			}
 		}
 		await workspace.revealLeaf(leaf);
+		if (date && !created && leaf.view instanceof JournalView) leaf.view.goToDate(date, true);
+	}
+
+	/** Consumed by a JournalView constructor so its first build uses the target date. */
+	consumeInitialDate(leaf: WorkspaceLeaf): Moment | undefined {
+		const date = this.initialDates.get(leaf);
+		this.initialDates.delete(leaf);
+		return date;
+	}
+
+	/** Keeps a native view-header action on every open daily-note pane. */
+	private syncDailyNoteActions(): void {
+		const open = new Set<MarkdownView>();
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			const view = leaf.view;
+			if (!(view instanceof MarkdownView)) return;
+			open.add(view);
+
+			const isDailyNote = !!view.file && this.index.keyForPath(view.file.path) !== null;
+			const action = this.dailyNoteActions.get(view);
+			if (!isDailyNote) {
+				action?.remove();
+				this.dailyNoteActions.delete(view);
+				return;
+			}
+			if (action?.isConnected) return;
+			action?.remove();
+
+			const added = view.addAction("notebook", "Open this day in journal", () => {
+				void this.openDailyNoteInJournal(view);
+			});
+			this.dailyNoteActions.set(view, added);
+		});
+
+		for (const [view, action] of this.dailyNoteActions) {
+			if (open.has(view)) continue;
+			action.remove();
+			this.dailyNoteActions.delete(view);
+		}
+	}
+
+	private clearDailyNoteActions(): void {
+		for (const action of this.dailyNoteActions.values()) action.remove();
+		this.dailyNoteActions.clear();
+	}
+
+	private async openDailyNoteInJournal(view: MarkdownView): Promise<void> {
+		const key = view.file ? this.index.keyForPath(view.file.path) : null;
+		if (!key) return;
+		const date = createMoment(key, DAY_KEY_FORMAT, true);
+		if (!date.isValid()) return;
+		await this.activateView(false, date);
 	}
 
 	async loadSettings(): Promise<void> {
@@ -129,6 +206,7 @@ export default class JournalViewPlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+		this.syncDailyNoteActions();
 		this.notifyViews();
 	}
 }

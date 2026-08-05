@@ -81,7 +81,7 @@ export class DaySection {
 	private modeToken = 0;
 	/** True while a preview is being built to replace this day's editor. */
 	private unmounting = false;
-	/** Preview height (px) the editor is held at until the reader types. */
+	/** Preview height (px) held until the editor completes its first layout. */
 	private heldHeight = 0;
 
 	private lastKnownContent = "";
@@ -564,9 +564,9 @@ export class DaySection {
 	 * mounts editors ahead of the reader, so by the time a day is close enough
 	 * to click it is already one.
 	 *
-	 * The day is held at its preview height until someone types in it: an
-	 * editor lays out the parts of a long note it cannot see lazily, and its
-	 * first guess at their height is only a guess.
+	 * The preview height stays in place through the editor's first measurement,
+	 * preventing a half-laid-out frame without leaving a stale minimum height
+	 * behind for the reader to release with their first click.
 	 */
 	mountEditor(): void {
 		if (this.destroyed || this.editor) return;
@@ -580,6 +580,7 @@ export class DaySection {
 		this.el.addClass("journal-day-editing");
 		const body = noteBody(this.lastKnownContent);
 		const placeholder = this.exists ? "Empty note" : "Start typing to create this note";
+		const token = this.modeToken;
 		try {
 			this.editor = createJournalEditor(
 				{
@@ -588,6 +589,10 @@ export class DaySection {
 					value: body,
 					placeholder,
 					file: this.file,
+					onReady: () => {
+						if (this.destroyed || token !== this.modeToken) return;
+						this.releaseHeight();
+					},
 					onChange: () => {
 						this.releaseHeight();
 						this.updateBlankState();
@@ -596,8 +601,8 @@ export class DaySection {
 					},
 					onFocus: () => {
 						this.focused = true;
-						// The day is on screen and the editor has measured what
-						// it shows, so its own height can be trusted from here.
+						// Measurement should normally have released the guard before
+						// the reader arrives; focus is the defensive fallback.
 						this.releaseHeight();
 						this.el.addClass("journal-day-focused");
 						// Focus is the one signal every way in shares - a click
