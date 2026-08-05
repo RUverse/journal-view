@@ -380,6 +380,15 @@ button.journal-day-create:hover {
 	overflow: visible;
 }
 
+/* Obsidian gives a phone's full-page Markdown scroller enough top padding to
+   clear its floating header. That host rule also matches these embedded
+   editors and is more specific than the reset above, so keep it out of each
+   journal day explicitly. */
+body.is-phone .journal-view .view-content .journal-day-editing .journal-day-body
+	.markdown-source-view > .cm-editor > .cm-scroller {
+	padding-top: 0;
+}
+
 .journal-day-body .cm-contentContainer,
 .journal-day-body .cm-content {
 	padding: 0;
