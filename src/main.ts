@@ -5,6 +5,8 @@ import {
 	DEFAULT_SETTINGS,
 	JournalViewSettingTab,
 	JournalViewSettings,
+	LEGACY_FULL_HEADER_FORMAT,
+	MONTH_SEPARATOR_DAY_FORMAT,
 	clampSaveDelay,
 } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
@@ -113,7 +115,11 @@ export default class JournalViewPlugin extends Plugin {
 			dateFormat: stringSetting(saved.dateFormat, DEFAULT_SETTINGS.dateFormat),
 			folder: stringSetting(saved.folder, DEFAULT_SETTINGS.folder),
 			templatePath: stringSetting(saved.templatePath, DEFAULT_SETTINGS.templatePath),
-			headerFormat: stringSetting(saved.headerFormat, DEFAULT_SETTINGS.headerFormat),
+			headerFormat: headerFormatSetting(saved.headerFormat, typeof saved.showMonthSeparators === "boolean"),
+			showMonthSeparators: booleanSetting(
+				saved.showMonthSeparators,
+				DEFAULT_SETTINGS.showMonthSeparators,
+			),
 			saveDelay: saveDelaySetting(saved.saveDelay),
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
@@ -133,6 +139,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringSetting(value: unknown, fallback: string): string {
 	return typeof value === "string" ? value : fallback;
+}
+
+/** Migrates the interim header defaults once, while preserving later choices. */
+function headerFormatSetting(value: unknown, hasGroupingSetting: boolean): string {
+	const format = stringSetting(value, DEFAULT_SETTINGS.headerFormat);
+	if (!hasGroupingSetting && (format === LEGACY_FULL_HEADER_FORMAT || format === MONTH_SEPARATOR_DAY_FORMAT)) {
+		return DEFAULT_SETTINGS.headerFormat;
+	}
+	return format;
 }
 
 function saveDelaySetting(value: unknown): number {

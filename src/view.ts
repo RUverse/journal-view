@@ -5,7 +5,7 @@ import { DatePickerModal } from "./datePicker";
 import { DayHost, DaySection } from "./day";
 import { DayWalker, isOffsetReachable } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
-import { distanceFromViewport } from "./scroll";
+import { distanceFromViewport, findAnchorIndex } from "./scroll";
 import { JournalToolbar } from "./toolbar";
 import { JournalFind, JournalFindHost } from "./find";
 import type { FindRange } from "./findText";
@@ -297,6 +297,28 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		return new DaySection(this, this.walker.dateFor(offset), offset);
 	}
 
+	/**
+	 * Carries each month heading on its first rendered day. Keeping the heading
+	 * inside a day means loading, trimming and scroll anchoring still have one
+	 * layout unit per date. Hidden empty days do not count as month starts.
+	 */
+	private syncMonthSeparators(): void {
+		if (!this.plugin.settings.showMonthSeparators) {
+			for (const section of this.sections) section.setMonthSeparator(false);
+			return;
+		}
+		let previousMonth: string | null = null;
+		for (const section of this.sections) {
+			if (section.isHidden) {
+				section.setMonthSeparator(false);
+				continue;
+			}
+			const month = section.date.format("YYYY-MM");
+			section.setMonthSeparator(month !== previousMonth);
+			previousMonth = month;
+		}
+	}
+
 	private sectionAt(offset: number): DaySection | undefined {
 		return this.sections.find((section) => section.offset === offset);
 	}
@@ -329,6 +351,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		}
 		if (where === "start") this.sections.unshift(...sections);
 		else this.sections.push(...sections);
+		this.syncMonthSeparators();
 		// A day can land inside the editor window on a tall pane.
 		this.editors.schedule();
 		if (this.ready) this.find?.sectionsChanged();
@@ -373,8 +396,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 				}
 
 				if (direction === "past") {
-					const ref = this.sections[0].el;
-					const before = ref.offsetTop;
+					const referenceDay = this.sections[0];
+					const before = referenceDay.contentTop;
 					// The compensating write below happens anyway, so the
 					// spacer is topped back up in the same breath - it is what
 					// absorbs late height changes (images loading, the day
@@ -383,7 +406,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 					const base = this.anchoring.spacerBase();
 					if (this.anchoring.spacerHeight() < base) this.anchoring.setSpacer(base);
 					this.commit([section], "start");
-					const delta = ref.offsetTop - before;
+					const delta = referenceDay.contentTop - before;
 					if (delta !== 0) this.scrollEl.scrollTop += delta;
 					this.editors.declareScroll();
 					this.anchoring.pin();
@@ -426,18 +449,20 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			if (!victims.length) return;
 			this.sections.length -= victims.length;
 			for (const section of victims) this.forget(section);
+			this.syncMonthSeparators();
 		} else {
 			for (let i = 0; i < this.sections.length && budget > 0; i++, budget--) {
 				const section = this.sections[i];
 				if (section.hasFocus || this.distanceFrom(section) < TRIM_DISTANCE) break;
 				victims.push(section);
 			}
-			const ref = this.sections[victims.length]?.el;
-			if (!victims.length || !ref) return;
-			const before = ref.offsetTop;
+			const referenceDay = this.sections[victims.length];
+			if (!victims.length || !referenceDay) return;
+			const before = referenceDay.contentTop;
 			this.sections.splice(0, victims.length);
 			for (const section of victims) this.forget(section);
-			const delta = ref.offsetTop - before;
+			this.syncMonthSeparators();
+			const delta = referenceDay.contentTop - before;
 			if (delta !== 0) this.scrollEl.scrollTop += delta;
 			this.editors.declareScroll();
 			this.anchoring.pin();
@@ -636,7 +661,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private centerTarget(section: DaySection): number {
 		return Math.max(
 			0,
-			section.el.offsetTop - Math.max(0, (this.scrollEl.clientHeight - section.el.offsetHeight) / 2),
+			section.cardTop - Math.max(0, (this.scrollEl.clientHeight - section.cardHeight) / 2),
 		);
 	}
 
@@ -763,9 +788,18 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private updateHeaderLabel(): void {
 		if (!this.ready || !this.toolbar) return;
-		// Reuses the anchor rather than measuring again - this runs every frame
-		// while scrolling.
-		const section = this.anchoring.section;
+		// The first day at the viewport top determines the sticky month. The
+		// indexed lookup skips filtered days, falls back to the first day in top
+		// padding, and retains the last day in bottom padding.
+		const at = findAnchorIndex(
+			this.sections.length,
+			(index) => {
+				const el = this.sections[index].el;
+				return el.offsetParent === null ? null : el.offsetTop;
+			},
+			this.scrollEl.scrollTop,
+		);
+		const section = at >= 0 ? this.sections[at] : this.anchoring.section;
 		this.toolbar.setLabel(section ? section.date.format("MMMM YYYY") : "Journal");
 	}
 
@@ -869,6 +903,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// The caller reloads the real content right after; the day starts
 		// empty and any growth is re-pinned by the resize observer.
 		this.sections.splice(at, 0, section);
+		this.syncMonthSeparators();
 		this.byPath.set(section.path, section);
 		if (section.file) this.byPath.set(section.file.path, section);
 		this.resizeObserver?.observe(section.el);
@@ -890,6 +925,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (previousPath) this.byPath.delete(previousPath);
 		this.byPath.set(day.path, day);
 		if (day.file) this.byPath.set(day.file.path, day);
+		this.syncMonthSeparators();
 	}
 
 	onDayContentChanged(_day: DaySection): void {
@@ -912,6 +948,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			section.revalidate();
 			if (section.path !== before) changed = true;
 		}
+		this.syncMonthSeparators();
 		if (changed) this.indexPaths();
 	}
 

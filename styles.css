@@ -165,9 +165,46 @@ button.journal-find-button.is-active {
 
 .journal-day {
 	position: relative;
+}
+
+.journal-day-card {
 	border-radius: var(--radius-m);
 	padding: var(--size-4-2) var(--size-4-3) var(--size-4-3);
-	transition: opacity 120ms ease-in-out, background-color 120ms ease-in-out;
+	transition: background-color 120ms ease-in-out;
+}
+
+.journal-month-separator {
+	display: flex;
+	align-items: baseline;
+	gap: var(--size-2-2);
+	margin: var(--size-4-4) 0 var(--size-4-5);
+	padding: 0 var(--size-4-3);
+	color: var(--text-normal);
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	line-height: var(--line-height-tight);
+}
+
+.journal-month-separator[hidden] {
+	display: none;
+}
+
+.journal-day:first-child .journal-month-separator {
+	margin-top: 0;
+}
+
+.journal-month-separator::after {
+	content: "";
+	height: 1px;
+	margin-left: var(--size-2-2);
+	background-color: var(--background-modifier-border);
+	flex: 1 1 auto;
+}
+
+.journal-month-year {
+	color: var(--text-faint);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-normal);
 }
 
 .journal-day-header {
@@ -178,6 +215,7 @@ button.journal-find-button.is-active {
 	padding-bottom: var(--size-2-2);
 	margin-bottom: var(--size-2-3);
 	border-bottom: 1px solid var(--background-modifier-border);
+	transition: opacity 120ms ease-in-out;
 }
 
 .journal-day-title {
@@ -241,6 +279,7 @@ button.journal-day-create:hover {
 	--journal-body-pad-top: 0px;
 	--journal-body-pad-bottom: 0px;
 	position: relative;
+	transition: opacity 120ms ease-in-out;
 	padding-top: var(--journal-body-pad-top);
 	padding-bottom: var(--journal-body-pad-bottom);
 	/* A blank day still needs a line's worth of click target. */
@@ -280,7 +319,7 @@ button.journal-day-create:hover {
 }
 
 /* Today gets a quiet highlight so the centre of the journal is obvious. */
-.journal-day-today {
+.journal-day-today .journal-day-card {
 	background-color: var(--background-primary-alt);
 }
 
@@ -293,12 +332,15 @@ button.journal-day-create:hover {
 }
 
 /* Days without a note yet: visible, but clearly not real content. */
-.journal-day-empty {
+.journal-day-empty .journal-day-header,
+.journal-day-empty .journal-day-body {
 	opacity: 0.45;
 }
 
-.journal-day-empty:hover,
-.journal-day-empty.journal-day-focused {
+.journal-day-empty:hover .journal-day-header,
+.journal-day-empty:hover .journal-day-body,
+.journal-day-empty.journal-day-focused .journal-day-header,
+.journal-day-empty.journal-day-focused .journal-day-body {
 	opacity: 1;
 }
 

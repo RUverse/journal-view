@@ -3,6 +3,7 @@ import type JournalViewPlugin from "./main";
 import { JournalEditor, createJournalEditor } from "./editor";
 import type { Moment } from "./moment";
 import { SaveQueue } from "./saveQueue";
+import { MONTH_SEPARATOR_DAY_FORMAT } from "./settings";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 
@@ -63,6 +64,8 @@ export class DaySection {
 	readonly el: HTMLElement;
 	readonly key: string;
 
+	private monthEl: HTMLElement;
+	private cardEl: HTMLElement;
 	private headerEl: HTMLElement;
 	private actionsEl: HTMLElement;
 	private bodyEl: HTMLElement;
@@ -107,14 +110,22 @@ export class DaySection {
 		this.file = host.plugin.daily.fileFor(date);
 
 		this.el = createDiv({ cls: "journal-day", attr: { "data-date": this.key } });
-		this.headerEl = this.el.createDiv({ cls: "journal-day-header" });
+		this.monthEl = this.el.createDiv({
+			cls: "journal-month-separator",
+			attr: { role: "heading", "aria-level": "2" },
+		});
+		this.monthEl.createSpan({ cls: "journal-month-name", text: date.format("MMMM") });
+		this.monthEl.createSpan({ cls: "journal-month-year", text: date.format("YYYY") });
+		this.monthEl.hidden = true;
+		this.cardEl = this.el.createDiv({ cls: "journal-day-card" });
+		this.headerEl = this.cardEl.createDiv({ cls: "journal-day-header" });
 		const titleEl = this.headerEl.createDiv({ cls: "journal-day-title" });
 		titleEl.createSpan({ cls: "journal-day-date", text: this.formatHeader() });
 		const relative = this.relativeLabel();
 		if (relative) titleEl.createSpan({ cls: "journal-day-badge", text: relative });
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 
-		this.bodyEl = this.el.createDiv({ cls: "journal-day-body" });
+		this.bodyEl = this.cardEl.createDiv({ cls: "journal-day-body" });
 
 		this.el.addEventListener("click", (event) => this.onClick(event));
 
@@ -238,8 +249,35 @@ export class DaySection {
 		return this.el.offsetParent !== null;
 	}
 
+	/** Viewport position of stable day content, below any movable month heading. */
+	get contentTop(): number {
+		return this.headerEl.getBoundingClientRect().top;
+	}
+
+	/** Card geometry excludes the optional month heading above the day. */
+	get cardTop(): number {
+		return this.el.offsetTop + this.cardEl.offsetTop;
+	}
+
+	get cardHeight(): number {
+		return this.cardEl.offsetHeight;
+	}
+
+	/** True when the day itself is filtered out, independent of pane visibility. */
+	get isHidden(): boolean {
+		return this.el.hasClass("journal-day-hidden");
+	}
+
+	/** Shows the month heading carried by the first rendered day in that month. */
+	setMonthSeparator(visible: boolean): void {
+		this.monthEl.hidden = !visible;
+	}
+
 	private formatHeader(): string {
-		return this.date.format(this.host.plugin.settings.headerFormat);
+		const format = this.host.plugin.settings.showMonthSeparators
+			? MONTH_SEPARATOR_DAY_FORMAT
+			: this.host.plugin.settings.headerFormat;
+		return this.date.format(format);
 	}
 
 	private relativeLabel(): string | null {

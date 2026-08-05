@@ -45,7 +45,8 @@ Nothing is written to the vault until you actually type: leave the day untouched
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Date format / Folder / Template | inherited | Override the vault's daily-note settings for this view only |
-| Header date format | `dddd, D MMMM YYYY` | How the date above each day reads |
+| Group days by month | off | Show month and year once above each month; grouped day labels stay compact |
+| Daily header format | `dddd, D MMMM` | How each day's date reads when month grouping is off |
 | Focus today on open | on | Put the cursor in today's note when the view opens |
 | Only show days that have a note | on | Skip empty days entirely and jump directly between existing notes, however far apart; today is always shown. Off shows every day, faded until you type |
 | Rich editor | on | Use Obsidian's markdown editor per day; off falls back to a plain text editor |
