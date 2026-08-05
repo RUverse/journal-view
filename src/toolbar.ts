@@ -26,11 +26,12 @@ export interface ToolbarActions {
  * it what to display.
  */
 export class JournalToolbar {
+	private toolbarEl: HTMLElement;
 	private labelEl: HTMLElement;
 	private filterButton: HTMLElement;
 
 	constructor(parent: HTMLElement, actions: ToolbarActions) {
-		const toolbar = parent.createDiv({ cls: "journal-toolbar" });
+		const toolbar = (this.toolbarEl = parent.createDiv({ cls: "journal-toolbar" }));
 		this.labelEl = toolbar.createDiv({ cls: "journal-toolbar-label", text: "Journal" });
 		const buttons = toolbar.createDiv({ cls: "journal-toolbar-actions" });
 
@@ -64,5 +65,9 @@ export class JournalToolbar {
 		setTooltip(this.filterButton, on ? "Showing only days with notes" : "Showing every day");
 		this.filterButton.toggleClass("is-active", on);
 		this.filterButton.setAttribute("aria-pressed", String(on));
+	}
+
+	setVisible(visible: boolean): void {
+		this.toolbarEl.toggleClass("is-hidden", !visible);
 	}
 }

@@ -29,6 +29,11 @@
 	flex: 0 0 auto;
 }
 
+.journal-toolbar.is-hidden,
+.journal-find-bar.is-hidden {
+	display: none;
+}
+
 .journal-toolbar-label {
 	font-size: var(--font-ui-small);
 	font-weight: var(--font-semibold);
@@ -46,6 +51,77 @@
 	width: auto;
 	gap: var(--size-2-2);
 	padding-inline: var(--size-4-2);
+}
+
+/* ----------------------------------------------------------- find bar --- */
+
+.journal-find-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+	padding: var(--size-4-2) var(--size-4-4);
+	border-bottom: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	flex: 0 0 auto;
+}
+
+.journal-find-input-wrap {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+	min-width: 0;
+	height: var(--input-height);
+	padding: 0 var(--size-2-3);
+	border-radius: var(--input-radius);
+	background-color: var(--background-modifier-form-field);
+	box-shadow: var(--input-shadow);
+	flex: 1 1 auto;
+}
+
+.journal-find-input-wrap:focus-within {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.journal-find-search-icon {
+	display: flex;
+	color: var(--text-muted);
+	flex: 0 0 auto;
+}
+
+.journal-find-search-icon svg {
+	width: var(--icon-s);
+	height: var(--icon-s);
+}
+
+input.journal-find-input {
+	min-width: 4rem;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	flex: 1 1 auto;
+}
+
+input.journal-find-input:focus {
+	border: 0;
+	box-shadow: none;
+}
+
+.journal-find-count {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+	flex: 0 0 auto;
+}
+
+button.journal-find-button {
+	flex: 0 0 auto;
+}
+
+button.journal-find-button.is-active {
+	color: var(--text-accent);
+	background-color: var(--background-modifier-hover);
 }
 
 /* -------------------------------------------------------------- scroller -- */
@@ -271,6 +347,21 @@ button.journal-day-create:hover {
 	display: none;
 }
 
+.journal-day-body .journal-find-match,
+.journal-day-preview mark.journal-find-match,
+.journal-plain-find-layer mark.journal-find-match {
+	border-radius: 2px;
+	background-color: var(--text-highlight-bg);
+	color: inherit;
+}
+
+.journal-day-body .journal-find-match-selected,
+.journal-day-preview mark.journal-find-match-selected,
+.journal-plain-find-layer mark.journal-find-match-selected {
+	background-color: var(--text-selection);
+	outline: 1px solid var(--interactive-accent);
+}
+
 .journal-plain-editor {
 	width: 100%;
 	height: var(--journal-editor-height, auto);
@@ -286,6 +377,28 @@ button.journal-day-create:hover {
 	font-size: var(--font-text-size);
 	line-height: var(--line-height-normal);
 	overflow: hidden;
+}
+
+.journal-plain-editor-find-active {
+	position: relative;
+	z-index: 1;
+	-webkit-text-fill-color: transparent;
+	caret-color: var(--text-normal);
+}
+
+.journal-plain-find-layer {
+	position: absolute;
+	z-index: 0;
+	top: var(--journal-body-pad-top);
+	left: 0;
+	right: 0;
+	pointer-events: none;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+	color: var(--text-normal);
+	font-family: var(--font-text);
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
 }
 
 .journal-plain-editor:focus,

@@ -3,6 +3,8 @@ import type JournalViewPlugin from "./main";
 import { JournalEditor, createJournalEditor } from "./editor";
 import type { Moment } from "./moment";
 import { SaveQueue } from "./saveQueue";
+import { findLiteralRanges } from "./findText";
+import type { FindRange } from "./findText";
 
 /** The bits of the journal view a day needs to talk to. */
 export interface DayHost {
@@ -14,6 +16,10 @@ export interface DayHost {
 	isPinnedDay(day: DaySection): boolean;
 	/** True while a day is out of sight, where its body can be swapped unseen. */
 	isOffScreen(day: DaySection): boolean;
+	/** Re-indexes find results after this day's visible body changes. */
+	onDayContentChanged(day: DaySection): void;
+	/** Opens the journal-wide find UI from an embedded editor command. */
+	showFind(): void;
 }
 
 /**
@@ -26,6 +32,17 @@ function noteBody(content: string): string {
 
 function replaceNoteBody(content: string, body: string): string {
 	return content.slice(0, getFrontMatterInfo(content).contentStart) + body;
+}
+
+function sameFindRange(left: FindRange | null, right: FindRange | null): boolean {
+	return left === right || (!!left && !!right && left.from === right.from && left.to === right.to);
+}
+
+function sameFindRanges(left: FindRange[], right: FindRange[]): boolean {
+	return (
+		left.length === right.length &&
+		left.every((range, index) => range.from === right[index].from && range.to === right[index].to)
+	);
 }
 
 /**
@@ -70,6 +87,12 @@ export class DaySection {
 	private saveTimer = 0;
 	private focused = false;
 	private readonly queue = new SaveQueue((value) => this.writeValue(value));
+	private findState: {
+		query: string;
+		caseSensitive: boolean;
+		ranges: FindRange[];
+		selected: FindRange | null;
+	} | null = null;
 
 	file: TFile | null;
 	path: string;
@@ -324,6 +347,54 @@ export class DaySection {
 		return value !== noteBody(this.lastKnownContent);
 	}
 
+	/** The body as the reader sees it, including edits not yet written to disk. */
+	searchText(): string {
+		return this.editor?.getValue() ?? noteBody(this.lastKnownContent);
+	}
+
+	setFindState(
+		query: string,
+		caseSensitive: boolean,
+		ranges: FindRange[],
+		selected: FindRange | null,
+	): void {
+		const current = this.findState;
+		if (
+			current &&
+			current.query === query &&
+			current.caseSensitive === caseSensitive &&
+			sameFindRanges(current.ranges, ranges)
+		) {
+			// Loaded-window refreshes first publish ranges without an active
+			// result. Preserve the current one until the controller resolves it.
+			if (selected !== null && !sameFindRange(current.selected, selected)) {
+				current.selected = selected;
+				this.applyFindState();
+			}
+			return;
+		}
+		this.findState = { query, caseSensitive, ranges, selected };
+		this.applyFindState();
+	}
+
+	selectFindRange(selected: FindRange | null): void {
+		if (!this.findState) return;
+		if (sameFindRange(this.findState.selected, selected)) return;
+		this.findState.selected = selected;
+		this.applyFindState();
+	}
+
+	clearFindState(): void {
+		this.findState = null;
+		this.editor?.clearFindMatches();
+		this.clearPreviewFindMarks();
+	}
+
+	revealFindRange(range: FindRange): void {
+		this.applyFindState();
+		this.editor?.revealRange(range);
+	}
+
 	/** Reads the day's note; days without a note are simply empty. */
 	async readContent(): Promise<string> {
 		if (!this.file) return "";
@@ -376,6 +447,63 @@ export class DaySection {
 		this.el.removeClass("journal-day-editing");
 		this.bodyEl.appendChild(built.container);
 		this.el.toggleClass("journal-day-blank", noteBody(content).trim().length === 0);
+		this.applyFindState();
+	}
+
+	private applyFindState(): void {
+		const state = this.findState;
+		if (!state || !state.query) {
+			this.editor?.clearFindMatches();
+			this.clearPreviewFindMarks();
+			return;
+		}
+		if (this.editor) {
+			this.clearPreviewFindMarks();
+			this.editor.setFindMatches(state.ranges, state.selected);
+			return;
+		}
+		this.highlightPreview(state.query, state.caseSensitive);
+	}
+
+	/** Highlights rendered preview text without changing Markdown structure. */
+	private highlightPreview(query: string, caseSensitive: boolean): void {
+		this.clearPreviewFindMarks();
+		const preview = this.bodyEl.querySelector<HTMLElement>(".journal-day-preview");
+		if (!preview || !query) return;
+		const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT);
+		const nodes: Text[] = [];
+		let node = walker.nextNode();
+		while (node) {
+			if (node.nodeType === Node.TEXT_NODE && node.nodeValue) nodes.push(node as Text);
+			node = walker.nextNode();
+		}
+		for (const textNode of nodes) {
+			const ranges = findLiteralRanges(textNode.data, query, caseSensitive);
+			if (!ranges.length || !textNode.parentNode) continue;
+			const fragment = createFragment();
+			let cursor = 0;
+			for (const range of ranges) {
+				if (range.from > cursor) fragment.appendText(textNode.data.slice(cursor, range.from));
+				fragment.createEl("mark", {
+					cls: "journal-find-match",
+					text: textNode.data.slice(range.from, range.to),
+				});
+				cursor = range.to;
+			}
+			if (cursor < textNode.data.length) fragment.appendText(textNode.data.slice(cursor));
+			textNode.replaceWith(fragment);
+		}
+	}
+
+	private clearPreviewFindMarks(): void {
+		const parents = new Set<Node>();
+		for (const mark of Array.from(this.bodyEl.querySelectorAll("mark.journal-find-match"))) {
+			if (!mark.closest(".journal-day-preview")) continue;
+			const parent = mark.parentNode;
+			if (parent) parents.add(parent);
+			mark.replaceWith(document.createTextNode(mark.textContent ?? ""));
+		}
+		for (const parent of parents) parent.normalize();
 	}
 
 	private async renderPreview(content: string): Promise<void> {
@@ -426,6 +554,7 @@ export class DaySection {
 						this.releaseHeight();
 						this.updateBlankState();
 						this.scheduleSave();
+						this.host.onDayContentChanged(this);
 					},
 					onFocus: () => {
 						this.focused = true;
@@ -438,6 +567,7 @@ export class DaySection {
 						void this.offerTemplate();
 					},
 					onBlur: () => this.onEditorBlur(),
+					onFind: () => this.host.showFind(),
 				},
 				this.host.plugin.settings.richEditor,
 			);
@@ -451,6 +581,7 @@ export class DaySection {
 			return;
 		}
 		this.updateBlankState();
+		this.applyFindState();
 	}
 
 	/**
@@ -522,6 +653,7 @@ export class DaySection {
 	applyExternalContent(content: string): void {
 		if (!this.editor) {
 			this.lastKnownContent = content;
+			this.host.onDayContentChanged(this);
 			return;
 		}
 		const body = noteBody(content);
@@ -538,6 +670,7 @@ export class DaySection {
 		// holds; the editor's own height is the honest one now.
 		this.releaseHeight();
 		this.updateBlankState();
+		this.host.onDayContentChanged(this);
 	}
 
 	/** Brings the day up to date with the note's current content on disk. */
@@ -551,6 +684,7 @@ export class DaySection {
 		if (content === this.lastKnownContent && this.previewComponent) return;
 		this.lastKnownContent = content;
 		await this.renderPreview(content);
+		this.host.onDayContentChanged(this);
 	}
 
 	/* ---------------------------------------------------------------- saving */
@@ -638,6 +772,7 @@ export class DaySection {
 		window.clearTimeout(this.saveTimer);
 		// Anything unsaved goes to the queue, which outlives this object.
 		this.capture();
+		this.clearFindState();
 		this.editor?.destroy();
 		this.editor = null;
 		this.previewComponent?.unload();

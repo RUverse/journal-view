@@ -7,6 +7,8 @@ import { DayWalker, MAX_OFFSET } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
 import { distanceFromViewport } from "./scroll";
 import { JournalToolbar } from "./toolbar";
+import { JournalFind, JournalFindHost } from "./find";
+import type { FindRange } from "./findText";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 
@@ -46,12 +48,13 @@ const SETTLE_DELAY = 180;
  * in the wrong place. Whatever height still drifts in afterwards is cancelled
  * out by `ScrollAnchor`.
  */
-export class JournalView extends ItemView implements DayHost, AnchorHost, EditorWindowHost {
+export class JournalView extends ItemView implements DayHost, AnchorHost, EditorWindowHost, JournalFindHost {
 	scrollEl!: HTMLElement;
 	daysEl!: HTMLElement;
 	sections: DaySection[] = [];
 
 	private toolbar?: JournalToolbar;
+	private find?: JournalFind;
 	/** The open date picker, which has to go when the view does. */
 	private picker: DatePickerModal | null = null;
 	private readonly anchoring = new ScrollAnchor(this);
@@ -125,6 +128,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			onGoToToday: () => this.goToToday(true),
 		});
 		this.syncFilterButton();
+		this.find = new JournalFind(this.contentEl, this);
 
 		this.scrollEl = this.contentEl.createDiv({ cls: "journal-scroll" });
 
@@ -134,6 +138,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerDomEvent(this.scrollEl, "pointercancel", () => (this.pointerHeld = false), { passive: true });
 		// A drag that ends outside the pane never delivers its pointerup here.
 		this.registerDomEvent(window, "pointerup", () => (this.pointerHeld = false), { passive: true });
+		this.registerDomEvent(this.containerEl, "keydown", (event) => this.onKeydown(event), { capture: true });
 		this.registerVaultEvents();
 
 		await this.build(undefined, true);
@@ -143,6 +148,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// The picker holds this view in its callback, so a leaf that closes
 		// while it is open would leave it able to navigate a dead journal.
 		this.picker?.close();
+		this.find?.destroy();
+		this.find = undefined;
 		await this.flushAll();
 		this.teardown();
 	}
@@ -245,6 +252,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.centerOn(this.sectionAt(origin), "instant");
 		} // else: the pane is hidden; the first real resize centres it.
 		this.updateHeaderLabel();
+		this.find?.sectionsChanged();
 
 		if (
 			focusToday &&
@@ -323,6 +331,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		else this.sections.push(...sections);
 		// A day can land inside the editor window on a tall pane.
 		this.editors.schedule();
+		if (this.ready) this.find?.sectionsChanged();
 	}
 
 	/** True while the viewport is within loading distance of `direction`'s end. */
@@ -434,6 +443,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.anchoring.pin();
 		}
 		this.exhausted[end] = false;
+		this.find?.sectionsChanged();
 	}
 
 	private forget(section: DaySection): void {
@@ -563,6 +573,64 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			if (this.needsMore("past")) void this.extend("past");
 			if (this.needsMore("future")) void this.extend("future");
 		});
+	}
+
+	private onKeydown(event: KeyboardEvent): void {
+		if (
+			event.key.toLowerCase() !== "f" ||
+			(!event.metaKey && !event.ctrlKey) ||
+			event.altKey ||
+			event.shiftKey
+		) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		this.showFind();
+	}
+
+	showFind(): void {
+		this.find?.show();
+	}
+
+	setFindMode(open: boolean): void {
+		this.toolbar?.setVisible(!open);
+	}
+
+	isFindReady(): boolean {
+		return this.ready;
+	}
+
+	findAnchorSection(): DaySection | null {
+		const focused = this.sections.find((section) => section.hasFocus);
+		if (focused) return focused;
+		if (!this.ready || !this.scrollEl || this.scrollEl.clientHeight === 0) return this.anchoring.section;
+		return this.anchoring.sectionNear(this.scrollEl.scrollTop) ?? this.anchoring.section;
+	}
+
+	revealFindMatch(section: DaySection, range: FindRange): void {
+		if (!section.el.isConnected) return;
+		this.centerOn(section, "instant");
+		const mounted = this.editors.mountForFind(section);
+		const reveal = () => {
+			if (!section.el.isConnected) return;
+			section.revealFindRange(range);
+			this.editors.declareScroll();
+			this.anchoring.pin();
+		};
+		if (!mounted) {
+			reveal();
+			window.requestAnimationFrame(reveal);
+			return;
+		}
+		// Let the editor mount guard finish before the intentional match reveal;
+		// otherwise a deep result in a long preview resembles the mount jump that
+		// the guard is designed to undo.
+		window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
+	}
+
+	async loadFindDate(date: Moment): Promise<void> {
+		await this.rebuild(date, false);
 	}
 
 	private centerTarget(section: DaySection): number {
@@ -820,6 +888,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (previousPath) this.byPath.delete(previousPath);
 		this.byPath.set(day.path, day);
 		if (day.file) this.byPath.set(day.file.path, day);
+	}
+
+	onDayContentChanged(_day: DaySection): void {
+		this.find?.sectionsChanged();
 	}
 
 	private revalidatePaths(): void {

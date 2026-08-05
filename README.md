@@ -17,6 +17,8 @@ shown faded; the moment you type in one, the file is created.
 - **Go to any date.** The calendar button opens one continuous column of months — a week per row, a
   dot under every day that has a note — scrolling as far back or forward as you like. Click a day and
   the journal moves there.
+- **Find across the journal.** Press `Cmd+F` on macOS or `Ctrl+F` elsewhere to search every loaded
+  day. Moving past the loaded results finds and opens matching daily notes further away.
 - **Everything you can see is editable in place.** Every day at or near the viewport is already a
   live editor, so clicking into any day just moves the cursor — nothing switches mode or reflows
   under the click.

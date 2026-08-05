@@ -66,6 +66,15 @@ export class EditorWindow {
 		if (this.guardExpected !== null) this.guardExpected = this.host.scrollEl.scrollTop;
 	}
 
+	/** Mounts a find target under the same scroll guard used by window updates. */
+	mountForFind(section: DaySection): boolean {
+		if (section.isEditing) return false;
+		const before = this.host.scrollEl.scrollTop;
+		section.mountEditor();
+		this.guardMountScroll(before);
+		return true;
+	}
+
 	/**
 	 * Brings every day's mode in line with where it sits: a live editor at and
 	 * around the viewport, a static preview further out.

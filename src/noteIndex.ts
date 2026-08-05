@@ -110,6 +110,23 @@ export class DailyNoteIndex {
 		return low > 0 ? list[low - 1] : null;
 	}
 
+	/**
+	 * Every indexed day after `key` in `direction`, wrapping once at the end.
+	 * The starting key itself is omitted. Find uses this to scan outward without
+	 * materialising empty calendar days.
+	 */
+	keysFrom(key: string, direction: -1 | 1): string[] {
+		// Daily-note keys are YYYY-MM-DD, so lexical and chronological order agree.
+		const list = this.list();
+		if (direction > 0) {
+			return [...list.filter((candidate) => candidate > key), ...list.filter((candidate) => candidate < key)];
+		}
+		return [
+			...list.filter((candidate) => candidate < key).reverse(),
+			...list.filter((candidate) => candidate > key).reverse(),
+		];
+	}
+
 	private list(): string[] {
 		if (this.sortedDirty) {
 			this.sorted = Array.from(this.keys).sort();

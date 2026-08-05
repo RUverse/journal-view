@@ -1,4 +1,9 @@
 import { App, TFile } from "obsidian";
+import { StateEffect, StateField } from "@codemirror/state";
+import type { EditorState, TransactionSpec } from "@codemirror/state";
+import { Decoration, EditorView } from "@codemirror/view";
+import type { DecorationSet } from "@codemirror/view";
+import type { FindRange } from "./findText";
 
 export interface JournalEditorOptions {
 	app: App;
@@ -10,6 +15,7 @@ export interface JournalEditorOptions {
 	onChange: () => void;
 	onFocus: () => void;
 	onBlur: () => void;
+	onFind: () => void;
 }
 
 export interface JournalEditor {
@@ -25,6 +31,11 @@ export interface JournalEditor {
 	placeCursorAtEnd?(): void;
 	/** True when this is Obsidian's own editor rather than the plain fallback. */
 	rich: boolean;
+	/** Draws every loaded match and distinguishes the selected range. */
+	setFindMatches(ranges: FindRange[], selected: FindRange | null): void;
+	clearFindMatches(): void;
+	/** Reveals a range without taking focus from the find input. */
+	revealRange(range: FindRange): void;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -33,10 +44,24 @@ export interface JournalEditor {
 
 interface InternalCodeMirror {
 	posAtCoords?(coords: { x: number; y: number }, precise: boolean): number | null;
-	dispatch?(spec: { selection: { anchor: number } }): void;
+	dispatch?(spec: TransactionSpec): void;
+	state?: EditorState;
 	/** CodeMirror's pending "bring the cursor into view" request, if any. */
 	viewState?: { scrollTarget?: unknown };
 }
+
+const setFindDecorations = StateEffect.define<DecorationSet>();
+const findDecorations = StateField.define<DecorationSet>({
+	create: () => Decoration.none,
+	update(value, transaction) {
+		let next = value.map(transaction.changes);
+		for (const effect of transaction.effects) {
+			if (effect.is(setFindDecorations)) next = effect.value;
+		}
+		return next;
+	},
+	provide: (field) => EditorView.decorations.from(field),
+});
 
 interface InternalEditorApi {
 	cm?: InternalCodeMirror;
@@ -63,7 +88,7 @@ interface InternalEditorOwner {
 	getSelection(): string;
 	onMarkdownScroll(): undefined;
 	onMarkdownFold(): undefined;
-	showSearch(): undefined;
+	showSearch(): void;
 	toggleMode(): undefined;
 	editor?: InternalEditorApi;
 }
@@ -127,7 +152,7 @@ class RichEditor implements JournalEditor {
 			getSelection: () => this.instance?.editor?.getSelection?.() ?? "",
 			onMarkdownScroll: () => undefined,
 			onMarkdownFold: () => undefined,
-			showSearch: () => undefined,
+			showSearch: () => this.options.onFind(),
 			toggleMode: () => undefined,
 		};
 
@@ -241,6 +266,55 @@ class RichEditor implements JournalEditor {
 		}
 	}
 
+	setFindMatches(ranges: FindRange[], selected: FindRange | null): void {
+		try {
+			const cm = this.instance?.editor?.cm;
+			const state = cm?.state;
+			if (!cm?.dispatch || !state) return;
+			if (!state.field(findDecorations, false)) {
+				cm.dispatch({ effects: StateEffect.appendConfig.of(findDecorations) });
+			}
+			const length = cm.state?.doc.length ?? this.getValue().length;
+			const marks = ranges
+				.filter((range) => range.from < range.to && range.from < length)
+				.map((range) => {
+					const active = selected && range.from === selected.from && range.to === selected.to;
+					return Decoration.mark({
+						class: active ? "journal-find-match journal-find-match-selected" : "journal-find-match",
+					}).range(range.from, Math.min(range.to, length));
+				});
+			cm.dispatch({ effects: setFindDecorations.of(Decoration.set(marks, true)) });
+		} catch (error) {
+			console.warn("Journal View: could not highlight find results", error);
+		}
+	}
+
+	clearFindMatches(): void {
+		try {
+			const cm = this.instance?.editor?.cm;
+			if (cm?.state?.field(findDecorations, false)) {
+				cm.dispatch?.({ effects: setFindDecorations.of(Decoration.none) });
+			}
+		} catch {
+			/* search highlighting is optional; the editor remains usable */
+		}
+	}
+
+	revealRange(range: FindRange): void {
+		try {
+			const cm = this.instance?.editor?.cm;
+			const length = cm?.state?.doc.length ?? this.getValue().length;
+			const from = Math.max(0, Math.min(range.from, length));
+			const to = Math.max(from, Math.min(range.to, length));
+			cm?.dispatch?.({
+				selection: { anchor: from, head: to },
+				effects: EditorView.scrollIntoView(from, { y: "center" }),
+			});
+		} catch (error) {
+			console.warn("Journal View: could not reveal find result", error);
+		}
+	}
+
 	hasFocus(): boolean {
 		const active = this.options.container.ownerDocument.activeElement;
 		return !!active && this.options.container.contains(active);
@@ -272,6 +346,7 @@ class RichEditor implements JournalEditor {
 class PlainEditor implements JournalEditor {
 	readonly rich = false;
 	private textarea: HTMLTextAreaElement;
+	private findLayer: HTMLElement | null = null;
 
 	constructor(private options: JournalEditorOptions) {
 		this.textarea = options.container.createEl("textarea", {
@@ -309,6 +384,51 @@ class PlainEditor implements JournalEditor {
 		this.textarea.setSelectionRange(end, end);
 	}
 
+	setFindMatches(ranges: FindRange[], selected: FindRange | null): void {
+		this.clearFindMatches();
+		if (!ranges.length) return;
+		this.textarea.addClass("journal-plain-editor-find-active");
+		this.findLayer = this.options.container.createDiv({
+			cls: "journal-plain-find-layer",
+			attr: { "aria-hidden": "true" },
+		});
+		const value = this.textarea.value;
+		let cursor = 0;
+		for (const range of ranges) {
+			const from = Math.max(cursor, Math.min(range.from, value.length));
+			const to = Math.max(from, Math.min(range.to, value.length));
+			if (from > cursor) this.findLayer.appendText(value.slice(cursor, from));
+			const mark = this.findLayer.createEl("mark", {
+				cls:
+					selected && selected.from === range.from && selected.to === range.to
+						? "journal-find-match journal-find-match-selected"
+						: "journal-find-match",
+				text: value.slice(from, to),
+			});
+			mark.dataset.from = String(range.from);
+			cursor = to;
+		}
+		if (cursor < value.length) this.findLayer.appendText(value.slice(cursor));
+		// Preserve the final empty line in the mirror's layout.
+		if (value.endsWith("\n")) this.findLayer.appendText("\u200b");
+	}
+
+	clearFindMatches(): void {
+		this.findLayer?.remove();
+		this.findLayer = null;
+		this.textarea.removeClass("journal-plain-editor-find-active");
+	}
+
+	revealRange(range: FindRange): void {
+		const from = Math.max(0, Math.min(range.from, this.textarea.value.length));
+		const to = Math.max(from, Math.min(range.to, this.textarea.value.length));
+		this.textarea.setSelectionRange(from, to);
+		const selected = this.findLayer?.querySelector<HTMLElement>(
+			`.journal-find-match-selected[data-from="${range.from}"]`,
+		);
+		selected?.scrollIntoView({ block: "center" });
+	}
+
 	setFile(): void {
 		/* nothing to do */
 	}
@@ -322,6 +442,7 @@ class PlainEditor implements JournalEditor {
 	}
 
 	destroy(): void {
+		this.clearFindMatches();
 		this.textarea.remove();
 		this.options.container.empty();
 	}
