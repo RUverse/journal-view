@@ -109,7 +109,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	getIcon(): string {
-		return "calendar-days";
+		return "notebook";
 	}
 
 	/* ----------------------------------------------------------- lifecycle */

@@ -48,7 +48,7 @@ export default class JournalViewPlugin extends Plugin {
 
 		this.registerView(VIEW_TYPE_JOURNAL, (leaf) => new JournalView(leaf, this));
 
-		this.addRibbonIcon("calendar-days", "Open journal", () => void this.activateView());
+		this.addRibbonIcon("notebook", "Open journal", () => void this.activateView());
 
 		this.addCommand({
 			id: "open",
