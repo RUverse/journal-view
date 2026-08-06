@@ -1,8 +1,7 @@
 # Journal View contributor guide
 
 Journal View is an Obsidian plugin that presents daily notes as one continuous,
-editable timeline. See [README.md](README.md) for behavior and installation, and
-[ROADMAP.md](ROADMAP.md) for planned work.
+editable timeline. See [README.md](README.md) for behavior and installation.
 
 ## Development
 
@@ -13,6 +12,15 @@ editable timeline. See [README.md](README.md) for behavior and installation, and
   writes, renames, and concurrent file creation defensively.
 - Obsidian's embedded Markdown editor is an internal API. Keep access isolated
   in `src/editor.ts`, guard failures, and retain the plain-text fallback.
+
+## Change workflow
+
+- Develop each new feature or fix on its own branch. Keep unrelated changes on
+  separate branches so each change can be reviewed and reverted independently.
+- Open a pull request from that branch into `main`; do not commit features or
+  fixes directly to `main`.
+- Keep pull requests focused, describe the user-visible effect, and include the
+  verification that was actually performed.
 
 ## Testing
 
@@ -57,7 +65,9 @@ host interface it implements:
 - `src/editorWindow.ts`: picks which days are live editors, and guards the
   scroll position while one is mounted
 - `src/dayWalk.ts`: day offsets, dates and index keys, including hidden days
-- `src/toolbar.ts`: the toolbar strip; `src/scroll.ts`: pure scroll geometry
+- `src/toolbar.ts`: the toolbar strip
+
+Pure scroll geometry lives separately in `src/scroll.ts`.
 
 `src/datePicker.ts` is the toolbar's calendar: a scrolling column of months that
 hangs off the view rather than being part of it, and moves the journal by date.
