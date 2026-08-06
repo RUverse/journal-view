@@ -74,12 +74,6 @@ export class JournalFind {
 
 		this.input.addEventListener("input", () => this.scheduleRefresh(true));
 		this.input.addEventListener("keydown", (event) => this.onInputKeydown(event));
-		this.el.addEventListener("keydown", (event) => {
-			if (event.key !== "Escape") return;
-			event.preventDefault();
-			event.stopPropagation();
-			this.close();
-		});
 		this.updateButtons();
 	}
 
@@ -119,6 +113,14 @@ export class JournalFind {
 
 	isOpen(): boolean {
 		return this.open;
+	}
+
+	/** Handles Escape early enough to outrank Obsidian's workspace keymap. */
+	handleEscape(event: KeyboardEvent): boolean {
+		const target = event.target as Node | null;
+		if (!this.open || !target || !this.el.contains(target)) return false;
+		this.close();
+		return true;
 	}
 
 	focusInput(select = false): void {

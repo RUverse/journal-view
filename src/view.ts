@@ -1,4 +1,4 @@
-import { ItemView, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { ItemView, Scope, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { AnchorHost, ScrollAnchor } from "./anchor";
 import { DatePickerModal } from "./datePicker";
@@ -105,6 +105,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		readonly plugin: JournalViewPlugin,
 	) {
 		super(leaf);
+		// Obsidian's workspace scope handles Escape before the find bar's DOM
+		// listener can. Claim it only while focus is in journal-wide find, leaving
+		// embedded-editor Escape handling (including Vim mode) untouched.
+		this.scope = new Scope(this.app.scope);
+		this.scope.register([], "Escape", (event) => {
+			if (!this.find?.handleEscape(event)) return;
+			return false;
+		});
 		this.initialDate = plugin.consumeInitialDate(leaf);
 		// Opening a note (from a day header, or a link inside a day) must not
 		// replace the journal itself.
