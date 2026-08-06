@@ -11,6 +11,12 @@ import type { FindRange } from "./findText";
 export interface DayHost {
 	app: App;
 	plugin: JournalViewPlugin;
+	/** Updates the file/navigation state exposed by the journal pane. */
+	onDayFocusChanged(): void;
+	/** Opens a link without allowing it to replace the journal pane. */
+	openDayLink(linktext: string, sourcePath: string, newTab: boolean): Promise<void>;
+	/** Opens a note without allowing it to replace the journal pane. */
+	openDayFile(file: TFile, newTab: boolean): Promise<void>;
 	/** Called when a day's underlying file appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
 	/** True for a day that stays in the journal even with empty days hidden. */
@@ -157,7 +163,7 @@ export class DaySection {
 			const href = link.getAttribute("data-href") ?? link.getAttribute("href");
 			if (!href) return;
 			if (link.classList.contains("internal-link")) {
-				void this.host.app.workspace.openLinkText(href, this.path, event.ctrlKey || event.metaKey);
+				void this.host.openDayLink(href, this.path, event.ctrlKey || event.metaKey);
 			} else if (/^https?:/.test(href)) {
 				window.open(href);
 			}
@@ -601,6 +607,7 @@ export class DaySection {
 					},
 					onFocus: () => {
 						this.focused = true;
+						this.host.onDayFocusChanged();
 						// Measurement should normally have released the guard before
 						// the reader arrives; focus is the defensive fallback.
 						this.releaseHeight();
@@ -672,6 +679,7 @@ export class DaySection {
 	/** Blurring an editor is not leaving the day, but it is a good time to save. */
 	private onEditorBlur(): void {
 		this.focused = false;
+		this.host.onDayFocusChanged();
 		this.el.removeClass("journal-day-focused");
 		// Leaving a day the reader only looked at costs them nothing.
 		if (this.withdrawTemplate()) return;
@@ -807,7 +815,7 @@ export class DaySection {
 				return;
 			}
 		}
-		await this.host.app.workspace.getLeaf(newTab ? "tab" : false).openFile(file);
+		await this.host.openDayFile(file, newTab);
 	}
 
 	destroy(): void {

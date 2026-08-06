@@ -1,4 +1,4 @@
-import { ItemView, Scope, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { FileView, Scope, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { AnchorHost, ScrollAnchor } from "./anchor";
 import { DatePickerModal } from "./datePicker";
@@ -50,7 +50,7 @@ type TimelineEnd = "start" | "end";
  * in the wrong place. Whatever height still drifts in afterwards is cancelled
  * out by `ScrollAnchor`.
  */
-export class JournalView extends ItemView implements DayHost, AnchorHost, EditorWindowHost, JournalFindHost {
+export class JournalView extends FileView implements DayHost, AnchorHost, EditorWindowHost, JournalFindHost {
 	scrollEl!: HTMLElement;
 	daysEl!: HTMLElement;
 	sections: DaySection[] = [];
@@ -105,6 +105,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		readonly plugin: JournalViewPlugin,
 	) {
 		super(leaf);
+		// The journal can open before today's note exists, but exposing the note
+		// through FileView lets Obsidian's file-aware commands act on it.
+		this.allowNoFile = true;
 		// Obsidian's workspace scope handles Escape before the find bar's DOM
 		// listener can. Claim it only while focus is in journal-wide find, leaving
 		// embedded-editor Escape handling (including Vim mode) untouched.
@@ -114,9 +117,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			return false;
 		});
 		this.initialDate = plugin.consumeInitialDate(leaf);
-		// Opening a note (from a day header, or a link inside a day) must not
-		// replace the journal itself.
-		this.navigation = false;
+		// This makes the origin note available to Obsidian's file-aware commands.
+		// A focused embedded editor publishes its own file instead, and temporarily
+		// opts the journal out so opening a link cannot replace the timeline.
+		this.navigation = true;
 	}
 
 	getViewType(): string {
@@ -276,6 +280,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.centerOn(this.sectionAt(origin), "instant");
 		} // else: the pane is hidden; the first real resize centres it.
 		this.updateHeaderLabel();
+		this.file = this.sectionAt(this.origin)?.file ?? null;
 		this.find?.sectionsChanged();
 
 		if (
@@ -660,6 +665,29 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.find?.show();
 	}
 
+	onDayFocusChanged(): void {
+		this.navigation = !this.sections.some((section) => section.hasFocus);
+	}
+
+	async openDayLink(linktext: string, sourcePath: string, newTab: boolean): Promise<void> {
+		await this.withNavigationSuppressed(() => this.app.workspace.openLinkText(linktext, sourcePath, newTab));
+	}
+
+	async openDayFile(file: TFile, newTab: boolean): Promise<void> {
+		await this.withNavigationSuppressed(() =>
+			this.app.workspace.getLeaf(newTab ? "tab" : false).openFile(file),
+		);
+	}
+
+	private async withNavigationSuppressed(action: () => Promise<void>): Promise<void> {
+		this.navigation = false;
+		try {
+			await action();
+		} finally {
+			this.onDayFocusChanged();
+		}
+	}
+
 	setFindMode(open: boolean): void {
 		this.toolbar?.setVisible(!open);
 	}
@@ -989,6 +1017,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (previousPath) this.byPath.delete(previousPath);
 		this.byPath.set(day.path, day);
 		if (day.file) this.byPath.set(day.file.path, day);
+		if (day.offset === this.origin) this.file = day.file;
 		this.syncMonthSeparators();
 	}
 
