@@ -31,6 +31,8 @@ const FLICK_IDLE = 120;
 /** Quiet time (ms) after which a scroll counts as finished. */
 const SETTLE_DELAY = 180;
 
+type TimelineEnd = "start" | "end";
+
 /**
  * The journal is a window of consecutive days. Every day at or near the
  * viewport is a live editor: the reader can click straight into any text they
@@ -83,8 +85,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private lastScrollAt = 0;
 	private scrollStep = 0;
 	private settleTimer = 0;
-	private loading = { past: false, future: false };
-	private exhausted = { past: false, future: false };
+	private loading: Record<TimelineEnd, boolean> = { start: false, end: false };
+	private exhausted: Record<TimelineEnd, boolean> = { start: false, end: false };
 	/** Bumped on teardown so in-flight loads know to abandon their work. */
 	private epoch = 0;
 	/** False until the view has centred on today in a laid-out pane. */
@@ -209,8 +211,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			() => this.plugin.settings.hideEmptyDays,
 			this.visited ?? undefined,
 		);
-		this.exhausted = { past: false, future: false };
-		this.loading = { past: false, future: false };
+		this.exhausted = { start: false, end: false };
+		this.loading = { start: false, end: false };
 		const epoch = ++this.epoch;
 
 		this.daysEl = this.scrollEl.createDiv({ cls: "journal-days" });
@@ -223,29 +225,30 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 		// The chosen day, plus a few days either side.
 		const origin = (this.origin = this.walker.origin(around));
-		const past: number[] = [];
+		const step = this.sortStep();
+		const before: number[] = [];
 		let edge = origin;
 		for (let i = 0; i < INITIAL_RADIUS; i++) {
-			const next = this.walker.next(edge, -1);
+			const next = this.walker.next(edge, (-step) as -1 | 1);
 			if (next === null) {
-				this.exhausted.past = true;
+				this.exhausted.start = true;
 				break;
 			}
-			past.push(next);
+			before.push(next);
 			edge = next;
 		}
-		const future: number[] = [];
+		const after: number[] = [];
 		edge = origin;
 		for (let i = 0; i < INITIAL_RADIUS; i++) {
-			const next = this.walker.next(edge, 1);
+			const next = this.walker.next(edge, step);
 			if (next === null) {
-				this.exhausted.future = true;
+				this.exhausted.end = true;
 				break;
 			}
-			future.push(next);
+			after.push(next);
 			edge = next;
 		}
-		const offsets = [...past.reverse(), origin, ...future];
+		const offsets = [...before.reverse(), origin, ...after];
 
 		const sections = offsets.map((offset) => this.createSection(offset));
 		await Promise.all(sections.map((section) => section.prepare()));
@@ -313,6 +316,16 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		return new DaySection(this, this.walker.dateFor(offset), offset);
 	}
 
+	/** Date offset step made by moving down through the rendered timeline. */
+	sortStep(): -1 | 1 {
+		return this.plugin.settings.daySortDirection === "descending" ? -1 : 1;
+	}
+
+	/** DOM-order comparison for two date offsets. */
+	private compareOffsets(left: number, right: number): number {
+		return (left - right) * this.sortStep();
+	}
+
 	/**
 	 * Carries each month heading on its first rendered day. Keeping the heading
 	 * inside a day means loading, trimming and scroll anchoring still have one
@@ -355,7 +368,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 * single task at the days' true heights - the browser cannot paint a
 	 * half-committed batch.
 	 */
-	private commit(sections: DaySection[], where: "start" | "end"): void {
+	private commit(sections: DaySection[], where: TimelineEnd): void {
 		const fragment = createFragment();
 		for (const section of sections) fragment.appendChild(section.el);
 		if (where === "start") this.daysEl.insertBefore(fragment, this.daysEl.firstChild);
@@ -373,10 +386,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (this.ready) this.find?.sectionsChanged();
 	}
 
-	/** True while the viewport is within loading distance of `direction`'s end. */
-	private needsMore(direction: "past" | "future"): boolean {
+	/** True while the viewport is within loading distance of a physical end. */
+	private needsMore(end: TimelineEnd): boolean {
 		const { scrollTop, scrollHeight, clientHeight } = this.scrollEl;
-		if (direction === "past") return scrollTop < LOAD_THRESHOLD;
+		if (end === "start") return scrollTop < LOAD_THRESHOLD;
 		return scrollHeight - scrollTop - clientHeight < LOAD_THRESHOLD;
 	}
 
@@ -387,19 +400,20 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 * inserting above the reader is offset by scrolling down the exact height
 	 * that appeared - in the same task, so nothing on screen moves.
 	 */
-	private async extend(direction: "past" | "future"): Promise<void> {
-		if (!this.ready || this.loading[direction] || this.exhausted[direction]) return;
+	private async extend(end: TimelineEnd): Promise<void> {
+		if (!this.ready || this.loading[end] || this.exhausted[end]) return;
 		if (!this.sections.length || this.scrollEl.clientHeight === 0) return;
-		this.loading[direction] = true;
+		this.loading[end] = true;
 		try {
-			const step = direction === "past" ? -1 : 1;
+			const sortStep = this.sortStep();
+			const step = (end === "start" ? -sortStep : sortStep) as -1 | 1;
 			// A generous cap in case something keeps the loop from converging.
-			for (let i = 0; i < 50 && this.needsMore(direction); i++) {
+			for (let i = 0; i < 50 && this.needsMore(end); i++) {
 				const edge =
-					direction === "past" ? this.sections[0].offset : this.sections[this.sections.length - 1].offset;
+					end === "start" ? this.sections[0].offset : this.sections[this.sections.length - 1].offset;
 				const next = this.walker.next(edge, step);
 				if (next === null) {
-					this.exhausted[direction] = true;
+					this.exhausted[end] = true;
 					return;
 				}
 
@@ -411,7 +425,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 					return;
 				}
 
-				if (direction === "past") {
+				if (end === "start") {
 					const referenceDay = this.sections[0];
 					const before = referenceDay.contentTop;
 					// The compensating write below happens anyway, so the
@@ -429,13 +443,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 				} else {
 					this.commit([section], "end");
 				}
-				this.trim(direction === "past" ? "future" : "past");
+				this.trim(end === "start" ? "end" : "start");
 
 				await this.nextFrame();
 				if (epoch !== this.epoch) return;
 			}
 		} finally {
-			this.loading[direction] = false;
+			this.loading[end] = false;
 		}
 	}
 
@@ -451,12 +465,12 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 * the save queue by `destroy`, and a trimmed end is no longer exhausted -
 	 * scrolling back simply reloads it.
 	 */
-	private trim(end: "past" | "future"): void {
+	private trim(end: TimelineEnd): void {
 		if (this.sections.length <= MAX_SECTIONS) return;
 		let budget = this.sections.length - TRIM_KEEP;
 		const victims: DaySection[] = [];
 
-		if (end === "future") {
+		if (end === "end") {
 			for (let i = this.sections.length - 1; i >= 0 && budget > 0; i--, budget--) {
 				const section = this.sections[i];
 				if (section.hasFocus || this.distanceFrom(section) < TRIM_DISTANCE) break;
@@ -615,8 +629,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			if (!this.scrollEl || !this.ready) return;
 			this.updateHeaderLabel();
 			this.editors.update();
-			if (this.needsMore("past")) void this.extend("past");
-			if (this.needsMore("future")) void this.extend("future");
+			if (this.needsMore("start")) void this.extend("start");
+			if (this.needsMore("end")) void this.extend("end");
 		});
 	}
 
@@ -923,17 +937,20 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private syncWithIndex(): void {
 		if (this.plugin.index.version === this.indexVersion) return;
 		this.indexVersion = this.plugin.index.version;
-		this.exhausted = { past: false, future: false };
+		this.exhausted = { start: false, end: false };
 	}
 
 	/** Materialises a day that falls inside the range already rendered. */
 	private ensureSectionFor(offset: number): DaySection | undefined {
 		if (!this.ready || !this.sections.length) return undefined;
-		if (offset < this.sections[0].offset || offset > this.sections[this.sections.length - 1].offset) {
+		if (
+			this.compareOffsets(offset, this.sections[0].offset) < 0 ||
+			this.compareOffsets(offset, this.sections[this.sections.length - 1].offset) > 0
+		) {
 			return undefined; // outside the window - the scroll loader will reach it
 		}
 
-		let at = this.sections.findIndex((section) => section.offset >= offset);
+		let at = this.sections.findIndex((section) => this.compareOffsets(section.offset, offset) >= 0);
 		if (at < 0) at = this.sections.length;
 		if (this.sections[at]?.offset === offset) return this.sections[at];
 

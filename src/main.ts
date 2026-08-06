@@ -11,6 +11,7 @@ import {
 	MONTH_SEPARATOR_DAY_FORMAT,
 	clampSaveDelay,
 } from "./settings";
+import type { DaySortDirection } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 
 export default class JournalViewPlugin extends Plugin {
@@ -201,6 +202,7 @@ export default class JournalViewPlugin extends Plugin {
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
+			daySortDirection: daySortDirectionSetting(saved.daySortDirection),
 		};
 	}
 
@@ -235,4 +237,8 @@ function saveDelaySetting(value: unknown): number {
 
 function booleanSetting(value: unknown, fallback: boolean): boolean {
 	return typeof value === "boolean" ? value : fallback;
+}
+
+function daySortDirectionSetting(value: unknown): DaySortDirection {
+	return value === "descending" ? "descending" : DEFAULT_SETTINGS.daySortDirection;
 }

@@ -8,6 +8,8 @@ const SAVE_DELAY_STEP = 100;
 export const MONTH_SEPARATOR_DAY_FORMAT = "dddd, D";
 export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
+export type DaySortDirection = "ascending" | "descending";
+
 export interface JournalViewSettings {
 	/** Overrides the daily-note date format. Empty = inherit from the vault. */
 	dateFormat: string;
@@ -27,6 +29,8 @@ export interface JournalViewSettings {
 	focusTodayOnOpen: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
+	/** Chronological direction in which days are laid out. */
+	daySortDirection: DaySortDirection;
 }
 
 export const DEFAULT_SETTINGS: JournalViewSettings = {
@@ -39,6 +43,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
+	daySortDirection: "ascending",
 };
 
 type SettingKey = keyof JournalViewSettings;
@@ -67,7 +72,20 @@ interface JournalSliderSetting extends JournalSettingBase {
 	control: { type: "slider"; key: "saveDelay"; min: number; max: number; step: number };
 }
 
-type JournalSetting = JournalInfoSetting | JournalTextSetting | JournalToggleSetting | JournalSliderSetting;
+interface JournalDropdownSetting extends JournalSettingBase {
+	control: {
+		type: "dropdown";
+		key: "daySortDirection";
+		options: Record<DaySortDirection, string>;
+	};
+}
+
+type JournalSetting =
+	| JournalInfoSetting
+	| JournalTextSetting
+	| JournalToggleSetting
+	| JournalSliderSetting
+	| JournalDropdownSetting;
 
 interface JournalSettingGroup {
 	type: "group";
@@ -127,6 +145,15 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				type: "group",
 				heading: "Display",
 				items: [
+					{
+						name: "Day order",
+						desc: "Choose which dates appear first in the journal.",
+						control: {
+							type: "dropdown",
+							key: "daySortDirection",
+							options: { ascending: "Oldest to newest", descending: "Newest to oldest" },
+						},
+					},
 					{
 						name: "Group days by month",
 						desc:
@@ -212,6 +239,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					changed = true;
 				}
 				break;
+			case "daySortDirection":
+				if (value === "ascending" || value === "descending") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
 			case "richEditor":
 			case "focusTodayOnOpen":
 			case "hideEmptyDays":
@@ -277,6 +310,14 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						.onChange((value) => this.setControlValue(control.key, value));
 					if (!requireApiVersion("1.13.0")) showLegacySliderTooltip(slider);
 				});
+				break;
+			case "dropdown":
+				setting.addDropdown((dropdown) =>
+					dropdown
+						.addOptions(control.options)
+						.setValue(this.plugin.settings[control.key])
+						.onChange((value) => this.setControlValue(control.key, value)),
+				);
 				break;
 		}
 	}

@@ -20,6 +20,7 @@ function applyIcon(el: HTMLElement, ...names: string[]): void {
 
 interface FindMatch extends FindRange {
 	section: DaySection;
+	sectionIndex: number;
 	key: string;
 }
 
@@ -27,6 +28,7 @@ export interface JournalFindHost {
 	readonly app: App;
 	readonly plugin: JournalViewPlugin;
 	readonly sections: DaySection[];
+	sortStep(): -1 | 1;
 	setFindMode(open: boolean): void;
 	findAnchorSection(): DaySection | null;
 	revealFindMatch(section: DaySection, range: FindRange): void;
@@ -148,10 +150,10 @@ export class JournalFind {
 		const previous = resetSelection ? null : this.selected;
 		this.matches = [];
 
-		for (const section of this.host.sections) {
+		for (const [sectionIndex, section] of this.host.sections.entries()) {
 			const ranges = findLiteralRanges(section.searchText(), query, this.caseSensitive);
 			section.setFindState(query, this.caseSensitive, ranges, null);
-			for (const range of ranges) this.matches.push({ section, key: section.key, ...range });
+			for (const range of ranges) this.matches.push({ section, sectionIndex, key: section.key, ...range });
 		}
 
 		let selected: FindMatch | null = null;
@@ -176,9 +178,10 @@ export class JournalFind {
 		if (!this.matches.length) return null;
 		const anchor = this.host.findAnchorSection();
 		if (!anchor) return this.matches[0];
+		const anchorIndex = this.host.sections.indexOf(anchor);
 		return (
 			this.matches.find((match) => match.section === anchor) ??
-			this.matches.find((match) => match.section.offset > anchor.offset) ??
+			this.matches.find((match) => match.sectionIndex > anchorIndex) ??
 			this.matches[0]
 		);
 	}
@@ -227,7 +230,8 @@ export class JournalFind {
 
 		const loadedKeys = new Set(this.host.sections.map((section) => section.key));
 		const edge = direction > 0 ? this.host.sections[this.host.sections.length - 1].key : this.host.sections[0].key;
-		const keys = this.host.plugin.index.keysFrom(edge, direction);
+		const dateDirection = (direction * this.host.sortStep()) as -1 | 1;
+		const keys = this.host.plugin.index.keysFrom(edge, dateDirection);
 		const today = createMoment().startOf("day");
 
 		try {
