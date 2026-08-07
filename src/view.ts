@@ -863,7 +863,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private updateHeaderLabel(): void {
 		if (!this.ready || !this.toolbar) return;
-		// The first day at the viewport top determines the sticky month. The
+		// The first day at the viewport top determines the sticky group label. The
 		// indexed lookup skips filtered days, falls back to the first day in top
 		// padding, and retains the last day in bottom padding.
 		const at = findAnchorIndex(
@@ -875,7 +875,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.scrollEl.scrollTop,
 		);
 		const section = at >= 0 ? this.sections[at] : this.anchoring.section;
-		this.toolbar.setLabel(section ? section.date.format("MMMM YYYY") : "Journal");
+		let label = "Journal";
+		if (section && this.plugin.settings.showMonthSeparators) label = section.date.format("MMMM YYYY");
+		else if (section && this.plugin.settings.groupDaysByYear) label = section.date.format("YYYY");
+		this.toolbar.setLabel(label);
 	}
 
 	/* -------------------------------------------------------- vault events */
