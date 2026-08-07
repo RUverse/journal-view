@@ -113,6 +113,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			if (!this.find?.handleEscape(event)) return;
 			return false;
 		});
+		// The active leaf keeps this scope even when focus is not inside a day.
+		// A DOM listener alone misses Mod+F when the journal pane itself is
+		// selected but no embedded editor owns the active element.
+		this.scope.register(["Mod"], "f", () => {
+			this.showFind();
+			return false;
+		});
 		this.initialDate = plugin.consumeInitialDate(leaf);
 		// Opening a note (from a day header, or a link inside a day) must not
 		// replace the journal itself.
