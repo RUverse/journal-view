@@ -318,8 +318,25 @@ button.journal-find-button.is-active {
 }
 
 .journal-day:hover .journal-day-actions,
-.journal-day-focused .journal-day-actions {
+.journal-day-focused .journal-day-actions,
+.journal-day-actions:focus-within {
 	opacity: 1;
+}
+
+/* With a hover-capable pointer, keep the destructive action tied to the header
+   rather than the much larger day hover target. Focus always reveals it. */
+@media (hover: hover) {
+	button.journal-day-delete {
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 120ms ease-in-out;
+	}
+
+	.journal-day-header:hover button.journal-day-delete,
+	button.journal-day-delete:focus {
+		opacity: 1;
+		pointer-events: auto;
+	}
 }
 
 button.journal-day-create {
