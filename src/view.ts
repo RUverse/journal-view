@@ -348,7 +348,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 */
 	private syncDateSeparators(): void {
 		const showMonths = this.plugin.settings.showMonthSeparators;
-		const showYears = this.plugin.settings.showYearSeparators;
+		const showYears = this.plugin.settings.groupDaysByYear;
 		let previousYear: string | null = null;
 		let previousMonth: string | null = null;
 		for (const section of this.sections) {

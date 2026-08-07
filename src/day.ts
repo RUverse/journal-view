@@ -3,7 +3,6 @@ import type JournalViewPlugin from "./main";
 import { JournalEditor, createJournalEditor } from "./editor";
 import type { Moment } from "./moment";
 import { SaveQueue } from "./saveQueue";
-import { MONTH_SEPARATOR_DAY_FORMAT } from "./settings";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 
@@ -287,10 +286,7 @@ export class DaySection {
 	}
 
 	private formatHeader(): string {
-		const format = this.host.plugin.settings.showMonthSeparators
-			? MONTH_SEPARATOR_DAY_FORMAT
-			: this.host.plugin.settings.headerFormat;
-		return this.date.format(format);
+		return this.date.format(this.host.plugin.settings.headerFormat);
 	}
 
 	private relativeLabel(): string | null {
