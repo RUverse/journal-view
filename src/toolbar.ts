@@ -81,6 +81,9 @@ export class JournalToolbar {
 
 		this.filterButton = view.addAction("filter", "Filter days", () => actions.onToggleFilter());
 		this.filterButton.addClass("journal-toolbar-button");
+		// Filter describes what the journal shows, so keep it with the navigation
+		// controls rather than the date destinations on the right.
+		view.containerEl.querySelector(".view-header-left")?.appendChild(this.filterButton);
 		this.buttons.push(this.filterButton);
 	}
 
