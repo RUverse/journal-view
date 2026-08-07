@@ -94,6 +94,58 @@ interface InternalEditorOwner {
 	showSearch(): void;
 	toggleMode(): undefined;
 	editor?: InternalEditorApi;
+	editMode?: InternalEditorInstance;
+}
+
+interface ActiveEditorOwner {
+	file: TFile | null;
+}
+
+type WorkspaceEditorUpdate = "claim" | "release" | "file";
+
+function focusStayedInside(container: HTMLElement, event: FocusEvent): boolean {
+	const NodeCtor = container.ownerDocument.defaultView?.Node;
+	return !!NodeCtor && event.relatedTarget instanceof NodeCtor && container.contains(event.relatedTarget);
+}
+
+/**
+ * Obsidian's file-oriented side panes follow the `file-open` event, including
+ * when a native embedded editor (such as a Canvas card) receives focus. Merely
+ * assigning `activeEditor` is enough for editor commands and `getActiveFile`,
+ * but does not tell Outline, Backlinks, or Properties to follow it.
+ */
+function updateWorkspaceEditor(
+	app: App,
+	owner: ActiveEditorOwner,
+	update: WorkspaceEditorUpdate,
+	notifyRelease = false,
+): void {
+	try {
+		const workspace = app.workspace as unknown as {
+			activeEditor: unknown;
+			getActiveFile(): TFile | null;
+			trigger(name: string, ...data: unknown[]): void;
+		};
+		if (update === "claim") {
+			// The embedded editor itself may have assigned this owner before its
+			// focus event bubbles to us; it does not emit the file notification.
+			workspace.activeEditor = owner;
+			workspace.trigger("file-open", owner.file);
+		} else if (update === "release") {
+			const owned = workspace.activeEditor === owner;
+			if (owned) workspace.activeEditor = null;
+			else if (workspace.activeEditor !== null) return;
+			// A view owns many mounted editors. Only the one the workspace still
+			// considers current should clear file followers during bulk teardown.
+			if (notifyRelease && (owned || workspace.getActiveFile() === owner.file)) {
+				workspace.trigger("file-open", null);
+			}
+		} else if (update === "file" && workspace.activeEditor === owner) {
+			workspace.trigger("file-open", owner.file);
+		}
+	} catch (error) {
+		console.warn("Journal View: could not update the workspace editor", error);
+	}
 }
 
 type EditorCtor = new (app: App, container: HTMLElement, owner: InternalEditorOwner) => InternalEditorInstance;
@@ -139,8 +191,8 @@ class RichEditor implements JournalEditor {
 	readonly rich = true;
 	private instance: InternalEditorInstance | null;
 	private owner: InternalEditorOwner;
-	private focusIn: () => void;
-	private focusOut: () => void;
+	private focusIn: (event: FocusEvent) => void;
+	private focusOut: (event: FocusEvent) => void;
 	private readyFrame = 0;
 	private readyReported = false;
 	private destroyed = false;
@@ -170,6 +222,12 @@ class RichEditor implements JournalEditor {
 			configurable: true,
 			get: () => this.instance?.editor,
 		});
+		// File-following core panes treat an active embedded editor like Canvas's
+		// MarkdownEmbed and read its edit mode to decide how to build live state.
+		Object.defineProperty(this.owner, "editMode", {
+			configurable: true,
+			get: () => this.instance ?? undefined,
+		});
 
 		const instance = this.instance;
 		const original = instance.onUpdate;
@@ -182,12 +240,14 @@ class RichEditor implements JournalEditor {
 		this.dropScrollRequest();
 		this.reportInitialLayout();
 
-		this.focusIn = () => {
-			this.claimActiveEditor(true);
+		this.focusIn = (event) => {
+			if (focusStayedInside(options.container, event)) return;
+			updateWorkspaceEditor(this.options.app, this.owner, "claim");
 			this.options.onFocus();
 		};
-		this.focusOut = () => {
-			this.claimActiveEditor(false);
+		this.focusOut = (event) => {
+			if (focusStayedInside(options.container, event)) return;
+			updateWorkspaceEditor(this.options.app, this.owner, "release");
 			this.options.onBlur();
 		};
 		options.container.addEventListener("focusin", this.focusIn);
@@ -215,16 +275,6 @@ class RichEditor implements JournalEditor {
 		if (this.destroyed || this.readyReported) return;
 		this.readyReported = true;
 		this.options.onReady();
-	}
-
-	private claimActiveEditor(claim: boolean): void {
-		try {
-			const workspace = this.options.app.workspace as unknown as { activeEditor: unknown };
-			if (claim) workspace.activeEditor = this.owner;
-			else if (workspace.activeEditor === this.owner) workspace.activeEditor = null;
-		} catch (error) {
-			console.warn("Journal View: could not hand the editor to the workspace", error);
-		}
 	}
 
 	getValue(): string {
@@ -267,6 +317,7 @@ class RichEditor implements JournalEditor {
 	setFile(file: TFile | null): void {
 		this.options.file = file;
 		this.owner.file = file;
+		updateWorkspaceEditor(this.options.app, this.owner, "file");
 	}
 
 	focus(): void {
@@ -354,7 +405,6 @@ class RichEditor implements JournalEditor {
 		this.destroyed = true;
 		if (this.readyFrame) window.cancelAnimationFrame(this.readyFrame);
 		this.readyFrame = 0;
-		this.claimActiveEditor(false);
 		this.options.container.removeEventListener("focusin", this.focusIn);
 		this.options.container.removeEventListener("focusout", this.focusOut);
 		try {
@@ -367,6 +417,10 @@ class RichEditor implements JournalEditor {
 		} catch {
 			/* the editor may not be a Component in every build */
 		}
+		// A blur deliberately leaves file-following panes on the last edited day.
+		// Teardown runs after the internal editor has finished its own focus work,
+		// then clears the owner unless another editor claimed the workspace.
+		updateWorkspaceEditor(this.options.app, this.owner, "release", true);
 		this.instance = null;
 		this.options.container.empty();
 	}
