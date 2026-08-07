@@ -64,6 +64,7 @@ export class DaySection {
 	readonly el: HTMLElement;
 	readonly key: string;
 
+	private yearEl: HTMLElement;
 	private monthEl: HTMLElement;
 	private cardEl: HTMLElement;
 	private headerEl: HTMLElement;
@@ -110,9 +111,15 @@ export class DaySection {
 		this.file = host.plugin.daily.fileFor(date);
 
 		this.el = createDiv({ cls: "journal-day", attr: { "data-date": this.key } });
+		this.yearEl = this.el.createDiv({
+			cls: "journal-year-separator",
+			text: date.format("YYYY"),
+			attr: { role: "heading", "aria-level": "2" },
+		});
+		this.yearEl.hidden = true;
 		this.monthEl = this.el.createDiv({
 			cls: "journal-month-separator",
-			attr: { role: "heading", "aria-level": "2" },
+			attr: { role: "heading", "aria-level": "3" },
 		});
 		this.monthEl.createSpan({ cls: "journal-month-name", text: date.format("MMMM") });
 		this.monthEl.createSpan({ cls: "journal-month-year", text: date.format("YYYY") });
@@ -249,12 +256,12 @@ export class DaySection {
 		return this.el.offsetParent !== null;
 	}
 
-	/** Viewport position of stable day content, below any movable month heading. */
+	/** Viewport position of stable day content, below any movable date headings. */
 	get contentTop(): number {
 		return this.headerEl.getBoundingClientRect().top;
 	}
 
-	/** Card geometry excludes the optional month heading above the day. */
+	/** Card geometry excludes the optional year and month headings above the day. */
 	get cardTop(): number {
 		return this.el.offsetTop + this.cardEl.offsetTop;
 	}
@@ -271,6 +278,12 @@ export class DaySection {
 	/** Shows the month heading carried by the first rendered day in that month. */
 	setMonthSeparator(visible: boolean): void {
 		this.monthEl.hidden = !visible;
+	}
+
+	/** Shows the year heading when this day follows a rendered day in another year. */
+	setYearSeparator(visible: boolean): void {
+		this.yearEl.hidden = !visible;
+		this.el.toggleClass("journal-day-year-start", visible);
 	}
 
 	private formatHeader(): string {
