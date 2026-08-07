@@ -147,6 +147,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 		this.toolbar = new JournalToolbar(this, {
 			onToggleFilter: () => void this.toggleHideEmptyDays(),
+			onShowFind: () => this.showFind(),
 			onGoToDate: () => this.openDatePicker(),
 			onGoToToday: () => this.goToToday(true),
 		});

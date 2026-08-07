@@ -16,6 +16,7 @@ function applyIcon(el: HTMLElement, ...names: string[]): void {
 /** What the toolbar's controls ask the view to do. */
 export interface ToolbarActions {
 	onToggleFilter(): void;
+	onShowFind(): void;
 	onGoToDate(): void;
 	onGoToToday(): void;
 }
@@ -44,6 +45,14 @@ export class JournalToolbar {
 			});
 			this.filterButton.addEventListener("click", () => actions.onToggleFilter());
 			this.buttons.push(this.filterButton);
+
+			const findButton = buttons.createEl("button", {
+				cls: "clickable-icon journal-toolbar-button",
+			});
+			applyIcon(findButton, "search");
+			setTooltip(findButton, "Find in journal");
+			findButton.addEventListener("click", () => actions.onShowFind());
+			this.buttons.push(findButton);
 
 			const dateButton = buttons.createEl("button", {
 				cls: "clickable-icon journal-toolbar-button journal-toolbar-labeled-button",
@@ -78,6 +87,12 @@ export class JournalToolbar {
 		applyIcon(dateButton, "calendar-search", "calendar-days", "calendar");
 		setTooltip(dateButton, "Go to date");
 		this.buttons.push(dateButton);
+
+		const findButton = view.addAction("search", "Find in journal", () => actions.onShowFind());
+		findButton.addClass("journal-toolbar-button");
+		applyIcon(findButton, "search");
+		setTooltip(findButton, "Find in journal");
+		this.buttons.push(findButton);
 
 		this.filterButton = view.addAction("filter", "Filter days", () => actions.onToggleFilter());
 		this.filterButton.addClass("journal-toolbar-button");
