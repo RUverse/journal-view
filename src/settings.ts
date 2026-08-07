@@ -21,6 +21,8 @@ export interface JournalViewSettings {
 	headerFormat: string;
 	/** Show month/year once above a group rather than inside every day. */
 	showMonthSeparators: boolean;
+	/** Show the year when consecutive rendered days cross a year boundary. */
+	showYearSeparators: boolean;
 	/** Milliseconds of inactivity before an edited day is written to disk. */
 	saveDelay: number;
 	/** Use Obsidian's own markdown editor inside the journal (live preview). */
@@ -39,6 +41,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	templatePath: "",
 	headerFormat: "dddd, D MMMM",
 	showMonthSeparators: false,
+	showYearSeparators: true,
 	saveDelay: 600,
 	richEditor: true,
 	focusTodayOnOpen: true,
@@ -48,7 +51,12 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 
 type SettingKey = keyof JournalViewSettings;
 type TextSettingKey = "dateFormat" | "folder" | "templatePath" | "headerFormat";
-type ToggleSettingKey = "richEditor" | "focusTodayOnOpen" | "hideEmptyDays" | "showMonthSeparators";
+type ToggleSettingKey =
+	| "richEditor"
+	| "focusTodayOnOpen"
+	| "hideEmptyDays"
+	| "showMonthSeparators"
+	| "showYearSeparators";
 
 interface JournalSettingBase {
 	name: string;
@@ -158,8 +166,13 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						name: "Group days by month",
 						desc:
 							"Show month and year once above the first visible day of each month. " +
-							"When off, every day shows its full configured date.",
+							"When off, day headers use the configured date format.",
 						control: { type: "toggle", key: "showMonthSeparators" },
+					},
+					{
+						name: "Show year separators",
+						desc: "Show a centered year heading when consecutive visible days cross a year boundary.",
+						control: { type: "toggle", key: "showYearSeparators" },
 					},
 					{
 						name: "Daily header format",
@@ -249,6 +262,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "focusTodayOnOpen":
 			case "hideEmptyDays":
 			case "showMonthSeparators":
+			case "showYearSeparators":
 				if (typeof value === "boolean") {
 					this.plugin.settings[key] = value;
 					changed = true;

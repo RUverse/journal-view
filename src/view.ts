@@ -348,6 +348,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 */
 	private syncDateSeparators(): void {
 		const showMonths = this.plugin.settings.showMonthSeparators;
+		const showYears = this.plugin.settings.showYearSeparators;
 		let previousYear: string | null = null;
 		let previousMonth: string | null = null;
 		for (const section of this.sections) {
@@ -358,7 +359,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			}
 			const year = section.date.format("YYYY");
 			const month = section.date.format("YYYY-MM");
-			section.setYearSeparator(previousYear !== null && year !== previousYear);
+			// A year heading marks a boundary between rendered days; the sticky
+			// toolbar supplies context for the first day in the current window.
+			section.setYearSeparator(showYears && previousYear !== null && year !== previousYear);
 			section.setMonthSeparator(showMonths && month !== previousMonth);
 			previousYear = year;
 			previousMonth = month;

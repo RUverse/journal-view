@@ -33,6 +33,7 @@ vault handles daily notes.
 | Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View |
 | Day order | Oldest to newest | Reverses the complete timeline when set to newest to oldest |
 | Group days by month | Off | Groups daily entries beneath compact month and year headings |
+| Show year separators | On | Marks year boundaries between consecutive visible daily entries |
 | Daily header format | `dddd, D MMMM` | Controls how each date appears when month grouping is off |
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |

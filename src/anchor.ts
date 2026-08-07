@@ -63,7 +63,9 @@ export class ScrollAnchor {
 			return;
 		}
 		const section = this.sectionNear(scrollEl.scrollTop);
-		this.pinned = section ? { el: section.el, section, top: section.el.offsetTop } : null;
+		// Date headings can move between days as notes appear or disappear. Pin
+		// the card below them so those changes count as layout drift too.
+		this.pinned = section ? { el: section.el, section, top: section.cardTop } : null;
 	}
 
 	/** The day the anchor should pin for a viewport whose top sits at `position`. */
@@ -99,7 +101,7 @@ export class ScrollAnchor {
 			return;
 		}
 
-		const top = this.pinned.el.offsetTop;
+		const top = this.pinned.section.cardTop;
 		const delta = top - this.pinned.top;
 		if (delta === 0) return;
 		const absorbed = this.absorbWithSpacer(delta);
