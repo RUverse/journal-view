@@ -198,6 +198,10 @@ export default class JournalViewPlugin extends Plugin {
 				saved.showMonthSeparators,
 				DEFAULT_SETTINGS.showMonthSeparators,
 			),
+			groupDaysByYear: booleanSetting(
+				saved.groupDaysByYear,
+				booleanSetting(saved.showYearSeparators, DEFAULT_SETTINGS.groupDaysByYear),
+			),
 			saveDelay: saveDelaySetting(saved.saveDelay),
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),

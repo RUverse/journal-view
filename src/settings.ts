@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting, requireApiVersion } from "obsidian";
-import type { SettingDefinitionItem, TextComponent } from "obsidian";
+import type { SettingDefinitionItem } from "obsidian";
 import type JournalViewPlugin from "./main";
 
 export const MIN_SAVE_DELAY = 200;
@@ -21,6 +21,8 @@ export interface JournalViewSettings {
 	headerFormat: string;
 	/** Show month/year once above a group rather than inside every day. */
 	showMonthSeparators: boolean;
+	/** Group rendered days beneath year boundary headings. */
+	groupDaysByYear: boolean;
 	/** Milliseconds of inactivity before an edited day is written to disk. */
 	saveDelay: number;
 	/** Use Obsidian's own markdown editor inside the journal (live preview). */
@@ -39,6 +41,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	templatePath: "",
 	headerFormat: "dddd, D MMMM",
 	showMonthSeparators: false,
+	groupDaysByYear: true,
 	saveDelay: 600,
 	richEditor: true,
 	focusTodayOnOpen: true,
@@ -48,7 +51,12 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 
 type SettingKey = keyof JournalViewSettings;
 type TextSettingKey = "dateFormat" | "folder" | "templatePath" | "headerFormat";
-type ToggleSettingKey = "richEditor" | "focusTodayOnOpen" | "hideEmptyDays" | "showMonthSeparators";
+type ToggleSettingKey =
+	| "richEditor"
+	| "focusTodayOnOpen"
+	| "hideEmptyDays"
+	| "showMonthSeparators"
+	| "groupDaysByYear";
 
 interface JournalSettingBase {
 	name: string;
@@ -98,8 +106,6 @@ interface LegacySliderTooltip {
 }
 
 export class JournalViewSettingTab extends PluginSettingTab {
-	private headerFormatControl: TextComponent | null = null;
-
 	constructor(app: App, private plugin: JournalViewPlugin) {
 		super(app, plugin);
 	}
@@ -155,20 +161,23 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: "Group days by month",
-						desc:
-							"Show month and year once above the first visible day of each month. " +
-							"When off, every day shows its full configured date.",
-						control: { type: "toggle", key: "showMonthSeparators" },
-					},
-					{
 						name: "Daily header format",
-						desc: "Moment.js format used for each day when month grouping is off.",
+						desc: "Moment.js format used for each day's header.",
 						control: {
 							type: "text",
 							key: "headerFormat",
 							placeholder: DEFAULT_SETTINGS.headerFormat,
 						},
+					},
+					{
+						name: "Group days by year",
+						desc: "Show a centered year heading when consecutive visible days cross a year boundary.",
+						control: { type: "toggle", key: "groupDaysByYear" },
+					},
+					{
+						name: "Group days by month",
+						desc: "Show month and year once above the first visible day of each month.",
+						control: { type: "toggle", key: "showMonthSeparators" },
 					},
 					{
 						name: "Focus today on open",
@@ -249,6 +258,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "focusTodayOnOpen":
 			case "hideEmptyDays":
 			case "showMonthSeparators":
+			case "groupDaysByYear":
 				if (typeof value === "boolean") {
 					this.plugin.settings[key] = value;
 					changed = true;
@@ -260,7 +270,6 @@ export class JournalViewSettingTab extends PluginSettingTab {
 
 	display(): void {
 		const { containerEl } = this;
-		this.headerFormatControl = null;
 		containerEl.empty();
 		for (const group of this.definitions()) {
 			new Setting(containerEl).setName(group.heading).setHeading();
@@ -281,25 +290,18 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		const control = definition.control;
 		switch (control.type) {
 			case "text":
-				setting.addText((text) => {
-					if (control.key === "headerFormat") this.headerFormatControl = text;
+				setting.addText((text) =>
 					text
 						.setPlaceholder(control.placeholder)
 						.setValue(this.plugin.settings[control.key])
-						.setDisabled(control.key === "headerFormat" && this.plugin.settings.showMonthSeparators)
-						.onChange((value) => this.setControlValue(control.key, value));
-				});
+						.onChange((value) => this.setControlValue(control.key, value)),
+				);
 				break;
 			case "toggle":
 				setting.addToggle((toggle) =>
 					toggle
 						.setValue(this.plugin.settings[control.key])
-						.onChange(async (value) => {
-							await this.setControlValue(control.key, value);
-							if (control.key === "showMonthSeparators") {
-								this.headerFormatControl?.setDisabled(value);
-							}
-						}),
+						.onChange((value) => this.setControlValue(control.key, value)),
 				);
 				break;
 			case "slider":

@@ -173,6 +173,31 @@ button.journal-find-button.is-active {
 	transition: background-color 120ms ease-in-out;
 }
 
+.journal-year-separator {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--size-4-3);
+	margin: var(--size-4-6) 0 var(--size-4-5);
+	padding: 0 var(--size-4-3);
+	color: var(--text-normal);
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-bold);
+	line-height: var(--line-height-tight);
+}
+
+.journal-year-separator[hidden] {
+	display: none;
+}
+
+.journal-year-separator::before,
+.journal-year-separator::after {
+	content: "";
+	height: 1px;
+	background-color: var(--background-modifier-border);
+	flex: 1 1 0;
+}
+
 .journal-month-separator {
 	display: flex;
 	align-items: baseline;
@@ -205,6 +230,12 @@ button.journal-find-button.is-active {
 	color: var(--text-faint);
 	font-size: var(--font-ui-small);
 	font-weight: var(--font-normal);
+}
+
+/* The year already has its own heading at a boundary; avoid repeating it in
+   the month heading immediately below. */
+.journal-day-year-start .journal-month-year {
+	display: none;
 }
 
 .journal-day-header {

@@ -342,23 +342,28 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	/**
-	 * Carries each month heading on its first rendered day. Keeping the heading
-	 * inside a day means loading, trimming and scroll anchoring still have one
-	 * layout unit per date. Hidden empty days do not count as month starts.
+	 * Carries date headings on the first rendered day in each group. Keeping the
+	 * headings inside a day means loading, trimming and scroll anchoring still
+	 * have one layout unit per date. Hidden empty days do not count as starts.
 	 */
-	private syncMonthSeparators(): void {
-		if (!this.plugin.settings.showMonthSeparators) {
-			for (const section of this.sections) section.setMonthSeparator(false);
-			return;
-		}
+	private syncDateSeparators(): void {
+		const showMonths = this.plugin.settings.showMonthSeparators;
+		const showYears = this.plugin.settings.groupDaysByYear;
+		let previousYear: string | null = null;
 		let previousMonth: string | null = null;
 		for (const section of this.sections) {
 			if (section.isHidden) {
+				section.setYearSeparator(false);
 				section.setMonthSeparator(false);
 				continue;
 			}
+			const year = section.date.format("YYYY");
 			const month = section.date.format("YYYY-MM");
-			section.setMonthSeparator(month !== previousMonth);
+			// A year heading marks a boundary between rendered days; the sticky
+			// toolbar supplies context for the first day in the current window.
+			section.setYearSeparator(showYears && previousYear !== null && year !== previousYear);
+			section.setMonthSeparator(showMonths && month !== previousMonth);
+			previousYear = year;
 			previousMonth = month;
 		}
 	}
@@ -395,7 +400,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		}
 		if (where === "start") this.sections.unshift(...sections);
 		else this.sections.push(...sections);
-		this.syncMonthSeparators();
+		this.syncDateSeparators();
 		// A day can land inside the editor window on a tall pane.
 		this.editors.schedule();
 		if (this.ready) this.find?.sectionsChanged();
@@ -494,7 +499,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			if (!victims.length) return;
 			this.sections.length -= victims.length;
 			for (const section of victims) this.forget(section);
-			this.syncMonthSeparators();
+			this.syncDateSeparators();
 		} else {
 			for (let i = 0; i < this.sections.length && budget > 0; i++, budget--) {
 				const section = this.sections[i];
@@ -506,7 +511,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			const before = referenceDay.contentTop;
 			this.sections.splice(0, victims.length);
 			for (const section of victims) this.forget(section);
-			this.syncMonthSeparators();
+			this.syncDateSeparators();
 			const delta = referenceDay.contentTop - before;
 			if (delta !== 0) this.scrollEl.scrollTop += delta;
 			this.editors.declareScroll();
@@ -974,7 +979,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// The caller reloads the real content right after; the day starts
 		// empty and any growth is re-pinned by the resize observer.
 		this.sections.splice(at, 0, section);
-		this.syncMonthSeparators();
+		this.syncDateSeparators();
 		this.byPath.set(section.path, section);
 		if (section.file) this.byPath.set(section.file.path, section);
 		this.resizeObserver?.observe(section.el);
@@ -996,7 +1001,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (previousPath) this.byPath.delete(previousPath);
 		this.byPath.set(day.path, day);
 		if (day.file) this.byPath.set(day.file.path, day);
-		this.syncMonthSeparators();
+		this.syncDateSeparators();
 	}
 
 	onDayContentChanged(_day: DaySection): void {
@@ -1019,7 +1024,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			section.revalidate();
 			if (section.path !== before) changed = true;
 		}
-		this.syncMonthSeparators();
+		this.syncDateSeparators();
 		if (changed) this.indexPaths();
 	}
 
