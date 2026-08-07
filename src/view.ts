@@ -145,7 +145,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.contentEl.empty();
 		this.contentEl.addClass("journal-content");
 
-		this.toolbar = new JournalToolbar(this.contentEl, {
+		this.toolbar = new JournalToolbar(this, {
 			onToggleFilter: () => void this.toggleHideEmptyDays(),
 			onGoToDate: () => this.openDatePicker(),
 			onGoToToday: () => this.goToToday(true),
@@ -177,6 +177,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.picker?.close();
 		this.find?.destroy();
 		this.find = undefined;
+		this.toolbar?.destroy();
+		this.toolbar = undefined;
 		await this.flushAll();
 		this.teardown();
 	}

@@ -18,6 +18,37 @@
 
 /* ------------------------------------------------------------- toolbar --- */
 
+.journal-view:not(.journal-view-mobile) .view-header {
+	position: relative;
+	container: journal-header / inline-size;
+	border-bottom: 1px solid var(--divider-color);
+}
+
+.journal-view:not(.journal-view-mobile) .view-header-title-container {
+	position: absolute;
+	inset-inline-start: 50%;
+	inset-block-start: 50%;
+	width: max-content;
+	max-width: 100%;
+	min-width: 0;
+	transform: translate(-50%, -50%);
+}
+
+.journal-view:not(.journal-view-mobile) .view-actions {
+	margin-inline-start: auto;
+}
+
+/* The query sees the header's content box; 30.5rem plus its 1.5rem horizontal
+   padding preserves the 32rem pane breakpoint. */
+@container journal-header (max-width: 30.5rem) {
+	.journal-view:not(.journal-view-mobile) .view-header-title-container {
+		position: static;
+		width: auto;
+		max-width: none;
+		transform: none;
+	}
+}
+
 .journal-toolbar {
 	display: flex;
 	align-items: center;
