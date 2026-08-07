@@ -67,6 +67,7 @@ export class DaySection {
 	private monthEl: HTMLElement;
 	private cardEl: HTMLElement;
 	private headerEl: HTMLElement;
+	private titleEl: HTMLElement;
 	private actionsEl: HTMLElement;
 	private bodyEl: HTMLElement;
 
@@ -125,10 +126,10 @@ export class DaySection {
 		this.monthEl.hidden = true;
 		this.cardEl = this.el.createDiv({ cls: "journal-day-card" });
 		this.headerEl = this.cardEl.createDiv({ cls: "journal-day-header" });
-		const titleEl = this.headerEl.createDiv({ cls: "journal-day-title" });
-		titleEl.createSpan({ cls: "journal-day-date", text: this.formatHeader() });
+		this.titleEl = this.headerEl.createDiv({ cls: "journal-day-title" });
+		this.titleEl.createSpan({ cls: "journal-day-date", text: this.formatHeader() });
 		const relative = this.relativeLabel();
-		if (relative) titleEl.createSpan({ cls: "journal-day-badge", text: relative });
+		if (relative) this.titleEl.createSpan({ cls: "journal-day-badge", text: relative });
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 
 		this.bodyEl = this.cardEl.createDiv({ cls: "journal-day-body" });
@@ -305,10 +306,12 @@ export class DaySection {
 
 		this.bodyEl.dataset.placeholder = this.exists ? "Empty note" : "Start typing to create this note";
 		this.actionsEl.empty();
-		setTooltip(this.headerEl, this.path, { placement: "right" });
+		setTooltip(this.titleEl, this.path, { placement: "right" });
 
 		if (this.exists) {
-			const remove = this.actionsEl.createEl("button", { cls: "clickable-icon journal-day-action" });
+			const remove = this.actionsEl.createEl("button", {
+				cls: "clickable-icon journal-day-action journal-day-delete",
+			});
 			setIcon(remove, "trash-2");
 			setTooltip(remove, "Delete note");
 			remove.addEventListener("click", (event) => {
