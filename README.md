@@ -38,7 +38,7 @@ vault handles daily notes.
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
-| Autosave delay | 600 ms | Sets how long Journal View waits after typing before saving |
+| Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 
 ## Privacy
 

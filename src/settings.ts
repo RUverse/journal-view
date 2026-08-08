@@ -42,7 +42,9 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	headerFormat: "dddd, D MMMM",
 	showMonthSeparators: false,
 	groupDaysByYear: true,
-	saveDelay: 600,
+	// Obsidian debounces its own `TextFileView.requestSave` by the same amount,
+	// so an edited day reaches disk as often as the note would in a normal pane.
+	saveDelay: 2000,
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
@@ -202,11 +204,13 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
-				heading: "Performance",
+				heading: "Advanced",
 				items: [
 					{
 						name: "Autosave delay",
-						desc: "Milliseconds of inactivity before an edited day is written to disk.",
+						desc:
+							"Milliseconds of inactivity before an edited day is written to disk. " +
+							"Leaving a day always saves it at once.",
 						control: {
 							type: "slider",
 							key: "saveDelay",
