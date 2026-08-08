@@ -15,10 +15,14 @@ editable timeline. See [README.md](README.md) for behavior and installation.
 
 ## Change workflow
 
-- Develop each new feature or fix on its own branch. Keep unrelated changes on
-  separate branches so each change can be reviewed and reverted independently.
-- Open a pull request from that branch into `main`; do not commit features or
-  fixes directly to `main`.
+- Use `dev` as the integration branch. Start every feature or fix branch from
+  the latest `dev`, and keep unrelated changes on separate branches so each
+  change can be reviewed and reverted independently.
+- Open feature and fix pull requests into `dev`. Do not merge them directly into
+  `main`, and do not commit features or fixes directly to either shared branch.
+- Keep `main` release-only. Move changes from `dev` to `main` through one release
+  pull request that also contains the version bump; do not create a separate
+  version-only release branch or pull request.
 - Keep pull requests focused, describe the user-visible effect, and include the
   verification that was actually performed.
 
@@ -78,12 +82,21 @@ When the user asks to prepare a release:
 
 - Confirm the intended semantic version; do not guess the release version when
   the user has not specified it.
-- Update all version files with
+- Make sure `dev` is clean, up to date with `origin/dev`, and contains all and
+  only the feature and fix pull requests intended for the release. Prepare the
+  release on `dev`, not on a feature branch or `main`.
+- On `dev`, update all version files with
   `npm version <version> --no-git-tag-version`. Run `npm run typecheck` and
-  `npm run build`, then commit the release changes.
-- Push the current branch and its commits first with
-  `git push origin <branch>`.
-- Create an annotated tag on the pushed release commit with
+  `npm run build`, then commit and push the version bump to `dev`.
+- Open one pull request from `dev` into `main`. That release pull request must
+  contain both the accumulated user-visible changes and their version bump.
+  Describe the changes and include only verification that was actually
+  performed. Do not open a separate version-only pull request.
+- Do not tag the head of `dev` or an unmerged release pull request. Leave the
+  pull request for review, and do not merge it unless the user explicitly asks.
+- After the release pull request is merged, update local `main`, verify that
+  `manifest.json` has the intended version, and create an annotated tag on the
+  merged `main` commit with
   `git tag -a <version> -m "Release <version>"`, then push it with
   `git push origin <version>`. The tag must be the exact version from
   `manifest.json`, without a `v` prefix; pushing it triggers the GitHub Action
