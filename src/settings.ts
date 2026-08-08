@@ -193,6 +193,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							"Today is always shown. When off, every day appears, faded until you type in it.",
 						control: { type: "toggle", key: "hideEmptyDays" },
 					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Advanced",
+				items: [
 					{
 						name: "Rich editor",
 						desc:
@@ -200,12 +206,6 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							"Turn off to fall back to a plain text editor.",
 						control: { type: "toggle", key: "richEditor" },
 					},
-				],
-			},
-			{
-				type: "group",
-				heading: "Advanced",
-				items: [
 					{
 						name: "Autosave delay",
 						desc:
