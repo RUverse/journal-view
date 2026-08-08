@@ -42,7 +42,9 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	headerFormat: "dddd, D MMMM",
 	showMonthSeparators: false,
 	groupDaysByYear: true,
-	saveDelay: 600,
+	// Obsidian debounces its own `TextFileView.requestSave` by the same amount,
+	// so an edited day reaches disk as often as the note would in a normal pane.
+	saveDelay: 2000,
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
@@ -191,6 +193,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							"Today is always shown. When off, every day appears, faded until you type in it.",
 						control: { type: "toggle", key: "hideEmptyDays" },
 					},
+				],
+			},
+			{
+				type: "group",
+				heading: "Advanced",
+				items: [
 					{
 						name: "Rich editor",
 						desc:
@@ -198,15 +206,11 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							"Turn off to fall back to a plain text editor.",
 						control: { type: "toggle", key: "richEditor" },
 					},
-				],
-			},
-			{
-				type: "group",
-				heading: "Performance",
-				items: [
 					{
 						name: "Autosave delay",
-						desc: "Milliseconds of inactivity before an edited day is written to disk.",
+						desc:
+							"Milliseconds of inactivity before an edited day is written to disk. " +
+							"Leaving a day always saves it at once.",
 						control: {
 							type: "slider",
 							key: "saveDelay",
