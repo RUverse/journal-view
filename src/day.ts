@@ -6,6 +6,15 @@ import { SaveQueue } from "./saveQueue";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 
+/**
+ * Frames a cursor placed at the end of a day is kept on screen for, long
+ * enough to outlast the centring and the rebuild that can follow a go-to.
+ */
+const REVEAL_FRAMES = 10;
+/** The reader moving the journal themselves, which ends that hold at once. */
+const READER_SCROLL_EVENTS = ["wheel", "touchmove", "pointerdown"] as const;
+const REVEAL_LISTENER: AddEventListenerOptions = { capture: true, passive: true };
+
 /** The bits of the journal view a day needs to talk to. */
 export interface DayHost {
 	app: App;
@@ -84,6 +93,10 @@ export class DaySection {
 	private unmounting = false;
 	/** Preview height (px) held until the editor completes its first layout. */
 	private heldHeight = 0;
+	/** Pending frame of the run that keeps a cursor placed at the end in view. */
+	private revealFrame = 0;
+	/** Drops the listeners watching for the reader to take that run over. */
+	private endReveal: (() => void) | null = null;
 
 	private lastKnownContent = "";
 	/** Template text shown in an empty day but not yet accepted by the reader. */
@@ -699,9 +712,71 @@ export class DaySection {
 		this.el.toggleClass("journal-day-blank", blank);
 	}
 
-	focusEditor(): void {
+	/**
+	 * Puts the reader in the day's editor. `atEnd` puts the cursor past
+	 * everything the day already holds, which is where writing carries on -
+	 * asked for by the two ways of arriving at today, opening the journal on it
+	 * and coming home to it. Every other way in leaves the cursor where focus
+	 * put it: a day reached by date is one to read as much as to write in, and
+	 * find needs the cursor on the match it just revealed.
+	 */
+	focusEditor(atEnd = false): void {
 		this.mountEditor();
-		this.editor?.focus();
+		if (!this.editor) return;
+		this.editor.focus();
+		if (!atEnd) return;
+		this.editor.placeCursorAtEnd?.(true);
+		this.keepCursorInView();
+	}
+
+	/**
+	 * Holds a cursor placed at the end on screen over the frames that follow.
+	 *
+	 * Arriving at a day is the view's own scroll: it centres the day, releases
+	 * the height its preview was held at, and on a go-to may have rebuilt the
+	 * window first. Any of that lands after the editor works out where its
+	 * cursor should be scrolled to, and overwrites it - on a long note that
+	 * leaves the reader looking at the top of a day whose cursor is at the
+	 * bottom. Asking again over the following frames outlives the positioning.
+	 *
+	 * None of that is worth a single frame of holding the journal against the
+	 * reader, so their first move on it ends the run: a wheel, a touch drag or
+	 * a pointer in the scroller - a scrollbar drag, or a click that puts the
+	 * cursor somewhere they chose - and the view stays where they put it.
+	 */
+	private keepCursorInView(): void {
+		this.stopRevealing();
+		const scroller: EventTarget = this.el.closest(".journal-scroll") ?? this.el.ownerDocument;
+		const surrender = (): void => this.stopRevealing(true);
+		for (const type of READER_SCROLL_EVENTS) scroller.addEventListener(type, surrender, REVEAL_LISTENER);
+		this.endReveal = () => {
+			for (const type of READER_SCROLL_EVENTS) scroller.removeEventListener(type, surrender, REVEAL_LISTENER);
+		};
+
+		let frames = REVEAL_FRAMES;
+		const step = (): void => {
+			this.revealFrame = 0;
+			if (this.destroyed || !this.editor?.hasFocus() || --frames < 0) {
+				this.stopRevealing();
+				return;
+			}
+			this.editor.revealCursor?.();
+			this.revealFrame = window.requestAnimationFrame(step);
+		};
+		this.revealFrame = window.requestAnimationFrame(step);
+	}
+
+	/**
+	 * Ends a reveal run, whether it ran out of frames or the reader took over.
+	 * `withdraw` also takes back the reveal the last frame asked for, which is
+	 * carried out a frame later and would otherwise undo their scroll once.
+	 */
+	private stopRevealing(withdraw = false): void {
+		window.cancelAnimationFrame(this.revealFrame);
+		this.revealFrame = 0;
+		this.endReveal?.();
+		this.endReveal = null;
+		if (withdraw) this.editor?.cancelReveal?.();
 	}
 
 	/** Applies a change that happened outside the journal (sync, another tab). */
@@ -825,6 +900,7 @@ export class DaySection {
 	destroy(): void {
 		this.destroyed = true;
 		window.clearTimeout(this.saveTimer);
+		this.stopRevealing();
 		// Anything unsaved goes to the queue, which outlives this object.
 		this.capture();
 		this.clearFindState();

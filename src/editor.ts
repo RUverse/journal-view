@@ -29,8 +29,15 @@ export interface JournalEditor {
 	destroy(): void;
 	/** Moves the cursor to the position nearest the given window coordinates. */
 	placeCursor?(x: number, y: number): void;
-	/** Moves the cursor past everything the editor holds. */
-	placeCursorAtEnd?(): void;
+	/**
+	 * Moves the cursor past everything the editor holds. `reveal` also brings
+	 * that position on screen, for the cursor the reader is about to type at.
+	 */
+	placeCursorAtEnd?(reveal?: boolean): void;
+	/** Brings the cursor on screen without moving it. */
+	revealCursor?(): void;
+	/** Withdraws a reveal that was asked for but has not been carried out yet. */
+	cancelReveal?(): void;
 	/** True when this is Obsidian's own editor rather than the plain fallback. */
 	rich: boolean;
 	/** Draws every loaded match and distinguishes the selected range. */
@@ -49,9 +56,19 @@ interface InternalCodeMirror {
 	dispatch?(spec: TransactionSpec): void;
 	requestMeasure?(request: { read: () => null; write: () => void }): void;
 	state?: EditorState;
+	defaultLineHeight?: number;
 	/** CodeMirror's pending "bring the cursor into view" request, if any. */
 	viewState?: { scrollTarget?: unknown };
 }
+
+/**
+ * Lines left clear around a revealed cursor. The pane runs to the bottom of the
+ * window, where Obsidian floats its status bar over it, so a cursor scrolled to
+ * the very edge is both cramped and liable to sit under that.
+ */
+const REVEAL_LINES = 2;
+/** Used only when the editor cannot say how tall its lines are. */
+const FALLBACK_LINE_HEIGHT = 24;
 
 const setFindDecorations = StateEffect.define<DecorationSet>();
 const findDecorations = StateField.define<DecorationSet>({
@@ -338,13 +355,41 @@ class RichEditor implements JournalEditor {
 		}
 	}
 
-	placeCursorAtEnd(): void {
+	placeCursorAtEnd(reveal = false): void {
 		try {
 			this.instance?.editor?.cm?.dispatch?.({ selection: { anchor: this.getValue().length } });
-			this.dropScrollRequest();
+			// A cursor the reader is meant to carry on typing at is worth the
+			// scroll; one placed under them - a template offer - is not.
+			if (reveal) this.revealCursor();
+			else this.dropScrollRequest();
 		} catch {
 			/* the cursor stays wherever focus put it */
 		}
+	}
+
+	revealCursor(): void {
+		try {
+			const cm = this.instance?.editor?.cm;
+			const head = cm?.state?.selection.main.head;
+			if (!cm?.dispatch || typeof head !== "number") return;
+			cm.dispatch({
+				effects: EditorView.scrollIntoView(head, {
+					y: "nearest",
+					yMargin: (cm.defaultLineHeight ?? FALLBACK_LINE_HEIGHT) * REVEAL_LINES,
+				}),
+			});
+		} catch {
+			/* the view keeps whatever position it already had */
+		}
+	}
+
+	/**
+	 * A reveal is carried out in a later measure pass, so the last one asked for
+	 * can still be in flight when the reader takes the journal over. Dropping it
+	 * is the same withdrawal a newly built editor makes.
+	 */
+	cancelReveal(): void {
+		this.dropScrollRequest();
 	}
 
 	setFindMatches(ranges: FindRange[], selected: FindRange | null): void {
@@ -471,9 +516,21 @@ class PlainEditor implements JournalEditor {
 		this.autoGrow();
 	}
 
-	placeCursorAtEnd(): void {
+	placeCursorAtEnd(reveal = false): void {
 		const end = this.textarea.value.length;
 		this.textarea.setSelectionRange(end, end);
+		if (reveal) this.revealCursor();
+	}
+
+	/**
+	 * The textarea grows to its full content and never scrolls itself, so its
+	 * bottom edge is where a cursor at the end sits. Anywhere else in the text
+	 * has no box of its own to bring on screen, and is left alone.
+	 */
+	revealCursor(): void {
+		const end = this.textarea.value.length;
+		if (this.textarea.selectionStart !== end || this.textarea.selectionEnd !== end) return;
+		this.textarea.scrollIntoView({ block: "end" });
 	}
 
 	setFindMatches(ranges: FindRange[], selected: FindRange | null): void {
