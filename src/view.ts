@@ -295,7 +295,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		) {
 			this.initialFocusTimer = window.setTimeout(() => {
 				this.initialFocusTimer = 0;
-				this.sectionAt(0)?.focusEditor();
+				this.sectionAt(0)?.focusEditor(true);
 			}, 50);
 		}
 		// A short viewport may already sit near an end.
@@ -770,7 +770,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.visited = null;
 		if (droppedVisited && this.plugin.settings.hideEmptyDays) {
 			void this.rebuild().then(() => {
-				if (focus) this.sectionAt(0)?.focusEditor();
+				if (focus) this.sectionAt(0)?.focusEditor(true);
 			});
 			return;
 		}
@@ -779,13 +779,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			// Midnight has passed, or today was trimmed away after a long
 			// scroll - rebuilding recentres on today directly.
 			void this.rebuild().then(() => {
-				if (focus) this.sectionAt(0)?.focusEditor();
+				if (focus) this.sectionAt(0)?.focusEditor(true);
 			});
 			return;
 		}
 		// Focus only once the animation has arrived: focusing an editor makes
 		// the browser scroll it into view, which would fight the animation.
-		this.centerOn(section, "smooth", focus ? () => section.focusEditor() : undefined);
+		this.centerOn(section, "smooth", focus ? () => section.focusEditor(true) : undefined);
 	}
 
 	/** Opens the calendar, on the day the reader is currently looking at. */

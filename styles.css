@@ -318,8 +318,25 @@ button.journal-find-button.is-active {
 }
 
 .journal-day:hover .journal-day-actions,
-.journal-day-focused .journal-day-actions {
+.journal-day-focused .journal-day-actions,
+.journal-day-actions:focus-within {
 	opacity: 1;
+}
+
+/* With a hover-capable pointer, keep the destructive action tied to the header
+   rather than the much larger day hover target. Focus always reveals it. */
+@media (hover: hover) {
+	button.journal-day-delete {
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 120ms ease-in-out;
+	}
+
+	.journal-day-header:hover button.journal-day-delete,
+	button.journal-day-delete:focus {
+		opacity: 1;
+		pointer-events: auto;
+	}
 }
 
 button.journal-day-create {
@@ -490,6 +507,10 @@ body.is-phone .journal-view .view-content .journal-day-editing .journal-day-body
 	font-size: var(--font-text-size);
 	line-height: var(--line-height-normal);
 	overflow: hidden;
+	/* Bringing a cursor at the end into view scrolls to this textarea's bottom
+	   edge; the margin keeps those last lines clear of the pane's own edge and
+	   the status bar floating over it. Matches REVEAL_LINES in editor.ts. */
+	scroll-margin-bottom: calc(var(--line-height-normal) * 2em);
 }
 
 .journal-plain-editor-find-active {
