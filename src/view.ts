@@ -915,10 +915,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		);
 
 		this.registerEvent(
-			this.app.vault.on("modify", (file) => {
-				if (!(file instanceof TFile)) return;
+			this.app.metadataCache.on("changed", (file, data) => {
 				const section = this.byPath.get(file.path);
-				if (section?.file?.path === file.path) void section.reload();
+				if (section?.file?.path === file.path) void section.reload(data);
 			}),
 		);
 
