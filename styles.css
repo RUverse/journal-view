@@ -185,7 +185,13 @@ button.journal-find-button.is-active {
 	   reach is worth having, blank they can scroll into is not. */
 	padding: var(--journal-padding-top, 40vh) var(--size-4-4) 40vh;
 	margin: 0 auto;
-	max-width: var(--file-line-width, 700px);
+	/* Obsidian's readable line width belongs to the note content. Keep the
+	   timeline and card gutters outside that width so journal text wraps at the
+	   same point as the native note editor. */
+	max-width: calc(
+		var(--file-line-width, 700px) + var(--size-4-4) + var(--size-4-4) + var(--size-4-3) +
+			var(--size-4-3)
+	);
 	width: 100%;
 	box-sizing: border-box;
 }
