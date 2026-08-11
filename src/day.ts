@@ -27,6 +27,8 @@ export interface DayHost {
 	isOffScreen(day: DaySection): boolean;
 	/** Re-indexes find results after this day's visible body changes. */
 	onDayContentChanged(day: DaySection): void;
+	/** Re-centres a navigation after focus-driven editor and template layout settles. */
+	onDayFocusSettled(day: DaySection): void;
 	/** Opens the journal-wide find UI from an embedded editor command. */
 	showFind(): void;
 }
@@ -110,6 +112,8 @@ export class DaySection {
 	private pendingTemplate: string | null = null;
 	private saveTimer = 0;
 	private focused = false;
+	/** Invalidates focus-settle work when focus leaves or the day is destroyed. */
+	private focusSettleToken = 0;
 	private readonly queue = new SaveQueue((value) => this.writeValue(value));
 	private findState: {
 		query: string;
@@ -630,16 +634,7 @@ export class DaySection {
 						this.scheduleSave();
 						this.host.onDayContentChanged(this);
 					},
-					onFocus: () => {
-						this.focused = true;
-						// Measurement should normally have released the guard before
-						// the reader arrives; focus is the defensive fallback.
-						this.releaseHeight();
-						this.el.addClass("journal-day-focused");
-						// Focus is the one signal every way in shares - a click
-						// the editor swallowed, a keyboard tab, a jump to a date.
-						void this.offerTemplate();
-					},
+					onFocus: () => this.onEditorFocus(),
 					onBlur: () => this.onEditorBlur(),
 					onFind: () => this.host.showFind(),
 				},
@@ -700,8 +695,30 @@ export class DaySection {
 		this.bodyEl.setCssProps({ "--journal-held-height": "0px" });
 	}
 
+	private onEditorFocus(): void {
+		this.focused = true;
+		// Measurement should normally have released the guard before the
+		// reader arrives; focus is the defensive fallback.
+		this.releaseHeight();
+		this.el.addClass("journal-day-focused");
+		// Focus is the one signal every way in shares - a click the editor
+		// swallowed, a keyboard tab, or a jump to a date.
+		const token = ++this.focusSettleToken;
+		void this.reportFocusSettled(token);
+	}
+
+	/** Waits through template insertion and the editor's resulting measurements. */
+	private async reportFocusSettled(token: number): Promise<void> {
+		await this.offerTemplate();
+		await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+		if (this.destroyed || token !== this.focusSettleToken || !this.hasFocus) return;
+		this.host.onDayFocusSettled(this);
+	}
+
 	/** Blurring an editor is not leaving the day, but it is a good time to save. */
 	private onEditorBlur(): void {
+		this.focusSettleToken++;
 		this.focused = false;
 		this.el.removeClass("journal-day-focused");
 		// Leaving a day the reader only looked at costs them nothing.
@@ -914,6 +931,7 @@ export class DaySection {
 
 	destroy(): void {
 		this.destroyed = true;
+		this.focusSettleToken++;
 		window.clearTimeout(this.saveTimer);
 		this.stopRevealing();
 		// Anything unsaved goes to the queue, which outlives this object.
