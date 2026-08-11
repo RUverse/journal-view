@@ -744,16 +744,29 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		await this.rebuild(date, false);
 	}
 
-	private centerTarget(section: DaySection): number {
-		const target = Math.max(
-			0,
-			section.cardTop - Math.max(0, (this.scrollEl.clientHeight - section.cardHeight) / 2),
-		);
+	/**
+	 * Today sits at the top of a newest-first timeline: everything a centred day
+	 * would be pushed down by is either empty future dates or the padding that
+	 * holds room for them. Resting it against the top of the viewport instead
+	 * shows as much of the day as the pane can hold, which is what the reader
+	 * came back for. Older days, and today in an oldest-first timeline, still
+	 * centre - they have real days on both sides.
+	 */
+	private restsAtTop(section: DaySection): boolean {
+		return this.sortStep() === -1 && section.offset === 0;
+	}
+
+	/** Where the scroller has to sit for `section` to be in its resting place. */
+	private restTarget(section: DaySection): number {
+		const lead = this.restsAtTop(section)
+			? 0
+			: Math.max(0, (this.scrollEl.clientHeight - section.cardHeight) / 2);
+		const target = Math.max(0, section.cardTop - lead);
 		return Math.min(target, Math.max(0, this.scrollEl.scrollHeight - this.scrollEl.clientHeight));
 	}
 
 	private centerBehavior(section: DaySection): "instant" | "smooth" {
-		const distance = Math.abs(this.centerTarget(section) - this.scrollEl.scrollTop);
+		const distance = Math.abs(this.restTarget(section) - this.scrollEl.scrollTop);
 		return distance > this.scrollEl.clientHeight * SMOOTH_CENTER_VIEWPORTS ? "instant" : "smooth";
 	}
 
@@ -826,7 +839,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private correctPendingFocusCenter(): void {
 		const section = this.pendingFocusCenter;
 		if (!section?.el.isConnected || section.cardHeight > this.scrollEl.clientHeight) return;
-		const target = this.centerTarget(section);
+		const target = this.restTarget(section);
 		if (Math.abs(target - this.scrollEl.scrollTop) < 0.5) return;
 		const before = this.scrollEl.scrollTop;
 		this.scrollEl.scrollTop = target;
@@ -844,7 +857,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.animFrame = 0;
 		}
 		if (behavior === "instant") {
-			this.scrollEl.scrollTop = this.centerTarget(section);
+			this.scrollEl.scrollTop = this.restTarget(section);
 			this.editors.declareScroll();
 			this.anchoring.pin();
 			onArrive?.();
@@ -860,7 +873,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const step = () => {
 			this.animFrame = 0;
 			if (!this.scrollEl || !section.el.isConnected) return;
-			const target = this.centerTarget(section);
+			const target = this.restTarget(section);
 			const remaining = target - this.scrollEl.scrollTop;
 			if (Math.abs(remaining) < 4 || performance.now() - started > 1500) {
 				this.scrollEl.scrollTop = target;
