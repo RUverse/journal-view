@@ -33,6 +33,8 @@ const FLICK_STEP = 24;
 const FLICK_IDLE = 120;
 /** Quiet time (ms) after which a scroll counts as finished. */
 const SETTLE_DELAY = 180;
+/** Defensive end to a centring hold when editor focus never settles. */
+const FOCUS_CENTER_TIMEOUT = 3000;
 
 type TimelineEnd = "start" | "end";
 
@@ -79,10 +81,12 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private animFrame = 0;
 	/** Focused navigation whose editor/template layout has not settled yet. */
 	private pendingFocusCenter: DaySection | null = null;
-	/** True once the focused editor, template and cursor reveal have settled. */
-	private pendingFocusCenterReady = false;
-	/** Final correction after scroll anchoring and editor-window work go quiet. */
-	private pendingFocusCenterTimer = 0;
+	/** Time the focused editor/template/cursor layout became final. */
+	private pendingFocusCenterReadyAt = 0;
+	/** Time the current pre-paint hold began. */
+	private pendingFocusCenterStartedAt = 0;
+	/** Pre-paint correction that keeps navigation still while layout settles. */
+	private pendingFocusCenterFrame = 0;
 	/** Removes the reader-input listeners guarding `pendingFocusCenter`. */
 	private endPendingFocusCenter: (() => void) | null = null;
 	/** Delayed editor focus used only by the initial open on today. */
@@ -632,10 +636,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			return;
 		}
 		this.anchoring.settle();
+		// Section ResizeObserver callbacks run after layout but before paint. Keep
+		// a focused navigation centred in that same frame, so an editor replacing
+		// its shorter preview is never shown at the preview's old position.
+		this.correctPendingFocusCenter();
 		// A pane that changed size has a different set of days near enough to
 		// the viewport to be worth an editor.
 		this.editors.schedule();
-		this.schedulePendingFocusCenter();
 	}
 
 	/* ------------------------------------------------------------ scrolling */
@@ -650,7 +657,6 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.lastScrollAt = performance.now();
 		window.clearTimeout(this.settleTimer);
 		this.settleTimer = window.setTimeout(() => this.onSettle(), SETTLE_DELAY);
-		this.schedulePendingFocusCenter();
 
 		// Two steps, in this order. Within a frame, scroll events run before
 		// ResizeObserver callbacks - so when a day changed height in a
@@ -753,12 +759,16 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// Even an editor that retained focus can have stale offscreen measurements.
 		this.armPendingFocusCenter(section);
 		section.focusEditor(atEnd);
+		// Cursor reveal registers its frame during focus. Registering this one
+		// afterwards makes the centring correction the last write before paint.
+		this.schedulePendingFocusCenter();
 	}
 
 	private armPendingFocusCenter(section: DaySection): void {
 		this.clearPendingFocusCenter();
 		this.pendingFocusCenter = section;
-		this.pendingFocusCenterReady = false;
+		this.pendingFocusCenterReadyAt = 0;
+		this.pendingFocusCenterStartedAt = performance.now();
 		const cancel = (): void => this.clearPendingFocusCenter();
 		for (const type of CENTER_CANCEL_EVENTS) this.scrollEl.addEventListener(type, cancel, CENTER_CANCEL_LISTENER);
 		this.endPendingFocusCenter = () => {
@@ -768,23 +778,53 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private clearPendingFocusCenter(): void {
 		this.pendingFocusCenter = null;
-		this.pendingFocusCenterReady = false;
-		window.clearTimeout(this.pendingFocusCenterTimer);
-		this.pendingFocusCenterTimer = 0;
+		this.pendingFocusCenterReadyAt = 0;
+		this.pendingFocusCenterStartedAt = 0;
+		if (this.pendingFocusCenterFrame) window.cancelAnimationFrame(this.pendingFocusCenterFrame);
+		this.pendingFocusCenterFrame = 0;
 		this.endPendingFocusCenter?.();
 		this.endPendingFocusCenter = null;
 	}
 
 	private schedulePendingFocusCenter(): void {
-		if (!this.pendingFocusCenter || !this.pendingFocusCenterReady) return;
-		window.clearTimeout(this.pendingFocusCenterTimer);
-		this.pendingFocusCenterTimer = window.setTimeout(() => {
-			this.pendingFocusCenterTimer = 0;
-			const section = this.pendingFocusCenter;
+		if (!this.pendingFocusCenter || this.pendingFocusCenterFrame) return;
+		this.pendingFocusCenterFrame = window.requestAnimationFrame(() => this.holdPendingFocusCenter());
+	}
+
+	private holdPendingFocusCenter(): void {
+		this.pendingFocusCenterFrame = 0;
+		const section = this.pendingFocusCenter;
+		if (!section?.el.isConnected || !this.scrollEl?.isConnected) {
 			this.clearPendingFocusCenter();
-			if (!section?.el.isConnected || !section.hasFocus) return;
-			if (section.cardHeight <= this.scrollEl.clientHeight) this.centerOn(section, "instant");
-		}, SETTLE_DELAY);
+			return;
+		}
+		if (performance.now() - this.pendingFocusCenterStartedAt >= FOCUS_CENTER_TIMEOUT) {
+			this.clearPendingFocusCenter();
+			return;
+		}
+
+		this.correctPendingFocusCenter();
+
+		if (
+			this.pendingFocusCenterReadyAt &&
+			performance.now() - this.pendingFocusCenterReadyAt >= SETTLE_DELAY
+		) {
+			this.clearPendingFocusCenter();
+			return;
+		}
+		this.schedulePendingFocusCenter();
+	}
+
+	private correctPendingFocusCenter(): void {
+		const section = this.pendingFocusCenter;
+		if (!section?.el.isConnected || section.cardHeight > this.scrollEl.clientHeight) return;
+		const target = this.centerTarget(section);
+		if (Math.abs(target - this.scrollEl.scrollTop) < 0.5) return;
+		this.scrollEl.scrollTop = target;
+		this.editors.declareScroll();
+		this.anchoring.pin();
+		// Stay through a full quiet period after the last correction.
+		if (this.pendingFocusCenterReadyAt) this.pendingFocusCenterReadyAt = performance.now();
 	}
 
 	private centerOn(section: DaySection | undefined, behavior: "instant" | "smooth", onArrive?: () => void): void {
@@ -1089,11 +1129,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			return;
 		}
 		// The editor, any focus-offered template, and cursor reveal now have their
-		// layout. Centre now, then once more after anchoring and editor-window work
-		// caused by the long jump has gone quiet. A long note cannot be centred
-		// without hiding its insertion point, so its cursor reveal stays authoritative.
-		this.pendingFocusCenterReady = true;
-		this.centerOn(day, "instant");
+		// layout. Keep the pre-paint hold through one quiet period after this point.
+		// A long note cannot be centred without hiding its insertion point, so its
+		// cursor reveal stays authoritative instead.
+		this.pendingFocusCenterReadyAt = performance.now();
 		this.schedulePendingFocusCenter();
 	}
 
