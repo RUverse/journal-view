@@ -78,7 +78,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private scrollFrame = 0;
 	private animFrame = 0;
 	/** Focused navigation whose editor/template layout has not settled yet. */
-	private pendingFocusCenter: { section: DaySection; atEnd: boolean } | null = null;
+	private pendingFocusCenter: DaySection | null = null;
+	/** True once the focused editor, template and cursor reveal have settled. */
+	private pendingFocusCenterReady = false;
+	/** Final correction after scroll anchoring and editor-window work go quiet. */
+	private pendingFocusCenterTimer = 0;
 	/** Removes the reader-input listeners guarding `pendingFocusCenter`. */
 	private endPendingFocusCenter: (() => void) | null = null;
 	/** Delayed editor focus used only by the initial open on today. */
@@ -303,7 +307,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		) {
 			this.initialFocusTimer = window.setTimeout(() => {
 				this.initialFocusTimer = 0;
-				this.sectionAt(0)?.focusEditor(true);
+				const section = this.sectionAt(0);
+				if (section) this.focusAfterCenter(section, true);
 			}, 50);
 		}
 		// A short viewport may already sit near an end.
@@ -621,7 +626,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.centerOn(section, "instant");
 			if (this.focusOnFirstResize) {
 				this.focusOnFirstResize = false;
-				section.focusEditor();
+				this.focusAfterCenter(section, false);
 			}
 			this.onScroll();
 			return;
@@ -630,6 +635,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// A pane that changed size has a different set of days near enough to
 		// the viewport to be worth an editor.
 		this.editors.schedule();
+		this.schedulePendingFocusCenter();
 	}
 
 	/* ------------------------------------------------------------ scrolling */
@@ -644,6 +650,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.lastScrollAt = performance.now();
 		window.clearTimeout(this.settleTimer);
 		this.settleTimer = window.setTimeout(() => this.onSettle(), SETTLE_DELAY);
+		this.schedulePendingFocusCenter();
 
 		// Two steps, in this order. Within a frame, scroll events run before
 		// ResizeObserver callbacks - so when a day changed height in a
@@ -743,15 +750,15 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	private focusAfterCenter(section: DaySection, atEnd: boolean): void {
-		// A day that already owns focus has completed this path before; focusing it
-		// again changes no layout and needs no delayed correction.
-		if (!section.hasFocus) this.armPendingFocusCenter(section, atEnd);
+		// Even an editor that retained focus can have stale offscreen measurements.
+		this.armPendingFocusCenter(section);
 		section.focusEditor(atEnd);
 	}
 
-	private armPendingFocusCenter(section: DaySection, atEnd: boolean): void {
+	private armPendingFocusCenter(section: DaySection): void {
 		this.clearPendingFocusCenter();
-		this.pendingFocusCenter = { section, atEnd };
+		this.pendingFocusCenter = section;
+		this.pendingFocusCenterReady = false;
 		const cancel = (): void => this.clearPendingFocusCenter();
 		for (const type of CENTER_CANCEL_EVENTS) this.scrollEl.addEventListener(type, cancel, CENTER_CANCEL_LISTENER);
 		this.endPendingFocusCenter = () => {
@@ -761,8 +768,23 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private clearPendingFocusCenter(): void {
 		this.pendingFocusCenter = null;
+		this.pendingFocusCenterReady = false;
+		window.clearTimeout(this.pendingFocusCenterTimer);
+		this.pendingFocusCenterTimer = 0;
 		this.endPendingFocusCenter?.();
 		this.endPendingFocusCenter = null;
+	}
+
+	private schedulePendingFocusCenter(): void {
+		if (!this.pendingFocusCenter || !this.pendingFocusCenterReady) return;
+		window.clearTimeout(this.pendingFocusCenterTimer);
+		this.pendingFocusCenterTimer = window.setTimeout(() => {
+			this.pendingFocusCenterTimer = 0;
+			const section = this.pendingFocusCenter;
+			this.clearPendingFocusCenter();
+			if (!section?.el.isConnected || !section.hasFocus) return;
+			if (section.cardHeight <= this.scrollEl.clientHeight) this.centerOn(section, "instant");
+		}, SETTLE_DELAY);
 	}
 
 	private centerOn(section: DaySection | undefined, behavior: "instant" | "smooth", onArrive?: () => void): void {
@@ -813,7 +835,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.visited = null;
 		if (droppedVisited && this.plugin.settings.hideEmptyDays) {
 			void this.rebuild().then(() => {
-				if (focus) this.sectionAt(0)?.focusEditor(true);
+				const section = this.sectionAt(0);
+				if (focus && section) this.focusAfterCenter(section, true);
 			});
 			return;
 		}
@@ -822,7 +845,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			// Midnight has passed, or today was trimmed away after a long
 			// scroll - rebuilding recentres on today directly.
 			void this.rebuild().then(() => {
-				if (focus) this.sectionAt(0)?.focusEditor(true);
+				const section = this.sectionAt(0);
+				if (focus && section) this.focusAfterCenter(section, true);
 			});
 			return;
 		}
@@ -882,7 +906,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		}
 		if (changedVisited && this.plugin.settings.hideEmptyDays) {
 			void this.rebuild(day).then(() => {
-				if (focus) this.sectionAt(this.origin)?.focusEditor();
+				const section = this.sectionAt(this.origin);
+				if (focus && section) this.focusAfterCenter(section, false);
 			});
 			return;
 		}
@@ -895,13 +920,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			return;
 		}
 		void this.rebuild(day).then(() => {
-			if (focus) this.sectionAt(this.origin)?.focusEditor();
+			const section = this.sectionAt(this.origin);
+			if (focus && section) this.focusAfterCenter(section, false);
 		});
 	}
 
 	private focusOriginWhenReady(): void {
 		const section = this.sectionAt(this.origin);
-		if (this.centered && section) section.focusEditor();
+		if (this.centered && section) this.focusAfterCenter(section, false);
 		else this.focusOnFirstResize = true;
 	}
 
@@ -1057,14 +1083,18 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	onDayFocusSettled(day: DaySection): void {
-		const pending = this.pendingFocusCenter;
-		if (!pending || pending.section !== day) return;
-		this.clearPendingFocusCenter();
-		if (!day.el.isConnected || !day.hasFocus) return;
-		// The editor and any focus-offered template now have their real height.
-		// Repeating focus after centring preserves the cursor-at-end behavior for
-		// long notes, where the cursor matters more than the card's top edge.
-		this.centerOn(day, "instant", () => day.focusEditor(pending.atEnd));
+		if (this.pendingFocusCenter !== day) return;
+		if (!day.el.isConnected || !day.hasFocus || day.cardHeight > this.scrollEl.clientHeight) {
+			this.clearPendingFocusCenter();
+			return;
+		}
+		// The editor, any focus-offered template, and cursor reveal now have their
+		// layout. Centre now, then once more after anchoring and editor-window work
+		// caused by the long jump has gone quiet. A long note cannot be centred
+		// without hiding its insertion point, so its cursor reveal stays authoritative.
+		this.pendingFocusCenterReady = true;
+		this.centerOn(day, "instant");
+		this.schedulePendingFocusCenter();
 	}
 
 	private revalidatePaths(): void {

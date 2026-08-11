@@ -703,15 +703,20 @@ export class DaySection {
 		this.el.addClass("journal-day-focused");
 		// Focus is the one signal every way in shares - a click the editor
 		// swallowed, a keyboard tab, or a jump to a date.
+		this.scheduleFocusSettled();
+	}
+
+	private scheduleFocusSettled(): void {
 		const token = ++this.focusSettleToken;
 		void this.reportFocusSettled(token);
 	}
 
-	/** Waits through template insertion and the editor's resulting measurements. */
+	/** Waits through template insertion, editor measurement and cursor reveal. */
 	private async reportFocusSettled(token: number): Promise<void> {
 		await this.offerTemplate();
-		await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-		await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+		for (let frame = 0; frame < REVEAL_FRAMES + 2; frame++) {
+			await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+		}
 		if (this.destroyed || token !== this.focusSettleToken || !this.hasFocus) return;
 		this.host.onDayFocusSettled(this);
 	}
@@ -747,9 +752,13 @@ export class DaySection {
 		this.mountEditor();
 		if (!this.editor) return;
 		this.editor.focus();
-		if (!atEnd) return;
-		this.editor.placeCursorAtEnd?.(true);
-		this.keepCursorInView();
+		if (atEnd) {
+			this.editor.placeCursorAtEnd?.(true);
+			this.keepCursorInView();
+		}
+		// `focus()` emits nothing when this editor already owns focus. Navigation
+		// still needs a fresh measurement after it has returned from far offscreen.
+		this.scheduleFocusSettled();
 	}
 
 	/**
