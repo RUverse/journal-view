@@ -11,6 +11,7 @@ import { JournalFind, JournalFindHost } from "./find";
 import type { FindRange } from "./findText";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
+import { listenForReaderScrollIntent } from "./readerInput";
 
 export const VIEW_TYPE_JOURNAL = "journal-view";
 
@@ -24,9 +25,6 @@ const TRIM_KEEP_RATIO = 0.8;
 const TRIM_DISTANCE = LOAD_THRESHOLD * 2;
 /** Long jumps skip animation once the destination is further away than this many viewports. */
 const SMOOTH_CENTER_VIEWPORTS = 2;
-/** Reader input that cancels a pending post-focus navigation correction. */
-const CENTER_CANCEL_EVENTS = ["wheel", "touchmove", "pointerdown"] as const;
-const CENTER_CANCEL_LISTENER: AddEventListenerOptions = { capture: true, passive: true };
 /** Per-frame scroll step (px) above which the reader is still travelling. */
 const FLICK_STEP = 24;
 /** How long after the last scroll step the view still counts as moving (ms). */
@@ -111,6 +109,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private origin = 0;
 	/** A settings change that arrived while a build was in flight. */
 	private settingsPending = false;
+	/** Rebuild-affecting settings used by the current window. */
+	private appliedSettingsSignature = "";
+	/** Loaded-day target already applied without necessarily rebuilding. */
+	private appliedMaxLoadedDays = 0;
 	private configSignature = "";
 	private indexVersion = -1;
 	private initialDate?: Moment;
@@ -235,6 +237,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private async build(around?: Moment, focusToday = false): Promise<void> {
 		this.ready = false;
 		this.centered = false;
+		const settingsSignature = this.rebuildSettingsSignature();
+		const maxLoadedDays = this.plugin.settings.maxLoadedDays;
 		this.today = createMoment().startOf("day");
 		this.configSignature = JSON.stringify(this.plugin.daily.config());
 		this.plugin.index.ensureCurrent();
@@ -291,6 +295,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			return;
 		}
 		this.commit(sections, "end");
+		this.appliedSettingsSignature = settingsSignature;
+		this.appliedMaxLoadedDays = maxLoadedDays;
 
 		this.ready = true;
 		if (this.scrollEl.clientHeight > 0) {
@@ -739,10 +745,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	private centerTarget(section: DaySection): number {
-		return Math.max(
+		const target = Math.max(
 			0,
 			section.cardTop - Math.max(0, (this.scrollEl.clientHeight - section.cardHeight) / 2),
 		);
+		return Math.min(target, Math.max(0, this.scrollEl.scrollHeight - this.scrollEl.clientHeight));
 	}
 
 	private centerBehavior(section: DaySection): "instant" | "smooth" {
@@ -758,7 +765,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private focusAfterCenter(section: DaySection, atEnd: boolean): void {
 		// Even an editor that retained focus can have stale offscreen measurements.
 		this.armPendingFocusCenter(section);
-		section.focusEditor(atEnd);
+		if (!section.focusEditor(atEnd)) {
+			this.clearPendingFocusCenter();
+			return;
+		}
 		// Cursor reveal registers its frame during focus. Registering this one
 		// afterwards makes the centring correction the last write before paint.
 		this.schedulePendingFocusCenter();
@@ -769,11 +779,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.pendingFocusCenter = section;
 		this.pendingFocusCenterReadyAt = 0;
 		this.pendingFocusCenterStartedAt = performance.now();
-		const cancel = (): void => this.clearPendingFocusCenter();
-		for (const type of CENTER_CANCEL_EVENTS) this.scrollEl.addEventListener(type, cancel, CENTER_CANCEL_LISTENER);
-		this.endPendingFocusCenter = () => {
-			for (const type of CENTER_CANCEL_EVENTS) this.scrollEl.removeEventListener(type, cancel, CENTER_CANCEL_LISTENER);
-		};
+		this.endPendingFocusCenter = listenForReaderScrollIntent(this.scrollEl, () =>
+			this.clearPendingFocusCenter(),
+		);
 	}
 
 	private clearPendingFocusCenter(): void {
@@ -820,7 +828,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (!section?.el.isConnected || section.cardHeight > this.scrollEl.clientHeight) return;
 		const target = this.centerTarget(section);
 		if (Math.abs(target - this.scrollEl.scrollTop) < 0.5) return;
+		const before = this.scrollEl.scrollTop;
 		this.scrollEl.scrollTop = target;
+		if (Math.abs(this.scrollEl.scrollTop - before) < 0.5) return;
 		this.editors.declareScroll();
 		this.anchoring.pin();
 		// Stay through a full quiet period after the last correction.
@@ -1173,12 +1183,40 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.toolbar?.setFilter(this.plugin.settings.hideEmptyDays);
 	}
 
+	/** Settings whose existing day DOM cannot adopt safely in place. */
+	private rebuildSettingsSignature(): string {
+		const settings = this.plugin.settings;
+		return JSON.stringify({
+			dateFormat: settings.dateFormat,
+			folder: settings.folder,
+			templatePath: settings.templatePath,
+			headerFormat: settings.headerFormat,
+			showMonthSeparators: settings.showMonthSeparators,
+			groupDaysByYear: settings.groupDaysByYear,
+			richEditor: settings.richEditor,
+			hideEmptyDays: settings.hideEmptyDays,
+			daySortDirection: settings.daySortDirection,
+		});
+	}
+
 	async onSettingsChanged(): Promise<void> {
 		this.syncFilterButton();
 		if (!this.ready) {
 			// A build is in flight against the old values - dropping the change
 			// here would leave the toolbar and the days disagreeing.
 			this.settingsPending = true;
+			return;
+		}
+		const signature = this.rebuildSettingsSignature();
+		if (signature === this.appliedSettingsSignature) {
+			const previousMax = this.appliedMaxLoadedDays;
+			this.appliedMaxLoadedDays = this.plugin.settings.maxLoadedDays;
+			if (this.appliedMaxLoadedDays < previousMax) {
+				// The cap is live: trim both physical ends as far as nearby/focused
+				// protection allows, without replacing the reader's current window.
+				this.trim("start");
+				this.trim("end");
+			}
 			return;
 		}
 		// The editor kind, date format and hidden-day handling all affect every
