@@ -1,6 +1,6 @@
 import { ItemView, Scope, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
-import { AnchorHost, ScrollAnchor } from "./anchor";
+import { AnchorHost, START_GUTTER, ScrollAnchor } from "./anchor";
 import { DatePickerModal } from "./datePicker";
 import { DayHost, DaySection } from "./day";
 import { DayWalker, isOffsetReachable } from "./dayWalk";
@@ -258,7 +258,6 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.lastScrollAt = 0;
 		this.scrollStep = 0;
 		this.anchoring.resetSpacer();
-		if (this.scrollEl.clientHeight > 0) this.anchoring.setSpacer(this.anchoring.spacerBase());
 		this.attachResizeObserver();
 
 		// The chosen day, plus a few days either side.
@@ -300,6 +299,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 		this.ready = true;
 		if (this.scrollEl.clientHeight > 0) {
+			// Only now is it known whether days can still arrive above the first
+			// one, which is what decides the spacer's resting height.
+			this.anchoring.setSpacer(this.anchoring.spacerBase());
 			this.centerOn(this.sectionAt(origin), "instant");
 			this.centered = true;
 			// The days on screen become editors before the reader has looked at
@@ -590,6 +592,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.anchoring.settle();
 	}
 
+	/** True once the walk has run out of days to put above the first one. */
+	atTimelineStart(): boolean {
+		return this.exhausted.start;
+	}
+
 	onAnchorScroll(): void {
 		this.editors.declareScroll();
 	}
@@ -674,6 +681,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// by exactly the amount the day grew.
 		this.anchoring.settle();
 		this.anchoring.pin();
+		// Approaching the top of the timeline: give back the spacer before the
+		// reader is close enough to see it as blank.
+		this.anchoring.collapseStartSpacer();
 
 		if (this.scrollFrame) return;
 		this.scrollFrame = window.requestAnimationFrame(() => {
@@ -746,11 +756,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	/**
 	 * Today sits at the top of a newest-first timeline: everything a centred day
-	 * would be pushed down by is either empty future dates or the padding that
-	 * holds room for them. Resting it against the top of the viewport instead
-	 * shows as much of the day as the pane can hold, which is what the reader
-	 * came back for. Older days, and today in an oldest-first timeline, still
-	 * centre - they have real days on both sides.
+	 * would be pushed down by is either empty future dates or the room held for
+	 * them. Resting it just below the top of the viewport instead shows as much
+	 * of the day as the pane can hold, which is what the reader came back for.
+	 * Older days, and today in an oldest-first timeline, still centre - they
+	 * have real days on both sides.
 	 */
 	private restsAtTop(section: DaySection): boolean {
 		return this.sortStep() === -1 && section.offset === 0;
@@ -758,11 +768,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	/** Where the scroller has to sit for `section` to be in its resting place. */
 	private restTarget(section: DaySection): number {
-		const lead = this.restsAtTop(section)
-			? 0
-			: Math.max(0, (this.scrollEl.clientHeight - section.cardHeight) / 2);
-		const target = Math.max(0, section.cardTop - lead);
-		return Math.min(target, Math.max(0, this.scrollEl.scrollHeight - this.scrollEl.clientHeight));
+		// A day resting at the top is measured whole, headings included: they
+		// name the month the reader is arriving in, so they belong on screen.
+		const target = this.restsAtTop(section)
+			? section.dayTop - START_GUTTER
+			: section.cardTop - Math.max(0, (this.scrollEl.clientHeight - section.cardHeight) / 2);
+		const limit = Math.max(0, this.scrollEl.scrollHeight - this.scrollEl.clientHeight);
+		return Math.min(Math.max(0, target), limit);
 	}
 
 	private centerBehavior(section: DaySection): "instant" | "smooth" {
