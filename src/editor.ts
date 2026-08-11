@@ -22,7 +22,8 @@ export interface JournalEditorOptions {
 
 export interface JournalEditor {
 	getValue(): string;
-	setValue(value: string): void;
+	/** Replaces the contents; `preserveSelection` is for a clean external update. */
+	setValue(value: string, preserveSelection?: boolean): void;
 	setFile(file: TFile | null): void;
 	focus(): void;
 	hasFocus(): boolean;
@@ -95,6 +96,7 @@ interface InternalEditorInstance {
 	get?(): string | null;
 	set?(value: string, clear: boolean): void;
 	onUpdate?: (update: unknown, changed: boolean) => void;
+	load?(): void;
 	destroy?(): void;
 	unload?(): void;
 }
@@ -253,6 +255,12 @@ class RichEditor implements JournalEditor {
 			if (changed) this.options.onChange();
 		};
 
+		// The editor is normally added as a child of Obsidian's MarkdownEmbed,
+		// which loads it before assigning content. Constructing it directly skips
+		// that lifecycle unless we do it here. In particular, live-preview embeds
+		// only register their metadata-change listeners once their component tree
+		// is loaded.
+		instance.load?.();
 		this.instance.set?.(options.value, true);
 		this.dropScrollRequest();
 		this.reportInitialLayout();
@@ -304,9 +312,12 @@ class RichEditor implements JournalEditor {
 		}
 	}
 
-	setValue(value: string): void {
+	setValue(value: string, preserveSelection = false): void {
 		try {
-			this.instance?.set?.(value, true);
+			// Obsidian's non-clearing path applies the smallest document change,
+			// mapping the selection through it. Template offers retain the clearing
+			// behavior they have always used; only external updates ask to preserve.
+			this.instance?.set?.(value, !preserveSelection);
 			this.dropScrollRequest();
 		} catch (error) {
 			console.warn("Journal View: could not update editor contents", error);
@@ -510,9 +521,14 @@ class PlainEditor implements JournalEditor {
 		return this.textarea.value;
 	}
 
-	setValue(value: string): void {
+	setValue(value: string, preserveSelection = false): void {
 		if (this.textarea.value === value) return;
+		const selectionStart = this.textarea.selectionStart;
+		const selectionEnd = this.textarea.selectionEnd;
 		this.textarea.value = value;
+		if (preserveSelection && this.hasFocus()) {
+			this.textarea.setSelectionRange(selectionStart, selectionEnd);
+		}
 		this.autoGrow();
 	}
 
