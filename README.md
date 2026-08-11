@@ -39,6 +39,7 @@ vault handles daily notes.
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
+| Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
 
 ## Privacy
 
