@@ -5,15 +5,13 @@ import type { Moment } from "./moment";
 import { SaveQueue } from "./saveQueue";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
+import { listenForReaderScrollIntent } from "./readerInput";
 
 /**
  * Frames a cursor placed at the end of a day is kept on screen for, long
  * enough to outlast the centring and the rebuild that can follow a go-to.
  */
 const REVEAL_FRAMES = 10;
-/** The reader moving the journal themselves, which ends that hold at once. */
-const READER_SCROLL_EVENTS = ["wheel", "touchmove", "pointerdown"] as const;
-const REVEAL_LISTENER: AddEventListenerOptions = { capture: true, passive: true };
 
 /** The bits of the journal view a day needs to talk to. */
 export interface DayHost {
@@ -27,6 +25,8 @@ export interface DayHost {
 	isOffScreen(day: DaySection): boolean;
 	/** Re-indexes find results after this day's visible body changes. */
 	onDayContentChanged(day: DaySection): void;
+	/** Re-centres a navigation after focus-driven editor and template layout settles. */
+	onDayFocusSettled(day: DaySection): void;
 	/** Opens the journal-wide find UI from an embedded editor command. */
 	showFind(): void;
 }
@@ -37,6 +37,11 @@ export interface DayHost {
  */
 function noteBody(content: string): string {
 	return content.slice(getFrontMatterInfo(content).contentStart);
+}
+
+/** CodeMirror stores every line break as `\n`, regardless of the file's EOL. */
+function editorBody(content: string): string {
+	return noteBody(content).replace(/\r\n?/g, "\n");
 }
 
 function replaceNoteBody(content: string, body: string): string {
@@ -99,10 +104,14 @@ export class DaySection {
 	private endReveal: (() => void) | null = null;
 
 	private lastKnownContent = "";
+	/** An external write held off until this day's own pending edit has settled. */
+	private externalReloadPending = false;
 	/** Template text shown in an empty day but not yet accepted by the reader. */
 	private pendingTemplate: string | null = null;
 	private saveTimer = 0;
 	private focused = false;
+	/** Invalidates focus-settle work when focus leaves or the day is destroyed. */
+	private focusSettleToken = 0;
 	private readonly queue = new SaveQueue((value) => this.writeValue(value));
 	private findState: {
 		query: string;
@@ -212,7 +221,7 @@ export class DaySection {
 	 */
 	private async offerTemplate(): Promise<void> {
 		if (this.file || !this.editor || this.editor.getValue().length > 0) return;
-		const body = noteBody(await this.host.plugin.daily.templateContent(this.date));
+		const body = editorBody(await this.host.plugin.daily.templateContent(this.date));
 		// Reading the template yields, so everything above is re-checked: the
 		// reader may have typed, left, or the note may have appeared, in
 		// between. An offer landing after they left would have nothing to
@@ -240,11 +249,10 @@ export class DaySection {
 		}
 
 		this.pendingTemplate = null;
-		this.editor.setValue(noteBody(this.lastKnownContent));
+		this.editor.setValue(editorBody(this.lastKnownContent));
 		this.updateBlankState();
-		// A note can appear under an offer that is still standing - Sync, or
-		// another view. Its content was held off while the day had focus, so
-		// the day asks for it now rather than saving the offer over it.
+		// A note can appear between offering the template and this blur. Re-read
+		// it rather than leave the pre-offer content in the editor.
 		if (this.file) void this.reload();
 		return true;
 	}
@@ -272,6 +280,11 @@ export class DaySection {
 	/** Viewport position of stable day content, below any movable date headings. */
 	get contentTop(): number {
 		return this.headerEl.getBoundingClientRect().top;
+	}
+
+	/** Top of the whole day, headings included - where the day starts on screen. */
+	get dayTop(): number {
+		return this.el.offsetTop;
 	}
 
 	/** Card geometry excludes the optional year and month headings above the day. */
@@ -407,12 +420,12 @@ export class DaySection {
 		// An untouched template offer is not the reader's work, so it must not
 		// pin the day to edit mode or fend off content arriving from the vault.
 		if (value === this.pendingTemplate) return false;
-		return value !== noteBody(this.lastKnownContent);
+		return value !== editorBody(this.lastKnownContent);
 	}
 
 	/** The body as the reader sees it, including edits not yet written to disk. */
 	searchText(): string {
-		return this.editor?.getValue() ?? noteBody(this.lastKnownContent);
+		return this.editor?.getValue() ?? editorBody(this.lastKnownContent);
 	}
 
 	setFindState(
@@ -603,7 +616,7 @@ export class DaySection {
 		this.bodyEl.empty();
 		if (this.heldHeight > 0) this.bodyEl.setCssProps({ "--journal-held-height": `${this.heldHeight}px` });
 		this.el.addClass("journal-day-editing");
-		const body = noteBody(this.lastKnownContent);
+		const body = editorBody(this.lastKnownContent);
 		const placeholder = this.exists ? "Empty note" : "Start typing to create this note";
 		const token = this.modeToken;
 		try {
@@ -624,16 +637,7 @@ export class DaySection {
 						this.scheduleSave();
 						this.host.onDayContentChanged(this);
 					},
-					onFocus: () => {
-						this.focused = true;
-						// Measurement should normally have released the guard before
-						// the reader arrives; focus is the defensive fallback.
-						this.releaseHeight();
-						this.el.addClass("journal-day-focused");
-						// Focus is the one signal every way in shares - a click
-						// the editor swallowed, a keyboard tab, a jump to a date.
-						void this.offerTemplate();
-					},
+					onFocus: () => this.onEditorFocus(),
 					onBlur: () => this.onEditorBlur(),
 					onFind: () => this.host.showFind(),
 				},
@@ -694,8 +698,35 @@ export class DaySection {
 		this.bodyEl.setCssProps({ "--journal-held-height": "0px" });
 	}
 
+	private onEditorFocus(): void {
+		this.focused = true;
+		// Measurement should normally have released the guard before the
+		// reader arrives; focus is the defensive fallback.
+		this.releaseHeight();
+		this.el.addClass("journal-day-focused");
+		// Focus is the one signal every way in shares - a click the editor
+		// swallowed, a keyboard tab, or a jump to a date.
+		this.scheduleFocusSettled();
+	}
+
+	private scheduleFocusSettled(): void {
+		const token = ++this.focusSettleToken;
+		void this.reportFocusSettled(token);
+	}
+
+	/** Waits through template insertion, editor measurement and cursor reveal. */
+	private async reportFocusSettled(token: number): Promise<void> {
+		await this.offerTemplate();
+		for (let frame = 0; frame < REVEAL_FRAMES + 2; frame++) {
+			await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+		}
+		if (this.destroyed || token !== this.focusSettleToken || !this.hasFocus) return;
+		this.host.onDayFocusSettled(this);
+	}
+
 	/** Blurring an editor is not leaving the day, but it is a good time to save. */
 	private onEditorBlur(): void {
+		this.focusSettleToken++;
 		this.focused = false;
 		this.el.removeClass("journal-day-focused");
 		// Leaving a day the reader only looked at costs them nothing.
@@ -719,14 +750,20 @@ export class DaySection {
 	 * and coming home to it. Every other way in leaves the cursor where focus
 	 * put it: a day reached by date is one to read as much as to write in, and
 	 * find needs the cursor on the match it just revealed.
+	 * Returns false when the guarded editor mount failed.
 	 */
-	focusEditor(atEnd = false): void {
+	focusEditor(atEnd = false): boolean {
 		this.mountEditor();
-		if (!this.editor) return;
+		if (!this.editor) return false;
 		this.editor.focus();
-		if (!atEnd) return;
-		this.editor.placeCursorAtEnd?.(true);
-		this.keepCursorInView();
+		if (atEnd) {
+			this.editor.placeCursorAtEnd?.(true);
+			this.keepCursorInView();
+		}
+		// `focus()` emits nothing when this editor already owns focus. Navigation
+		// still needs a fresh measurement after it has returned from far offscreen.
+		this.scheduleFocusSettled();
+		return true;
 	}
 
 	/**
@@ -748,10 +785,7 @@ export class DaySection {
 		this.stopRevealing();
 		const scroller: EventTarget = this.el.closest(".journal-scroll") ?? this.el.ownerDocument;
 		const surrender = (): void => this.stopRevealing(true);
-		for (const type of READER_SCROLL_EVENTS) scroller.addEventListener(type, surrender, REVEAL_LISTENER);
-		this.endReveal = () => {
-			for (const type of READER_SCROLL_EVENTS) scroller.removeEventListener(type, surrender, REVEAL_LISTENER);
-		};
+		this.endReveal = listenForReaderScrollIntent(scroller, surrender);
 
 		let frames = REVEAL_FRAMES;
 		const step = (): void => {
@@ -783,19 +817,27 @@ export class DaySection {
 	applyExternalContent(content: string): void {
 		if (!this.editor) {
 			this.lastKnownContent = content;
+			this.externalReloadPending = false;
 			this.host.onDayContentChanged(this);
 			return;
 		}
-		const body = noteBody(content);
+		const body = editorBody(content);
 		if (this.editor.getValue() === body) {
 			this.lastKnownContent = content;
+			this.externalReloadPending = false;
 			return;
 		}
-		if (this.hasFocus || this.isDirty) return; // never clobber the user's typing
+		if (this.isDirty) {
+			// A metadata event held off by our pending save is not replayed. Retry
+			// once the queue settles so the editor reflects whichever write won.
+			this.externalReloadPending = true;
+			return;
+		}
 
 		this.pendingTemplate = null;
-		this.editor.setValue(body);
+		this.editor.setValue(body, true);
 		this.lastKnownContent = content;
+		this.externalReloadPending = false;
 		// The held height belongs to content that is no longer what the day
 		// holds; the editor's own height is the honest one now.
 		this.releaseHeight();
@@ -804,8 +846,8 @@ export class DaySection {
 	}
 
 	/** Brings the day up to date with the note's current content on disk. */
-	async reload(): Promise<void> {
-		const content = await this.readContent();
+	async reload(knownContent?: string): Promise<void> {
+		const content = knownContent ?? (await this.readContent());
 		if (this.destroyed) return;
 		if (this.editor) {
 			this.applyExternalContent(content);
@@ -833,13 +875,14 @@ export class DaySection {
 		const body = this.editor.getValue();
 		if (body === this.pendingTemplate) return; // an offer nobody accepted
 		this.pendingTemplate = null;
-		if (body !== noteBody(this.lastKnownContent)) void this.queue.submit(body);
+		if (body !== editorBody(this.lastKnownContent)) void this.queue.submit(body);
 	}
 
 	async flush(): Promise<void> {
 		window.clearTimeout(this.saveTimer);
 		this.capture();
 		await this.queue.settled();
+		if (!this.destroyed && this.externalReloadPending && !this.isDirty) await this.reload();
 	}
 
 	private async writeValue(body: string): Promise<boolean> {
@@ -899,6 +942,7 @@ export class DaySection {
 
 	destroy(): void {
 		this.destroyed = true;
+		this.focusSettleToken++;
 		window.clearTimeout(this.saveTimer);
 		this.stopRevealing();
 		// Anything unsaved goes to the queue, which outlives this object.

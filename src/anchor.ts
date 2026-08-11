@@ -1,6 +1,13 @@
 import type { DaySection } from "./day";
 import { findAnchorIndex } from "./scroll";
 
+/**
+ * Blank left above the first day once the timeline has nothing left to put
+ * there: enough to breathe, little enough that it reads as the top of the
+ * journal rather than a screen the reader has to scroll past.
+ */
+export const START_GUTTER = 24;
+
 /** The bits of the journal view the anchor needs to talk to. */
 export interface AnchorHost {
 	/** The scroller; its scroll position is what the anchor protects. */
@@ -9,6 +16,8 @@ export interface AnchorHost {
 	readonly daysEl: HTMLElement;
 	/** The live days, in order. */
 	readonly sections: DaySection[];
+	/** True when no further day can ever load above the first one. */
+	atTimelineStart(): boolean;
 	/** Declares a scroll position the anchor wrote itself. */
 	onAnchorScroll(): void;
 }
@@ -127,19 +136,42 @@ export class ScrollAnchor {
 	}
 
 	/**
-	 * Tops the padding above the first day back up to its resting height. The
-	 * spacer is what lets layout changes above the reader be absorbed without
-	 * touching the scroll position, so a run of them can spend it - and once it
-	 * is gone, corrections start writing scrollTop instead, which is what a
-	 * scroll feels as a stutter. Putting it back moves the scroll position by
-	 * exactly the height added, in the same task, so nothing on screen moves.
+	 * Returns the padding above the first day to its resting height. The spacer
+	 * is what lets layout changes above the reader be absorbed without touching
+	 * the scroll position, so a run of them can spend it - and once it is gone,
+	 * corrections start writing scrollTop instead, which is what a scroll feels
+	 * as a stutter. Putting it back moves the scroll position by exactly the
+	 * height added, in the same task, so nothing on screen moves.
 	 *
 	 * Returns true when it did the work, so the caller can treat the resulting
 	 * position as the reader's own.
 	 */
 	replenishSpacer(): boolean {
+		// Growing is the common case. Shrinking is only ever the gutter being
+		// taken back at the timeline start; a spacer that grew past its base to
+		// absorb a shift is left alone, since giving that back here could cost
+		// more scroll position than the reader has above them.
+		if (this.spacerHeight() > this.spacerBase() && !this.atStartGutter()) return false;
+		return this.restoreSpacer();
+	}
+
+	/**
+	 * Hands back the blank above the first day as soon as the reader is close
+	 * enough to reach it. Waiting for the scroll to stop would let them arrive
+	 * at the top, see the blank, and have it collected under them; a viewport
+	 * of warning is also what makes the give-back free, because the height
+	 * removed is still above the viewport and the scroll position can pay for
+	 * it in full.
+	 */
+	collapseStartSpacer(): void {
+		if (!this.atStartGutter() || this.spacerHeight() <= START_GUTTER) return;
+		this.restoreSpacer();
+	}
+
+	/** Moves the spacer to its resting height, compensated so nothing moves. */
+	private restoreSpacer(): boolean {
 		const base = this.spacerBase();
-		if (this.spacerHeight() >= base) return false;
+		if (this.spacerHeight() === base) return false;
 		const ref = this.host.sections.find((section) => section.isLaidOut)?.el;
 		if (!ref) return false;
 		const before = ref.offsetTop;
@@ -151,10 +183,27 @@ export class ScrollAnchor {
 		return true;
 	}
 
-	/** The spacer's resting height - the breathing room above the first day. */
+	/**
+	 * The spacer's resting height - the breathing room above the first day.
+	 *
+	 * Room to absorb shifts is only worth having where it cannot be seen. Once
+	 * the timeline has run out of days to put above the first one, and the
+	 * reader is within a viewport of it, the spacer is blank they could scroll
+	 * into, so it rests at a gutter instead. Both the scroll position and the
+	 * first day move together whenever the spacer changes, so that distance -
+	 * and with it this answer - does not change underneath the change itself.
+	 */
 	spacerBase(): number {
 		const height = this.host.scrollEl?.clientHeight ?? 0;
-		return height > 0 ? Math.round(height * 0.4) : this.spacerHeight();
+		if (height <= 0) return this.spacerHeight();
+		return this.atStartGutter() ? START_GUTTER : Math.round(height * 0.4);
+	}
+
+	private atStartGutter(): boolean {
+		if (!this.host.atTimelineStart()) return false;
+		const first = this.host.sections.find((section) => section.isLaidOut);
+		if (!first) return false;
+		return this.host.scrollEl.scrollTop - first.dayTop < this.host.scrollEl.clientHeight;
 	}
 
 	spacerHeight(): number {
