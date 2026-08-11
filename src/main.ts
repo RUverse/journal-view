@@ -9,6 +9,7 @@ import {
 	JournalViewSettings,
 	LEGACY_FULL_HEADER_FORMAT,
 	MONTH_SEPARATOR_DAY_FORMAT,
+	clampLoadedDays,
 	clampSaveDelay,
 } from "./settings";
 import type { DaySortDirection } from "./settings";
@@ -203,6 +204,7 @@ export default class JournalViewPlugin extends Plugin {
 				booleanSetting(saved.showYearSeparators, DEFAULT_SETTINGS.groupDaysByYear),
 			),
 			saveDelay: saveDelaySetting(saved.saveDelay),
+			maxLoadedDays: loadedDaysSetting(saved.maxLoadedDays),
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
@@ -237,6 +239,11 @@ function headerFormatSetting(value: unknown, hasGroupingSetting: boolean): strin
 function saveDelaySetting(value: unknown): number {
 	if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SETTINGS.saveDelay;
 	return clampSaveDelay(value);
+}
+
+function loadedDaysSetting(value: unknown): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_SETTINGS.maxLoadedDays;
+	return clampLoadedDays(value);
 }
 
 function booleanSetting(value: unknown, fallback: boolean): boolean {

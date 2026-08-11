@@ -5,6 +5,9 @@ import type JournalViewPlugin from "./main";
 export const MIN_SAVE_DELAY = 200;
 export const MAX_SAVE_DELAY = 3000;
 const SAVE_DELAY_STEP = 100;
+export const MIN_LOADED_DAYS = 20;
+export const MAX_LOADED_DAYS = 120;
+const LOADED_DAYS_STEP = 5;
 export const MONTH_SEPARATOR_DAY_FORMAT = "dddd, D";
 export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
@@ -25,6 +28,8 @@ export interface JournalViewSettings {
 	groupDaysByYear: boolean;
 	/** Milliseconds of inactivity before an edited day is written to disk. */
 	saveDelay: number;
+	/** Target maximum number of day sections kept in the timeline. */
+	maxLoadedDays: number;
 	/** Use Obsidian's own markdown editor inside the journal (live preview). */
 	richEditor: boolean;
 	/** Put the cursor in today's note when the view opens. */
@@ -45,6 +50,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	// Obsidian debounces its own `TextFileView.requestSave` by the same amount,
 	// so an edited day reaches disk as often as the note would in a normal pane.
 	saveDelay: 2000,
+	maxLoadedDays: 60,
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
@@ -79,7 +85,13 @@ interface JournalToggleSetting extends JournalSettingBase {
 }
 
 interface JournalSliderSetting extends JournalSettingBase {
-	control: { type: "slider"; key: "saveDelay"; min: number; max: number; step: number };
+	control: {
+		type: "slider";
+		key: "saveDelay" | "maxLoadedDays";
+		min: number;
+		max: number;
+		step: number;
+	};
 }
 
 interface JournalDropdownSetting extends JournalSettingBase {
@@ -219,6 +231,19 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							step: SAVE_DELAY_STEP,
 						},
 					},
+					{
+						name: "Days kept loaded",
+						desc:
+							"Target maximum number of days kept in the timeline. Lower values use less memory " +
+							"but reload days sooner. Focused and nearby days may temporarily exceed the target.",
+						control: {
+							type: "slider",
+							key: "maxLoadedDays",
+							min: MIN_LOADED_DAYS,
+							max: MAX_LOADED_DAYS,
+							step: LOADED_DAYS_STEP,
+						},
+					},
 				],
 			},
 		];
@@ -249,6 +274,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "saveDelay":
 				if (typeof value === "number" && Number.isFinite(value)) {
 					this.plugin.settings[key] = clampSaveDelay(value);
+					changed = true;
+				}
+				break;
+			case "maxLoadedDays":
+				if (typeof value === "number" && Number.isFinite(value)) {
+					this.plugin.settings[key] = clampLoadedDays(value);
 					changed = true;
 				}
 				break;
@@ -335,6 +366,11 @@ function isSettingKey(key: string): key is keyof JournalViewSettings {
 
 export function clampSaveDelay(value: number): number {
 	return Math.max(MIN_SAVE_DELAY, Math.min(MAX_SAVE_DELAY, value));
+}
+
+export function clampLoadedDays(value: number): number {
+	const clamped = Math.max(MIN_LOADED_DAYS, Math.min(MAX_LOADED_DAYS, value));
+	return Math.round(clamped / LOADED_DAYS_STEP) * LOADED_DAYS_STEP;
 }
 
 function showLegacySliderTooltip(slider: unknown): void {

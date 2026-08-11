@@ -18,12 +18,12 @@ export const VIEW_TYPE_JOURNAL = "journal-view";
 const INITIAL_RADIUS = 7;
 /** How close to an end (px) the reader must get before more days are loaded. */
 const LOAD_THRESHOLD = 1500;
-/** Above this many live days, the end furthest from the reader is trimmed. */
-const MAX_SECTIONS = 60;
-/** How many days survive a trim. */
-const TRIM_KEEP = 48;
+/** Fraction of the loaded-day target that survives a trim (60 -> 48 by default). */
+const TRIM_KEEP_RATIO = 0.8;
 /** Days closer than this (px) to the viewport are never trimmed. */
 const TRIM_DISTANCE = LOAD_THRESHOLD * 2;
+/** Long jumps skip animation once the destination is further away than this many viewports. */
+const SMOOTH_CENTER_VIEWPORTS = 2;
 /** Per-frame scroll step (px) above which the reader is still travelling. */
 const FLICK_STEP = 24;
 /** How long after the last scroll step the view still counts as moving (ms). */
@@ -489,8 +489,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 * scrolling back simply reloads it.
 	 */
 	private trim(end: TimelineEnd): void {
-		if (this.sections.length <= MAX_SECTIONS) return;
-		let budget = this.sections.length - TRIM_KEEP;
+		const maxSections = this.plugin.settings.maxLoadedDays;
+		if (this.sections.length <= maxSections) return;
+		const trimKeep = Math.floor(maxSections * TRIM_KEEP_RATIO);
+		let budget = this.sections.length - trimKeep;
 		const victims: DaySection[] = [];
 
 		if (end === "end") {
@@ -722,6 +724,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		);
 	}
 
+	private centerBehavior(section: DaySection): "instant" | "smooth" {
+		const distance = Math.abs(this.centerTarget(section) - this.scrollEl.scrollTop);
+		return distance > this.scrollEl.clientHeight * SMOOTH_CENTER_VIEWPORTS ? "instant" : "smooth";
+	}
+
 	private centerOn(section: DaySection | undefined, behavior: "instant" | "smooth", onArrive?: () => void): void {
 		if (!section) return;
 		if (this.animFrame) {
@@ -785,7 +792,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		}
 		// Focus only once the animation has arrived: focusing an editor makes
 		// the browser scroll it into view, which would fight the animation.
-		this.centerOn(section, "smooth", focus ? () => section.focusEditor(true) : undefined);
+		this.centerOn(section, this.centerBehavior(section), focus ? () => section.focusEditor(true) : undefined);
 	}
 
 	/** Opens the calendar, on the day the reader is currently looking at. */
@@ -848,7 +855,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (section) {
 			// Focusing only once the animation has arrived: focus scrolls the
 			// editor into view, which would fight it. Same as `goToToday`.
-			this.centerOn(section, "smooth", focus ? () => section.focusEditor() : undefined);
+			this.centerOn(section, this.centerBehavior(section), focus ? () => section.focusEditor() : undefined);
 			return;
 		}
 		void this.rebuild(day).then(() => {
