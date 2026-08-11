@@ -67,7 +67,7 @@ interface InternalCodeMirror {
  * window, where Obsidian floats its status bar over it, so a cursor scrolled to
  * the very edge is both cramped and liable to sit under that.
  */
-const REVEAL_LINES = 2;
+const REVEAL_LINES = 4;
 /** Used only when the editor cannot say how tall its lines are. */
 const FALLBACK_LINE_HEIGHT = 24;
 

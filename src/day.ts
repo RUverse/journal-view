@@ -282,6 +282,11 @@ export class DaySection {
 		return this.headerEl.getBoundingClientRect().top;
 	}
 
+	/** Top of the whole day, headings included - where the day starts on screen. */
+	get dayTop(): number {
+		return this.el.offsetTop;
+	}
+
 	/** Card geometry excludes the optional year and month headings above the day. */
 	get cardTop(): number {
 		return this.el.offsetTop + this.cardEl.offsetTop;

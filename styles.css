@@ -180,7 +180,9 @@ button.journal-find-button.is-active {
 	flex-direction: column;
 	/* Leaves room so the first and last day can still be centred. The view
 	   updates the custom property to absorb layout shifts above the reader
-	   without touching scrollTop. */
+	   without touching scrollTop, and drops it to a gutter once the timeline
+	   has no more days to put above the first one - room the reader cannot
+	   reach is worth having, blank they can scroll into is not. */
 	padding: var(--journal-padding-top, 40vh) var(--size-4-4) 40vh;
 	margin: 0 auto;
 	max-width: var(--file-line-width, 700px);
