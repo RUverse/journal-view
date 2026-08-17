@@ -75,6 +75,12 @@ export default class JournalViewPlugin extends Plugin {
 		this.register(() => this.clearDailyNoteActions());
 
 		this.registerView(VIEW_TYPE_JOURNAL, (leaf) => new JournalView(leaf, this));
+		this.app.workspace.onLayoutReady(() => {
+			if (!this.settings.openJournalOnStartup) return;
+			void this.activateView(false).catch((error: unknown) => {
+				console.error("Journal View: could not open on startup", error);
+			});
+		});
 
 		this.addRibbonIcon("notebook", "Open journal", () => void this.activateView());
 
@@ -259,6 +265,10 @@ export default class JournalViewPlugin extends Plugin {
 			maxLoadedDays: loadedDaysSetting(saved.maxLoadedDays),
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
+			openJournalOnStartup: booleanSetting(
+				saved.openJournalOnStartup,
+				DEFAULT_SETTINGS.openJournalOnStartup,
+			),
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
 			hideDailyNoteH1: booleanSetting(saved.hideDailyNoteH1, DEFAULT_SETTINGS.hideDailyNoteH1),
 			dayHeadingStyle: dayHeadingStyleSetting(saved.dayHeadingStyle),

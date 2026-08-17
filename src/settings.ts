@@ -36,6 +36,8 @@ export interface JournalViewSettings {
 	richEditor: boolean;
 	/** Put the cursor in today's note when the view opens. */
 	focusTodayOnOpen: boolean;
+	/** Open or reveal the journal after Obsidian restores the workspace. */
+	openJournalOnStartup: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
 	/** Hide a leading level-one heading while leaving it in the daily note file. */
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	maxLoadedDays: 60,
 	richEditor: true,
 	focusTodayOnOpen: true,
+	openJournalOnStartup: false,
 	hideEmptyDays: true,
 	hideDailyNoteH1: false,
 	dayHeadingStyle: "default",
@@ -76,6 +79,7 @@ type TextSettingKey = "dateFormat" | "folder" | "templatePath" | "headerFormat";
 type ToggleSettingKey =
 	| "richEditor"
 	| "focusTodayOnOpen"
+	| "openJournalOnStartup"
 	| "hideEmptyDays"
 	| "hideDailyNoteH1"
 	| "hideHeaderSeparator"
@@ -268,6 +272,17 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
+				heading: "Startup",
+				items: [
+					{
+						name: "Open journal on startup",
+						desc: "Open or reveal Journal View after Obsidian restores the workspace.",
+						control: { type: "toggle", key: "openJournalOnStartup" },
+					},
+				],
+			},
+			{
+				type: "group",
 				heading: "Advanced",
 				items: [
 					{
@@ -362,6 +377,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				break;
 			case "richEditor":
 			case "focusTodayOnOpen":
+			case "openJournalOnStartup":
 			case "hideEmptyDays":
 			case "hideDailyNoteH1":
 			case "hideHeaderSeparator":
