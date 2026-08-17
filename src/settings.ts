@@ -50,6 +50,8 @@ export interface JournalViewSettings {
 	focusTodayOnOpen: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
+	/** Hide the rule between a daily header and its note body. */
+	hideHeaderSeparator: boolean;
 	/** Tag and property rules that decide which existing notes are visible. */
 	filterRules: JournalFilterRule[];
 	/** Show frontmatter tags above each existing note's body. */
@@ -75,6 +77,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
+	hideHeaderSeparator: false,
 	filterRules: [],
 	showTags: false,
 	displayProperties: [],
@@ -87,6 +90,7 @@ type ToggleSettingKey =
 	| "richEditor"
 	| "focusTodayOnOpen"
 	| "hideEmptyDays"
+	| "hideHeaderSeparator"
 	| "showMonthSeparators"
 	| "groupDaysByYear";
 
@@ -227,6 +231,11 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						},
 					},
 					{
+						name: "Hide header separator",
+						desc: "Remove the line between each daily heading and its note contents.",
+						control: { type: "toggle", key: "hideHeaderSeparator" },
+					},
+					{
 						name: "Group days by year",
 						desc: "Show a centered year heading when consecutive visible days cross a year boundary.",
 						control: { type: "toggle", key: "groupDaysByYear" },
@@ -341,6 +350,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "richEditor":
 			case "focusTodayOnOpen":
 			case "hideEmptyDays":
+			case "hideHeaderSeparator":
 			case "showMonthSeparators":
 			case "groupDaysByYear":
 				if (typeof value === "boolean") {
