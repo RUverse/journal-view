@@ -164,8 +164,28 @@ export class DaySection {
 		this.bodyEl = this.cardEl.createDiv({ cls: "journal-day-body" });
 
 		this.el.addEventListener("click", (event) => this.onClick(event));
+		this.titleEl.addEventListener("click", (event) => this.onTitleClick(event));
+		this.titleEl.addEventListener("keydown", (event) => this.onTitleKeydown(event));
 
 		this.refreshState();
+	}
+
+	private onTitleClick(event: MouseEvent): void {
+		if (!this.canOpenFromTitle()) return;
+		event.preventDefault();
+		event.stopPropagation();
+		void this.openInTab(event.ctrlKey || event.metaKey);
+	}
+
+	private onTitleKeydown(event: KeyboardEvent): void {
+		if (event.key !== "Enter" || !this.canOpenFromTitle()) return;
+		event.preventDefault();
+		event.stopPropagation();
+		void this.openInTab(event.ctrlKey || event.metaKey);
+	}
+
+	private canOpenFromTitle(): boolean {
+		return this.exists && this.host.plugin.settings.openNoteAction === "heading";
 	}
 
 	private onClick(event: MouseEvent): void {
@@ -342,7 +362,7 @@ export class DaySection {
 
 		this.bodyEl.dataset.placeholder = this.exists ? "Empty note" : "Start typing to create this note";
 		this.actionsEl.empty();
-		setTooltip(this.titleEl, this.path, { placement: "right" });
+		this.syncHeaderSettings();
 
 		if (this.exists) {
 			const remove = this.actionsEl.createEl("button", {
@@ -355,7 +375,9 @@ export class DaySection {
 				void this.deleteNote();
 			});
 
-			const open = this.actionsEl.createEl("button", { cls: "clickable-icon journal-day-action" });
+			const open = this.actionsEl.createEl("button", {
+				cls: "clickable-icon journal-day-action journal-day-open",
+			});
 			setIcon(open, "file-text");
 			setTooltip(open, "Open note in a tab");
 			open.addEventListener("click", (event) => {
@@ -373,6 +395,20 @@ export class DaySection {
 				void this.createNow();
 			});
 		}
+	}
+
+	syncHeaderSettings(): void {
+		const clickable = this.canOpenFromTitle();
+		this.titleEl.toggleClass("journal-day-title-clickable", clickable);
+		if (clickable) {
+			this.titleEl.setAttribute("role", "link");
+			this.titleEl.setAttribute("tabindex", "0");
+			setTooltip(this.titleEl, `Open note: ${this.path}`, { placement: "right" });
+			return;
+		}
+		this.titleEl.removeAttribute("role");
+		this.titleEl.removeAttribute("tabindex");
+		setTooltip(this.titleEl, this.path, { placement: "right" });
 	}
 
 	private async deleteNote(): Promise<void> {

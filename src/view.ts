@@ -1211,6 +1211,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private syncDisplaySettings(): void {
 		this.containerEl.toggleClass("journal-heading-style-h1", this.plugin.settings.dayHeadingStyle === "h1");
+		this.containerEl.toggleClass(
+			"journal-open-note-button-hidden",
+			this.plugin.settings.openNoteAction !== "button",
+		);
+		for (const section of this.sections) section.syncHeaderSettings();
 	}
 
 	/** Settings whose existing day DOM cannot adopt safely in place. */

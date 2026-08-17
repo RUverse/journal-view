@@ -34,6 +34,7 @@ vault handles daily notes.
 | Day order | Oldest to newest | Reverses the complete timeline when set to newest to oldest |
 | Daily header format | `dddd, D MMMM` | Controls how each daily header displays its date |
 | Daily heading style | Journal View default | Can use the current theme's H1 typography for daily headings |
+| Open note control | Show button | Can hide the open-note button or replace it with a clickable daily heading |
 | Group days by year | On | Marks year boundaries between consecutive visible daily entries |
 | Group days by month | Off | Groups daily entries beneath compact month and year headings |
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |

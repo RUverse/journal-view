@@ -13,6 +13,7 @@ export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
 export type DayHeadingStyle = "default" | "h1";
+export type OpenNoteAction = "button" | "hidden" | "heading";
 
 export interface JournalViewSettings {
 	/** Overrides the daily-note date format. Empty = inherit from the vault. */
@@ -41,6 +42,8 @@ export interface JournalViewSettings {
 	hideDailyNoteH1: boolean;
 	/** Typography used by the date heading above each note. */
 	dayHeadingStyle: DayHeadingStyle;
+	/** How readers open a daily note from its journal header. */
+	openNoteAction: OpenNoteAction;
 	/** Chronological direction in which days are laid out. */
 	daySortDirection: DaySortDirection;
 }
@@ -61,6 +64,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	hideEmptyDays: true,
 	hideDailyNoteH1: false,
 	dayHeadingStyle: "default",
+	openNoteAction: "button",
 	daySortDirection: "ascending",
 };
 
@@ -113,6 +117,11 @@ type JournalDropdownSetting = JournalSettingBase & {
 				type: "dropdown";
 				key: "dayHeadingStyle";
 				options: Record<DayHeadingStyle, string>;
+			  }
+		| {
+				type: "dropdown";
+				key: "openNoteAction";
+				options: Record<OpenNoteAction, string>;
 			  };
 };
 
@@ -204,6 +213,19 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							type: "dropdown",
 							key: "dayHeadingStyle",
 							options: { default: "Journal View default", h1: "Theme H1" },
+						},
+					},
+					{
+						name: "Open note control",
+						desc: "Keep the open-note button, remove it, or open the note by clicking its daily heading.",
+						control: {
+							type: "dropdown",
+							key: "openNoteAction",
+							options: {
+								button: "Show button (default)",
+								hidden: "Hide button",
+								heading: "Use clickable heading",
+							},
 						},
 					},
 					{
@@ -319,6 +341,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				break;
 			case "dayHeadingStyle":
 				if (value === "default" || value === "h1") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
+			case "openNoteAction":
+				if (value === "button" || value === "hidden" || value === "heading") {
 					this.plugin.settings[key] = value;
 					changed = true;
 				}

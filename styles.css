@@ -295,6 +295,16 @@ button.journal-find-button.is-active {
 	min-width: 0;
 }
 
+.journal-day-title-clickable {
+	border-radius: var(--radius-s);
+	cursor: var(--cursor-link, pointer);
+}
+
+.journal-day-title-clickable:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus, var(--interactive-accent));
+	outline-offset: var(--size-2-1);
+}
+
 .journal-day-date {
 	font-size: var(--font-ui-small);
 	font-weight: var(--font-semibold);
@@ -343,6 +353,10 @@ button.journal-find-button.is-active {
 	opacity: 0;
 	transition: opacity 120ms ease-in-out;
 	flex: 0 0 auto;
+}
+
+.journal-open-note-button-hidden .journal-day-open {
+	display: none;
 }
 
 .journal-day:hover .journal-day-actions,

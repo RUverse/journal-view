@@ -12,7 +12,7 @@ import {
 	clampLoadedDays,
 	clampSaveDelay,
 } from "./settings";
-import type { DayHeadingStyle, DaySortDirection } from "./settings";
+import type { DayHeadingStyle, DaySortDirection, OpenNoteAction } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 
 export default class JournalViewPlugin extends Plugin {
@@ -210,6 +210,7 @@ export default class JournalViewPlugin extends Plugin {
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
 			hideDailyNoteH1: booleanSetting(saved.hideDailyNoteH1, DEFAULT_SETTINGS.hideDailyNoteH1),
 			dayHeadingStyle: dayHeadingStyleSetting(saved.dayHeadingStyle),
+			openNoteAction: openNoteActionSetting(saved.openNoteAction),
 			daySortDirection: daySortDirectionSetting(saved.daySortDirection),
 		};
 	}
@@ -258,4 +259,8 @@ function daySortDirectionSetting(value: unknown): DaySortDirection {
 
 function dayHeadingStyleSetting(value: unknown): DayHeadingStyle {
 	return value === "h1" ? "h1" : DEFAULT_SETTINGS.dayHeadingStyle;
+}
+
+function openNoteActionSetting(value: unknown): OpenNoteAction {
+	return value === "hidden" || value === "heading" ? value : DEFAULT_SETTINGS.openNoteAction;
 }
