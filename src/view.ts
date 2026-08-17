@@ -1215,6 +1215,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			"journal-open-note-button-hidden",
 			this.plugin.settings.openNoteAction !== "button",
 		);
+		this.containerEl.toggleClass(
+			"journal-header-separator-hidden",
+			this.plugin.settings.hideHeaderSeparator,
+		);
 		for (const section of this.sections) section.syncHeaderSettings();
 	}
 

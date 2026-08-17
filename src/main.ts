@@ -211,6 +211,10 @@ export default class JournalViewPlugin extends Plugin {
 			hideDailyNoteH1: booleanSetting(saved.hideDailyNoteH1, DEFAULT_SETTINGS.hideDailyNoteH1),
 			dayHeadingStyle: dayHeadingStyleSetting(saved.dayHeadingStyle),
 			openNoteAction: openNoteActionSetting(saved.openNoteAction),
+			hideHeaderSeparator: booleanSetting(
+				saved.hideHeaderSeparator,
+				DEFAULT_SETTINGS.hideHeaderSeparator,
+			),
 			daySortDirection: daySortDirectionSetting(saved.daySortDirection),
 		};
 	}

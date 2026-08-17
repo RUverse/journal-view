@@ -288,6 +288,10 @@ button.journal-find-button.is-active {
 	transition: opacity 120ms ease-in-out;
 }
 
+.journal-header-separator-hidden .journal-day-header {
+	border-bottom-color: transparent;
+}
+
 .journal-day-title {
 	display: flex;
 	align-items: baseline;

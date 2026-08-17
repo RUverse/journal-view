@@ -44,6 +44,8 @@ export interface JournalViewSettings {
 	dayHeadingStyle: DayHeadingStyle;
 	/** How readers open a daily note from its journal header. */
 	openNoteAction: OpenNoteAction;
+	/** Hide the rule between a daily header and its note body. */
+	hideHeaderSeparator: boolean;
 	/** Chronological direction in which days are laid out. */
 	daySortDirection: DaySortDirection;
 }
@@ -65,6 +67,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	hideDailyNoteH1: false,
 	dayHeadingStyle: "default",
 	openNoteAction: "button",
+	hideHeaderSeparator: false,
 	daySortDirection: "ascending",
 };
 
@@ -75,6 +78,7 @@ type ToggleSettingKey =
 	| "focusTodayOnOpen"
 	| "hideEmptyDays"
 	| "hideDailyNoteH1"
+	| "hideHeaderSeparator"
 	| "showMonthSeparators"
 	| "groupDaysByYear";
 
@@ -229,6 +233,11 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						},
 					},
 					{
+						name: "Hide header separator",
+						desc: "Remove the line between each daily heading and its note contents.",
+						control: { type: "toggle", key: "hideHeaderSeparator" },
+					},
+					{
 						name: "Group days by year",
 						desc: "Show a centered year heading when consecutive visible days cross a year boundary.",
 						control: { type: "toggle", key: "groupDaysByYear" },
@@ -355,6 +364,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "focusTodayOnOpen":
 			case "hideEmptyDays":
 			case "hideDailyNoteH1":
+			case "hideHeaderSeparator":
 			case "showMonthSeparators":
 			case "groupDaysByYear":
 				if (typeof value === "boolean") {
