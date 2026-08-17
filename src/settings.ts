@@ -50,6 +50,8 @@ export interface JournalViewSettings {
 	focusTodayOnOpen: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
+	/** Hide a leading level-one heading while leaving it in the daily note file. */
+	hideDailyNoteH1: boolean;
 	/** Tag and property rules that decide which existing notes are visible. */
 	filterRules: JournalFilterRule[];
 	/** Show frontmatter tags above each existing note's body. */
@@ -75,6 +77,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
+	hideDailyNoteH1: false,
 	filterRules: [],
 	showTags: false,
 	displayProperties: [],
@@ -87,6 +90,7 @@ type ToggleSettingKey =
 	| "richEditor"
 	| "focusTodayOnOpen"
 	| "hideEmptyDays"
+	| "hideDailyNoteH1"
 	| "showMonthSeparators"
 	| "groupDaysByYear";
 
@@ -248,6 +252,11 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							"Today is always shown. When off, every day appears, faded until you type in it.",
 						control: { type: "toggle", key: "hideEmptyDays" },
 					},
+					{
+						name: "Hide note H1 heading",
+						desc: "Hide a leading H1 from each entry in the journal while keeping it in the daily note file.",
+						control: { type: "toggle", key: "hideDailyNoteH1" },
+					},
 				],
 			},
 			{
@@ -341,6 +350,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "richEditor":
 			case "focusTodayOnOpen":
 			case "hideEmptyDays":
+			case "hideDailyNoteH1":
 			case "showMonthSeparators":
 			case "groupDaysByYear":
 				if (typeof value === "boolean") {

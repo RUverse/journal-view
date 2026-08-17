@@ -256,6 +256,7 @@ export default class JournalViewPlugin extends Plugin {
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
+			hideDailyNoteH1: booleanSetting(saved.hideDailyNoteH1, DEFAULT_SETTINGS.hideDailyNoteH1),
 			filterRules: filterRulesSetting(saved.filterRules),
 			showTags: booleanSetting(saved.showTags, DEFAULT_SETTINGS.showTags),
 			displayProperties: propertyNamesSetting(saved.displayProperties),
