@@ -304,6 +304,26 @@ button.journal-find-button.is-active {
 	text-overflow: ellipsis;
 }
 
+.journal-heading-style-h1 .journal-day-title {
+	font-family: var(--font-text);
+	font-size: var(--font-text-size);
+}
+
+.journal-heading-style-h1 .journal-day-date {
+	color: var(--h1-color, var(--text-normal));
+	font-family: var(--h1-font, inherit);
+	font-size: var(--h1-size, 2em);
+	font-style: var(--h1-style, normal);
+	font-variant: var(--h1-variant, normal);
+	font-weight: var(--h1-weight, var(--font-bold));
+	letter-spacing: var(--h1-letter-spacing, -0.015em);
+	line-height: var(--h1-line-height, var(--line-height-tight));
+}
+
+.journal-heading-style-h1 .journal-day-badge {
+	font-family: var(--font-interface);
+}
+
 /* A quiet marker, not a call to action: today is already highlighted by its
    background, so the badge only has to name it. */
 .journal-day-badge {

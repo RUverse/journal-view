@@ -12,6 +12,7 @@ export const MONTH_SEPARATOR_DAY_FORMAT = "dddd, D";
 export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
+export type DayHeadingStyle = "default" | "h1";
 
 export interface JournalViewSettings {
 	/** Overrides the daily-note date format. Empty = inherit from the vault. */
@@ -38,6 +39,8 @@ export interface JournalViewSettings {
 	hideEmptyDays: boolean;
 	/** Hide a leading level-one heading while leaving it in the daily note file. */
 	hideDailyNoteH1: boolean;
+	/** Typography used by the date heading above each note. */
+	dayHeadingStyle: DayHeadingStyle;
 	/** Chronological direction in which days are laid out. */
 	daySortDirection: DaySortDirection;
 }
@@ -57,6 +60,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
 	hideDailyNoteH1: false,
+	dayHeadingStyle: "default",
 	daySortDirection: "ascending",
 };
 
@@ -98,13 +102,19 @@ interface JournalSliderSetting extends JournalSettingBase {
 	};
 }
 
-interface JournalDropdownSetting extends JournalSettingBase {
-	control: {
-		type: "dropdown";
-		key: "daySortDirection";
-		options: Record<DaySortDirection, string>;
-	};
-}
+type JournalDropdownSetting = JournalSettingBase & {
+	control:
+		| {
+				type: "dropdown";
+				key: "daySortDirection";
+				options: Record<DaySortDirection, string>;
+			  }
+		| {
+				type: "dropdown";
+				key: "dayHeadingStyle";
+				options: Record<DayHeadingStyle, string>;
+			  };
+};
 
 type JournalSetting =
 	| JournalInfoSetting
@@ -185,6 +195,15 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							type: "text",
 							key: "headerFormat",
 							placeholder: DEFAULT_SETTINGS.headerFormat,
+						},
+					},
+					{
+						name: "Daily heading style",
+						desc: "Use Journal View's compact heading or the H1 typography supplied by your theme.",
+						control: {
+							type: "dropdown",
+							key: "dayHeadingStyle",
+							options: { default: "Journal View default", h1: "Theme H1" },
 						},
 					},
 					{
@@ -294,6 +313,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				break;
 			case "daySortDirection":
 				if (value === "ascending" || value === "descending") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
+			case "dayHeadingStyle":
+				if (value === "default" || value === "h1") {
 					this.plugin.settings[key] = value;
 					changed = true;
 				}

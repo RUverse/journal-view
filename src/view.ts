@@ -159,6 +159,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	async onOpen(): Promise<void> {
 		this.containerEl.addClass("journal-view");
+		this.syncDisplaySettings();
 		this.contentEl.empty();
 		this.contentEl.addClass("journal-content");
 
@@ -1208,6 +1209,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.toolbar?.setFilter(this.plugin.settings.hideEmptyDays);
 	}
 
+	private syncDisplaySettings(): void {
+		this.containerEl.toggleClass("journal-heading-style-h1", this.plugin.settings.dayHeadingStyle === "h1");
+	}
+
 	/** Settings whose existing day DOM cannot adopt safely in place. */
 	private rebuildSettingsSignature(): string {
 		const settings = this.plugin.settings;
@@ -1227,6 +1232,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	async onSettingsChanged(): Promise<void> {
 		this.syncFilterButton();
+		this.syncDisplaySettings();
 		if (!this.ready) {
 			// A build is in flight against the old values - dropping the change
 			// here would leave the toolbar and the days disagreeing.
