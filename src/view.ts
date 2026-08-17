@@ -11,6 +11,7 @@ import { JournalFind, JournalFindHost } from "./find";
 import type { FindRange } from "./findText";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
+import { DAY_KEY_FORMAT } from "./noteIndex";
 import { listenForReaderScrollIntent } from "./readerInput";
 
 export const VIEW_TYPE_JOURNAL = "journal-view";
@@ -89,8 +90,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private endPendingFocusCenter: (() => void) | null = null;
 	/** Delayed editor focus used only by the initial open on today. */
 	private initialFocusTimer = 0;
-	/** Focus requested while the pane still had no measurable height. */
-	private focusOnFirstResize = false;
+	/** Cursor placement requested while the pane still had no measurable height. */
+	private focusOnFirstResizeAtEnd: boolean | null = null;
 	/** True while a pointer is held down in the scroller (scrollbar, selection). */
 	private pointerHeld = false;
 	/** Scroll position and pace, used to keep editor work out of a gesture. */
@@ -115,7 +116,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private appliedMaxLoadedDays = 0;
 	private configSignature = "";
 	private indexVersion = -1;
-	private initialDate?: Moment;
+	private initialTarget?: { date: Moment; focusAtEnd: boolean; keepVisible: boolean };
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -137,7 +138,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.showFind();
 			return false;
 		});
-		this.initialDate = plugin.consumeInitialDate(leaf);
+		this.initialTarget = plugin.consumeInitialTarget(leaf);
 		// Opening a note (from a day header, or a link inside a day) must not
 		// replace the journal itself.
 		this.navigation = false;
@@ -183,11 +184,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerDomEvent(this.containerEl, "keydown", (event) => this.onKeydown(event), { capture: true });
 		this.registerVaultEvents();
 
-		const initialDate = this.initialDate;
-		this.initialDate = undefined;
-		if (initialDate) this.visited = initialDate.clone().startOf("day");
+		const initialTarget = this.initialTarget;
+		this.initialTarget = undefined;
+		const initialDate = initialTarget?.date;
+		if (initialDate && initialTarget.keepVisible) {
+			this.visited = initialDate.clone().startOf("day");
+		}
 		await this.build(initialDate, !initialDate);
-		if (initialDate) this.focusOriginWhenReady();
+		if (initialTarget) this.focusOriginWhenReady(initialTarget.focusAtEnd);
 	}
 
 	async onClose(): Promise<void> {
@@ -215,7 +219,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.clearPendingFocusCenter();
 		window.clearTimeout(this.initialFocusTimer);
 		this.initialFocusTimer = 0;
-		this.focusOnFirstResize = false;
+		this.focusOnFirstResizeAtEnd = null;
 		window.clearTimeout(this.settleTimer);
 		this.settleTimer = 0;
 		for (const section of this.sections) section.destroy();
@@ -642,9 +646,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.centered = true;
 			this.editors.update({ includeVisible: true });
 			this.centerOn(section, "instant");
-			if (this.focusOnFirstResize) {
-				this.focusOnFirstResize = false;
-				this.focusAfterCenter(section, false);
+			if (this.focusOnFirstResizeAtEnd !== null) {
+				const atEnd = this.focusOnFirstResizeAtEnd;
+				this.focusOnFirstResizeAtEnd = null;
+				this.focusAfterCenter(section, atEnd);
 			}
 			this.onScroll();
 			return;
@@ -931,6 +936,55 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.centerSection(section, focus, true);
 	}
 
+	/** Command navigation that keeps the same near-scroll and far-snap behavior as Today. */
+	goToCommandDate(date: Moment, focus = false): void {
+		if (!this.scrollEl?.isConnected) return;
+		window.clearTimeout(this.initialFocusTimer);
+		this.initialFocusTimer = 0;
+
+		this.plugin.index.ensureCurrent();
+		const day = date.clone().startOf("day");
+		const offset = day.diff(this.today, "days");
+		const key = day.format(DAY_KEY_FORMAT);
+		const indexed = this.plugin.index.has(key);
+		if (!isOffsetReachable(offset, indexed)) return;
+
+		const previousVisited = this.visited;
+		const addedHiddenVisited =
+			this.plugin.settings.hideEmptyDays &&
+			!indexed &&
+			!previousVisited?.isSame(day, "day");
+		const droppedHiddenVisited =
+			this.plugin.settings.hideEmptyDays &&
+			!!previousVisited &&
+			!previousVisited.isSame(day, "day") &&
+			!this.plugin.index.has(previousVisited.format(DAY_KEY_FORMAT));
+		this.visited = this.plugin.settings.hideEmptyDays && !indexed ? day : null;
+
+		const now = createMoment().startOf("day");
+		if (
+			!this.centered ||
+			!now.isSame(this.today, "day") ||
+			addedHiddenVisited ||
+			droppedHiddenVisited
+		) {
+			void this.rebuild(day).then(() => {
+				if (focus) this.focusOriginWhenReady(true);
+			});
+			return;
+		}
+
+		const section = this.sectionAt(offset);
+		if (section) {
+			this.centerSection(section, focus, true);
+			return;
+		}
+		void this.rebuild(day).then(() => {
+			const rebuilt = this.sectionAt(this.origin);
+			if (focus && rebuilt) this.focusAfterCenter(rebuilt, true);
+		});
+	}
+
 	/** Opens the calendar, on the day the reader is currently looking at. */
 	private openDatePicker(): void {
 		// The dots come straight from the index, so it has to agree with the
@@ -968,7 +1022,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const day = date.clone().startOf("day");
 		const offset = day.diff(this.today, "days");
 		const indexed = this.plugin.index.has(this.walker.keyFor(offset));
-		if (!isOffsetReachable(offset, this.plugin.settings.hideEmptyDays, indexed)) return;
+		if (!isOffsetReachable(offset, indexed)) return;
 		const changedVisited = !this.visited?.isSame(day, "day");
 		this.visited = day;
 		// A view built while hidden has not committed to a scroll position yet.
@@ -1001,10 +1055,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		});
 	}
 
-	private focusOriginWhenReady(): void {
+	private focusOriginWhenReady(atEnd = false): void {
 		const section = this.sectionAt(this.origin);
-		if (this.centered && section) this.focusAfterCenter(section, false);
-		else this.focusOnFirstResize = true;
+		if (this.centered && section) this.focusAfterCenter(section, atEnd);
+		else this.focusOnFirstResizeAtEnd = atEnd;
 	}
 
 	private updateHeaderLabel(): void {

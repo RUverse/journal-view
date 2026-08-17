@@ -6,12 +6,12 @@ import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
 export const MAX_OFFSET = 5000;
 
 /**
- * Empty calendar days stay inside the hard stop. When they are hidden, an
- * indexed note is safe at any distance because the walker jumps straight to
- * it rather than materialising every date in between.
+ * Empty calendar days stay inside the hard stop. An indexed note is safe at
+ * any distance when used as a rebuild origin because the view starts directly
+ * on it rather than materialising every date in between.
  */
-export function isOffsetReachable(offset: number, hideEmpty: boolean, indexed: boolean): boolean {
-	return Number.isFinite(offset) && (Math.abs(offset) <= MAX_OFFSET || (hideEmpty && indexed));
+export function isOffsetReachable(offset: number, indexed: boolean): boolean {
+	return Number.isFinite(offset) && (Math.abs(offset) <= MAX_OFFSET || indexed);
 }
 
 /**
@@ -77,7 +77,7 @@ export class DayWalker {
 			return direction < 0 ? Math.max(...candidates) : Math.min(...candidates);
 		}
 		const offset = from + direction;
-		return isOffsetReachable(offset, false, false) ? offset : null;
+		return isOffsetReachable(offset, false) ? offset : null;
 	}
 
 	/** True for a day that is shown whether or not it has a note. */
@@ -116,6 +116,6 @@ export class DayWalker {
 	}
 
 	private isReachable(offset: number): boolean {
-		return isOffsetReachable(offset, this.hideEmpty(), this.index.has(this.keyFor(offset)));
+		return isOffsetReachable(offset, this.index.has(this.keyFor(offset)));
 	}
 }

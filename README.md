@@ -45,6 +45,14 @@ vault handles daily notes.
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
 
+## Date commands
+
+- **Go to today** opens the journal when needed, then focuses today's entry.
+- **Go to yesterday** focuses yesterday or the closest earlier daily note.
+- **Go to tomorrow** focuses tomorrow or the closest later daily note.
+
+All three commands scroll when the target is nearby and snap when it is more than two view heights away.
+
 ## Privacy
 
 Journal View works locally with files in your Obsidian vault. It does not make network requests,
