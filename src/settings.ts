@@ -48,6 +48,8 @@ export interface JournalViewSettings {
 	richEditor: boolean;
 	/** Put the cursor in today's note when the view opens. */
 	focusTodayOnOpen: boolean;
+	/** Open or reveal the journal after Obsidian restores the workspace. */
+	openJournalOnStartup: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
 	/** Tag and property rules that decide which existing notes are visible. */
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	maxLoadedDays: 60,
 	richEditor: true,
 	focusTodayOnOpen: true,
+	openJournalOnStartup: false,
 	hideEmptyDays: true,
 	filterRules: [],
 	showTags: false,
@@ -86,6 +89,7 @@ type TextSettingKey = "dateFormat" | "folder" | "templatePath" | "headerFormat";
 type ToggleSettingKey =
 	| "richEditor"
 	| "focusTodayOnOpen"
+	| "openJournalOnStartup"
 	| "hideEmptyDays"
 	| "showMonthSeparators"
 	| "groupDaysByYear";
@@ -252,6 +256,17 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
+				heading: "Startup",
+				items: [
+					{
+						name: "Open journal on startup",
+						desc: "Open or reveal Journal View after Obsidian restores the workspace.",
+						control: { type: "toggle", key: "openJournalOnStartup" },
+					},
+				],
+			},
+			{
+				type: "group",
 				heading: "Advanced",
 				items: [
 					{
@@ -340,6 +355,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				break;
 			case "richEditor":
 			case "focusTodayOnOpen":
+			case "openJournalOnStartup":
 			case "hideEmptyDays":
 			case "showMonthSeparators":
 			case "groupDaysByYear":
