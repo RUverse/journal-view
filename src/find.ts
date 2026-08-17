@@ -249,7 +249,7 @@ export class JournalFind {
 				const date = createMoment(key, "YYYY-MM-DD", true).startOf("day");
 				if (!date.isValid()) continue;
 				const offset = date.diff(today, "days");
-				if (!isOffsetReachable(offset, this.host.plugin.settings.hideEmptyDays, true)) continue;
+				if (!isOffsetReachable(offset, true)) continue;
 				const file = this.host.plugin.daily.fileFor(date);
 				if (!file) continue;
 				let content: string;

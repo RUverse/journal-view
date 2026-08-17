@@ -69,6 +69,14 @@ Journal View is a custom view, so the Homepage plugin cannot select it as a home
 **Open journal on startup** in Journal View instead. If you also use Homepage, configure only one of
 the two plugins to open content at startup so they do not compete for the active tab.
 
+## Date commands
+
+- **Go to today** opens the journal when needed, then focuses today's entry.
+- **Go to yesterday** focuses the closest visible earlier daily note, or yesterday when empty days are shown.
+- **Go to tomorrow** focuses the closest visible later daily note, or tomorrow when empty days are shown.
+
+All three commands scroll when the target is nearby and snap when it is more than two view heights away.
+
 ## Privacy
 
 Journal View works locally with files in your Obsidian vault. It does not make network requests,
