@@ -37,6 +37,7 @@ vault handles daily notes.
 | Group days by month | Off | Groups daily entries beneath compact month and year headings |
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |
+| Hide note H1 heading | Off | Hides a leading H1 in the journal while keeping it in the daily note file |
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |

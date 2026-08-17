@@ -1218,6 +1218,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			headerFormat: settings.headerFormat,
 			showMonthSeparators: settings.showMonthSeparators,
 			groupDaysByYear: settings.groupDaysByYear,
+			hideDailyNoteH1: settings.hideDailyNoteH1,
 			richEditor: settings.richEditor,
 			hideEmptyDays: settings.hideEmptyDays,
 			daySortDirection: settings.daySortDirection,
