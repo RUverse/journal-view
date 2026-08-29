@@ -70,6 +70,8 @@ interface InternalCodeMirror {
 const REVEAL_LINES = 4;
 /** Used only when the editor cannot say how tall its lines are. */
 const FALLBACK_LINE_HEIGHT = 24;
+/** Republish after Obsidian's async file read and delayed focus notification. */
+const WORKSPACE_CONTENT_DELAY = 50;
 
 const setFindDecorations = StateEffect.define<DecorationSet>();
 const findDecorations = StateField.define<DecorationSet>({
@@ -95,7 +97,7 @@ interface InternalEditorInstance {
 	editor?: InternalEditorApi;
 	get?(): string | null;
 	set?(value: string, clear: boolean): void;
-	onUpdate?: (update: unknown, changed: boolean) => void;
+	onUpdate?: (update: { selectionSet?: boolean }, changed: boolean) => void;
 	load?(): void;
 	destroy?(): void;
 	unload?(): void;
@@ -120,6 +122,12 @@ interface ActiveEditorOwner {
 	file: TFile | null;
 }
 
+interface WorkspaceEditorHost {
+	activeEditor: unknown;
+	getActiveFile(): TFile | null;
+	trigger(name: string, ...data: unknown[]): void;
+}
+
 type WorkspaceEditorUpdate = "claim" | "release" | "file";
 
 function focusStayedInside(container: HTMLElement, event: FocusEvent): boolean {
@@ -140,11 +148,7 @@ function updateWorkspaceEditor(
 	notifyRelease = false,
 ): void {
 	try {
-		const workspace = app.workspace as unknown as {
-			activeEditor: unknown;
-			getActiveFile(): TFile | null;
-			trigger(name: string, ...data: unknown[]): void;
-		};
+		const workspace = app.workspace as unknown as WorkspaceEditorHost;
 		if (update === "claim") {
 			// The embedded editor itself may have assigned this owner before its
 			// focus event bubbles to us; it does not emit the file notification.
@@ -164,6 +168,23 @@ function updateWorkspaceEditor(
 		}
 	} catch (error) {
 		console.warn("Journal View: could not update the workspace editor", error);
+	}
+}
+
+/**
+ * Publishes the focused editor's in-memory text through the same workspace
+ * event as a native Markdown view. Core consumers such as Word Count use this
+ * instead of `editor-change`, because the vault can still hold an older value
+ * while the editor is being changed.
+ */
+function publishWorkspaceContent(app: App, owner: ActiveEditorOwner, content: string): void {
+	try {
+		const workspace = app.workspace as unknown as WorkspaceEditorHost;
+		if (owner.file && workspace.activeEditor === owner) {
+			workspace.trigger("quick-preview", owner.file, content);
+		}
+	} catch (error) {
+		console.warn("Journal View: could not publish the active editor content", error);
 	}
 }
 
@@ -212,6 +233,7 @@ class RichEditor implements JournalEditor {
 	private owner: InternalEditorOwner;
 	private focusIn: (event: FocusEvent) => void;
 	private focusOut: (event: FocusEvent) => void;
+	private workspaceContentTimer = 0;
 	private readyFrame = 0;
 	private readyReported = false;
 	private destroyed = false;
@@ -250,8 +272,13 @@ class RichEditor implements JournalEditor {
 
 		const instance = this.instance;
 		const original = instance.onUpdate;
-		instance.onUpdate = (update: unknown, changed: boolean) => {
+		instance.onUpdate = (update, changed) => {
 			original?.call(instance, update, changed);
+			// Obsidian's selection event falls back to the active file view when
+			// the selection is empty. A journal is not a file view, so republish
+			// this day's text after both edits and collapsed-cursor moves. Leave a
+			// real selection alone: Word Count intentionally reports its count.
+			if (changed || update.selectionSet) this.scheduleWorkspaceContent();
 			if (changed) this.options.onChange();
 		};
 
@@ -268,15 +295,42 @@ class RichEditor implements JournalEditor {
 		this.focusIn = (event) => {
 			if (focusStayedInside(options.container, event)) return;
 			updateWorkspaceEditor(this.options.app, this.owner, "claim");
+			this.scheduleWorkspaceContent();
 			this.options.onFocus();
 		};
 		this.focusOut = (event) => {
 			if (focusStayedInside(options.container, event)) return;
+			this.cancelWorkspaceContent();
 			updateWorkspaceEditor(this.options.app, this.owner, "release");
 			this.options.onBlur();
 		};
 		options.container.addEventListener("focusin", this.focusIn);
 		options.container.addEventListener("focusout", this.focusOut);
+	}
+
+	/**
+	 * Publishes now, then once more after the file-open read and focus events
+	 * normally settle. A real selection keeps Obsidian's selection count.
+	 */
+	private scheduleWorkspaceContent(): void {
+		this.cancelWorkspaceContent();
+		if (this.owner.getSelection()) return;
+		this.publishCurrentContent();
+		this.workspaceContentTimer = window.setTimeout(() => {
+			this.workspaceContentTimer = 0;
+			if (!this.destroyed) this.publishCurrentContent();
+		}, WORKSPACE_CONTENT_DELAY);
+	}
+
+	/** A failed internal read must not masquerade as an empty note. */
+	private publishCurrentContent(): void {
+		const content = this.readValue();
+		if (content !== null) publishWorkspaceContent(this.options.app, this.owner, content);
+	}
+
+	private cancelWorkspaceContent(): void {
+		if (this.workspaceContentTimer) window.clearTimeout(this.workspaceContentTimer);
+		this.workspaceContentTimer = 0;
 	}
 
 	/** Releases the preview-height guard only after CodeMirror has measured its DOM. */
@@ -302,14 +356,18 @@ class RichEditor implements JournalEditor {
 		this.options.onReady();
 	}
 
-	getValue(): string {
+	private readValue(): string | null {
 		try {
 			if (typeof this.instance?.get === "function") return this.instance.get() ?? "";
 			return this.instance?.editor?.getValue?.() ?? "";
 		} catch (error) {
 			console.warn("Journal View: could not read editor contents", error);
-			return "";
+			return null;
 		}
+	}
+
+	getValue(): string {
+		return this.readValue() ?? "";
 	}
 
 	setValue(value: string, preserveSelection = false): void {
@@ -346,6 +404,7 @@ class RichEditor implements JournalEditor {
 		this.options.file = file;
 		this.owner.file = file;
 		updateWorkspaceEditor(this.options.app, this.owner, "file");
+		this.scheduleWorkspaceContent();
 	}
 
 	focus(): void {
@@ -459,6 +518,7 @@ class RichEditor implements JournalEditor {
 
 	destroy(): void {
 		this.destroyed = true;
+		this.cancelWorkspaceContent();
 		if (this.readyFrame) window.cancelAnimationFrame(this.readyFrame);
 		this.readyFrame = 0;
 		this.options.container.removeEventListener("focusin", this.focusIn);
