@@ -26,15 +26,22 @@ export default class JournalViewPlugin extends Plugin {
 	private initialDates = new Map<WorkspaceLeaf, Moment>();
 
 	private notifyViews = debounce(
-		() => {
-			for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_JOURNAL)) {
-				const view = leaf.view;
-				if (view instanceof JournalView) void view.onSettingsChanged();
-			}
-		},
+		() => this.updateViews(),
 		400,
 		true,
 	);
+
+	private updateViews(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_JOURNAL)) {
+			const view = leaf.view;
+			if (view instanceof JournalView) void view.onSettingsChanged();
+		}
+	}
+
+	/** Applies modal controls live without the settings tab's typing debounce. */
+	notifyViewsImmediately(): void {
+		this.updateViews();
+	}
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -192,7 +199,7 @@ export default class JournalViewPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const saved: unknown = await this.loadData();
 		if (!isRecord(saved)) {
-			this.settings = { ...DEFAULT_SETTINGS };
+			this.settings = { ...DEFAULT_SETTINGS, displayProperties: [] };
 			return;
 		}
 		this.settings = {
@@ -213,14 +220,16 @@ export default class JournalViewPlugin extends Plugin {
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
+			showTags: booleanSetting(saved.showTags, DEFAULT_SETTINGS.showTags),
+			displayProperties: propertyNamesSetting(saved.displayProperties),
 			daySortDirection: daySortDirectionSetting(saved.daySortDirection),
 		};
 	}
 
-	async saveSettings(): Promise<void> {
+	async saveSettings(scheduleViewUpdate = true): Promise<void> {
 		await this.saveData(this.settings);
 		this.syncDailyNoteActions();
-		this.notifyViews();
+		if (scheduleViewUpdate) this.notifyViews();
 	}
 }
 
@@ -253,6 +262,21 @@ function loadedDaysSetting(value: unknown): number {
 
 function booleanSetting(value: unknown, fallback: boolean): boolean {
 	return typeof value === "boolean" ? value : fallback;
+}
+
+function propertyNamesSetting(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	const names: string[] = [];
+	const seen = new Set<string>();
+	for (const item of value) {
+		if (typeof item !== "string") continue;
+		const name = item.trim();
+		const key = name.toLocaleLowerCase();
+		if (!name || key === "tags" || seen.has(key)) continue;
+		seen.add(key);
+		names.push(name);
+	}
+	return names;
 }
 
 function daySortDirectionSetting(value: unknown): DaySortDirection {
