@@ -1,5 +1,6 @@
 import { MarkdownView, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
+import { WorkspaceEditorBridge } from "./editor";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
@@ -19,6 +20,7 @@ export default class JournalViewPlugin extends Plugin {
 	settings: JournalViewSettings = { ...DEFAULT_SETTINGS };
 	daily!: DailyNoteResolver;
 	index!: DailyNoteIndex;
+	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
 	/** Target dates handed to journal views before Obsidian constructs them. */
 	private initialDates = new Map<WorkspaceLeaf, Moment>();
@@ -71,6 +73,9 @@ export default class JournalViewPlugin extends Plugin {
 		);
 		this.registerEvent(this.app.workspace.on("file-open", () => this.syncDailyNoteActions()));
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.syncDailyNoteActions()));
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", (leaf) => this.workspaceEditors.onActiveLeafChange(leaf)),
+		);
 		this.register(() => this.clearDailyNoteActions());
 
 		this.registerView(VIEW_TYPE_JOURNAL, (leaf) => new JournalView(leaf, this));

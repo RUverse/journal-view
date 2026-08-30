@@ -125,6 +125,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		readonly plugin: JournalViewPlugin,
 	) {
 		super(leaf);
+		this.register(plugin.workspaceEditors.registerJournalLeaf(leaf));
 		// Obsidian's workspace scope handles Escape before the find bar's DOM
 		// listener can. Claim it only while focus is in journal-wide find, leaving
 		// embedded-editor Escape handling (including Vim mode) untouched.
