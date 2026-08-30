@@ -16,6 +16,7 @@ function applyIcon(el: HTMLElement, ...names: string[]): void {
 /** What the toolbar's controls ask the view to do. */
 export interface ToolbarActions {
 	onToggleFilter(): void;
+	onShowAppearance(): void;
 	onShowFind(): void;
 	onGoToDate(): void;
 	onGoToToday(): void;
@@ -39,6 +40,15 @@ export class JournalToolbar {
 			const toolbar = (this.toolbarEl = view.contentEl.createDiv({ cls: "journal-toolbar" }));
 			this.labelEl = toolbar.createDiv({ cls: "journal-toolbar-label", text: "Journal" });
 			const buttons = toolbar.createDiv({ cls: "journal-toolbar-actions" });
+
+			const appearanceButton = buttons.createEl("button", {
+				cls: "clickable-icon journal-toolbar-button",
+				attr: { "aria-haspopup": "dialog" },
+			});
+			applyIcon(appearanceButton, "settings-2", "settings");
+			setTooltip(appearanceButton, "Customization");
+			appearanceButton.addEventListener("click", () => actions.onShowAppearance());
+			this.buttons.push(appearanceButton);
 
 			this.filterButton = buttons.createEl("button", {
 				cls: "clickable-icon journal-toolbar-button",
@@ -96,10 +106,17 @@ export class JournalToolbar {
 
 		this.filterButton = view.addAction("filter", "Filter days", () => actions.onToggleFilter());
 		this.filterButton.addClass("journal-toolbar-button");
+		const appearanceButton = view.addAction("settings-2", "Customization", () => actions.onShowAppearance());
+		appearanceButton.addClass("journal-toolbar-button");
+		applyIcon(appearanceButton, "settings-2", "settings");
+		setTooltip(appearanceButton, "Customization");
+		appearanceButton.setAttribute("aria-haspopup", "dialog");
 		// Filter describes what the journal shows, so keep it with the navigation
-		// controls rather than the date destinations on the right.
-		view.containerEl.querySelector(".view-header-left")?.appendChild(this.filterButton);
-		this.buttons.push(this.filterButton);
+		// controls rather than the date destinations on the right. Appearance is
+		// the adjacent description of what each shown day contains.
+		const left = view.containerEl.querySelector(".view-header-left");
+		left?.append(appearanceButton, this.filterButton);
+		this.buttons.push(appearanceButton, this.filterButton);
 	}
 
 	setLabel(text: string): void {

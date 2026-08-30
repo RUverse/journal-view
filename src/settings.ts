@@ -36,6 +36,10 @@ export interface JournalViewSettings {
 	focusTodayOnOpen: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
+	/** Show frontmatter tags above each existing note's body. */
+	showTags: boolean;
+	/** Frontmatter property names shown above each existing note's body. */
+	displayProperties: string[];
 	/** Chronological direction in which days are laid out. */
 	daySortDirection: DaySortDirection;
 }
@@ -54,6 +58,8 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
+	showTags: false,
+	displayProperties: [],
 	daySortDirection: "ascending",
 };
 

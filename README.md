@@ -28,6 +28,8 @@ Journal View uses your existing daily-note configuration by default. You can ove
 format, folder, and template in **Settings → Journal View** without changing how the rest of your
 vault handles daily notes.
 
+Some Customization is only visible in the customization menu accessible from the view's toolbar.
+
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View |
