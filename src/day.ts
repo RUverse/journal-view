@@ -1931,7 +1931,21 @@ export class DaySection {
 				return;
 			}
 		}
-		await this.host.app.workspace.getLeaf(newTab ? "tab" : false).openFile(file);
+		const { workspace } = this.host.app;
+		let existing: WorkspaceLeaf | undefined;
+		if (!newTab) {
+			existing = workspace.getLeavesOfType("markdown").find(
+				(leaf) =>
+					leaf.getRoot() === workspace.rootSplit &&
+					leaf.getViewState().state?.file === file.path,
+			);
+		}
+		if (existing) {
+			await workspace.revealLeaf(existing);
+			workspace.setActiveLeaf(existing, { focus: true });
+			return;
+		}
+		await workspace.getLeaf(newTab ? "tab" : false).openFile(file);
 	}
 
 	destroy(): void {
