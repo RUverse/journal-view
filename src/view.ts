@@ -228,7 +228,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	async flushAll(): Promise<void> {
-		await Promise.all(this.sections.map((section) => section.flush()));
+		await Promise.all(this.sections.map((section) => section.flush(true)));
 	}
 
 	/* --------------------------------------------------------------- build */
@@ -1249,7 +1249,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			return;
 		}
 		// Appearance settings do not change the editor or the day window. Repaint
-		// their small read-only strips in place and let the resize anchor absorb
+		// their small metadata strips in place and let the resize anchor absorb
 		// any height change without moving the reader.
 		for (const section of this.sections) section.refreshMetadata();
 		const signature = this.rebuildSettingsSignature();

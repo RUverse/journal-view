@@ -407,6 +407,79 @@ button.journal-day-create:hover {
 	overflow-wrap: anywhere;
 }
 
+button.journal-day-metadata-value-button {
+	appearance: none;
+	border: 0;
+	box-shadow: none;
+	background: transparent;
+	font: inherit;
+	line-height: inherit;
+	text-align: start;
+	height: auto;
+	padding: 0;
+	cursor: text;
+}
+
+button.journal-day-metadata-value-button:hover,
+button.journal-day-metadata-value-button:focus-visible {
+	color: var(--text-accent);
+}
+
+button.journal-day-metadata-value-button:focus-visible,
+.journal-day-tag:focus-visible,
+.journal-day-tag-add:focus-visible,
+.journal-day-metadata-clear:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 2px;
+}
+
+.journal-day-property-editor {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	min-width: 0;
+	max-width: 100%;
+}
+
+.journal-day-property-input,
+.journal-day-tag-input {
+	height: 22px;
+	min-height: 22px;
+	padding: 1px var(--size-2-2);
+	border-radius: var(--input-radius);
+	font-size: inherit;
+	line-height: inherit;
+}
+
+.journal-day-property-input:not([type="checkbox"]) {
+	width: min(14rem, 38vw);
+}
+
+.journal-day-property-input[type="checkbox"] {
+	width: var(--checkbox-size);
+	height: var(--checkbox-size);
+	min-height: 0;
+	margin: 0;
+}
+
+.journal-day-property-input.is-invalid,
+.journal-day-tag-input.is-invalid {
+	border-color: var(--text-error);
+	box-shadow: 0 0 0 1px var(--text-error);
+}
+
+.journal-day-metadata-clear {
+	--icon-size: var(--icon-xs);
+	width: 20px;
+	height: 20px;
+	padding: 2px;
+	color: var(--text-muted);
+}
+
+.journal-day-metadata-pending {
+	opacity: 0.65;
+}
+
 .journal-day-metadata-tags {
 	align-items: center;
 }
@@ -431,11 +504,48 @@ button.journal-day-create:hover {
 }
 
 .journal-day-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	appearance: none;
+	border: 0;
+	box-shadow: none;
+	font: inherit;
+	line-height: inherit;
+	height: auto;
 	padding: 1px var(--size-2-2);
 	border-radius: var(--radius-s);
 	background-color: var(--background-modifier-hover);
 	color: var(--text-accent);
 	overflow-wrap: anywhere;
+}
+
+button.journal-day-tag {
+	cursor: var(--cursor);
+}
+
+button.journal-day-tag:hover {
+	background-color: var(--background-modifier-active-hover);
+}
+
+.journal-day-tag-x {
+	color: var(--text-muted);
+	font-size: 1.1em;
+	line-height: 0.8;
+}
+
+.journal-day-tag-add {
+	--icon-size: var(--icon-xs);
+	width: 20px;
+	height: 20px;
+	padding: 2px;
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	background-color: var(--background-modifier-hover);
+}
+
+.journal-day-tag-input {
+	width: min(9rem, 34vw);
 }
 
 .journal-day-body {

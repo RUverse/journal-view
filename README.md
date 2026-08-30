@@ -15,8 +15,8 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
   return to today in one click, or open the surrounding days from the notebook button on a daily note.
 - **Edit directly in the timeline.** Read and write without switching between files, views, or editing
   modes.
-- **Keep useful context in sight.** The Customization button can show frontmatter tags and selected
-  properties, such as `mood`, above every daily-note body.
+- **Keep useful context in sight.** The Customization button can show editable frontmatter tags and
+  selected properties, such as `mood`, above every daily-note body.
 - **Write only when there is something to say.** Start typing on an empty day and Journal View creates
   the daily note only when you need it.
 - **Rediscover past entries.** Search across your journal to quickly find notes, ideas, and memories
@@ -32,6 +32,8 @@ vault handles daily notes.
 
 The settings button beside the journal filter opens **Customization**. Its tag toggle and
 property list are shared by every open Journal View and saved across restarts.
+Click a displayed value to edit it, clear it to remove that property from the note, or use the tag
+chips to add and remove frontmatter tags. Tag controls stay available on existing tagless notes.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
