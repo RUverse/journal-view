@@ -387,11 +387,20 @@ button.journal-day-create:hover {
 	width: max-content;
 	max-width: 100%;
 	min-width: 0;
+	min-height: calc(20px + 2 * var(--size-2-2));
 	padding: var(--size-2-2) var(--size-2-3);
 	border-radius: var(--radius-s);
 	background-color: var(--background-primary-alt);
 	box-sizing: border-box;
 	flex: 0 0 auto;
+}
+
+.journal-day-metadata-row:not(.journal-day-metadata-tags) {
+	padding-block: var(--size-2-3);
+}
+
+.journal-day-metadata-row.journal-day-metadata-editing {
+	padding-block: var(--size-2-2);
 }
 
 .journal-day-metadata-label {
@@ -453,6 +462,12 @@ button.journal-day-metadata-value-button:focus-visible,
 
 .journal-day-property-input:not([type="checkbox"]) {
 	width: min(14rem, 38vw);
+}
+
+.journal-day-metadata-row.journal-day-metadata-editing .journal-day-property-input {
+	height: 20px;
+	min-height: 20px;
+	padding-block: 0;
 }
 
 .journal-day-property-input[type="checkbox"] {

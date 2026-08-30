@@ -678,6 +678,7 @@ export class DaySection {
 	}
 
 	private renderPropertyEditor(row: HTMLElement, state: PropertyEditState): void {
+		row.addClass("journal-day-metadata-editing");
 		const editor = row.createSpan({ cls: "journal-day-property-editor" });
 		const input = editor.createEl("input", {
 			cls: "journal-day-property-input",
