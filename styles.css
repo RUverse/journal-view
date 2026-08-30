@@ -361,6 +361,83 @@ button.journal-day-create:hover {
 	color: var(--text-normal);
 }
 
+/* ----------------------------------------------------------- metadata --- */
+
+.journal-day-metadata {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	column-gap: var(--size-2-3);
+	row-gap: var(--size-2-2);
+	/* Match the header's bottom margin so the strip has the same breathing
+	   room above and below it. */
+	margin: 0 0 var(--size-2-3);
+	font-size: var(--font-ui-smaller);
+	line-height: var(--line-height-tight);
+}
+
+.journal-day-metadata[hidden] {
+	display: none;
+}
+
+.journal-day-metadata-row {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-3);
+	width: max-content;
+	max-width: 100%;
+	min-width: 0;
+	padding: var(--size-2-2) var(--size-2-3);
+	border-radius: var(--radius-s);
+	background-color: var(--background-primary-alt);
+	box-sizing: border-box;
+	flex: 0 0 auto;
+}
+
+.journal-day-metadata-label {
+	color: var(--text-muted);
+	font-weight: var(--font-medium);
+	white-space: nowrap;
+	flex: 0 0 auto;
+}
+
+.journal-day-metadata-value {
+	min-width: 0;
+	color: var(--text-normal);
+	overflow-wrap: anywhere;
+}
+
+.journal-day-metadata-tags {
+	align-items: center;
+}
+
+.journal-day-metadata-tags-label {
+	display: flex;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.journal-day-metadata-tags-label svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+.journal-day-tags {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--size-2-1);
+	min-width: 0;
+}
+
+.journal-day-tag {
+	padding: 1px var(--size-2-2);
+	border-radius: var(--radius-s);
+	background-color: var(--background-modifier-hover);
+	color: var(--text-accent);
+	overflow-wrap: anywhere;
+}
+
 .journal-day-body {
 	/* Breathing room above and below the text; zero for an ordinary day. */
 	--journal-body-pad-top: 0px;
@@ -717,6 +794,38 @@ button.journal-picker-day.is-out-of-range:hover {
 
 .journal-picker-blank {
 	height: 34px;
+}
+
+/* ----------------------------------------------------- appearance modal -- */
+
+.journal-appearance-modal {
+	width: min(520px, 92vw);
+}
+
+.journal-appearance-modal .modal-content {
+	margin-top: var(--size-4-2);
+}
+
+.journal-appearance-modal input[type="text"] {
+	width: min(16rem, 45vw);
+}
+
+.modal.journal-appearance-modal .modal-content .journal-appearance-add-property.setting-item {
+	border-top: 0;
+}
+
+.journal-appearance-properties {
+	max-height: min(40vh, 320px);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.journal-appearance-properties > .setting-item:first-child {
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.journal-appearance-empty {
+	padding: var(--size-4-3) 0;
 }
 
 /* -------------------------------------------------------------- settings -- */

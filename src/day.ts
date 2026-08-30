@@ -1,4 +1,15 @@
-import { App, Component, MarkdownRenderer, Notice, TFile, getFrontMatterInfo, setIcon, setTooltip } from "obsidian";
+import {
+	App,
+	Component,
+	MarkdownRenderer,
+	Notice,
+	TFile,
+	getFrontMatterInfo,
+	parseFrontMatterTags,
+	parseYaml,
+	setIcon,
+	setTooltip,
+} from "obsidian";
 import type JournalViewPlugin from "./main";
 import { JournalEditor, createJournalEditor } from "./editor";
 import type { Moment } from "./moment";
@@ -48,6 +59,32 @@ function replaceNoteBody(content: string, body: string): string {
 	return content.slice(0, getFrontMatterInfo(content).contentStart) + body;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nestedMetadataText(value: unknown): string {
+	if (value === null || value === undefined) return "";
+	if (typeof value === "string") return value.trim();
+	if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+		return String(value);
+	}
+	try {
+		return JSON.stringify(value) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+/** Compact, non-interactive rendering for a frontmatter value. */
+function metadataText(value: unknown): string {
+	if (Array.isArray(value)) {
+		const items = value.map(nestedMetadataText).filter(Boolean);
+		return items.length ? items.join(", ") : "—";
+	}
+	return nestedMetadataText(value) || "—";
+}
+
 function sameFindRange(left: FindRange | null, right: FindRange | null): boolean {
 	return left === right || (!!left && !!right && left.from === right.from && left.to === right.to);
 }
@@ -83,6 +120,7 @@ export class DaySection {
 	private headerEl: HTMLElement;
 	private titleEl: HTMLElement;
 	private actionsEl: HTMLElement;
+	private metadataEl: HTMLElement;
 	private bodyEl: HTMLElement;
 
 	private editor: JournalEditor | null = null;
@@ -104,6 +142,8 @@ export class DaySection {
 	private endReveal: (() => void) | null = null;
 
 	private lastKnownContent = "";
+	/** Newest complete file content, including external frontmatter held off from a dirty editor. */
+	private latestContent = "";
 	/** An external write held off until this day's own pending edit has settled. */
 	private externalReloadPending = false;
 	/** Template text shown in an empty day but not yet accepted by the reader. */
@@ -154,6 +194,8 @@ export class DaySection {
 		if (relative) this.titleEl.createSpan({ cls: "journal-day-badge", text: relative });
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 
+		this.metadataEl = this.cardEl.createDiv({ cls: "journal-day-metadata" });
+		this.metadataEl.hidden = true;
 		this.bodyEl = this.cardEl.createDiv({ cls: "journal-day-body" });
 
 		this.el.addEventListener("click", (event) => this.onClick(event));
@@ -363,6 +405,78 @@ export class DaySection {
 				void this.createNow();
 			});
 		}
+		this.refreshMetadata();
+	}
+
+	/** Rebuilds the read-only strip from the latest complete note content. */
+	refreshMetadata(content = this.latestContent): void {
+		if (this.destroyed) return;
+		this.latestContent = content;
+		this.metadataEl.empty();
+		this.metadataEl.hidden = true;
+		const { displayProperties, showTags } = this.host.plugin.settings;
+		if (!this.file || (!displayProperties.length && !showTags)) return;
+
+		const frontmatter = this.parseFrontmatter(content);
+		const entries = Object.entries(frontmatter);
+		for (const property of displayProperties) {
+			const key = property.toLocaleLowerCase();
+			const entry = entries.find(([name]) => name.toLocaleLowerCase() === key);
+			const row = this.metadataEl.createDiv({ cls: "journal-day-metadata-row" });
+			row.createSpan({ cls: "journal-day-metadata-label", text: property });
+			row.createSpan({ cls: "journal-day-metadata-value", text: metadataText(entry?.[1]) });
+		}
+
+		if (showTags) {
+			const tags = this.frontmatterTags(frontmatter);
+			if (tags.length) {
+				const row = this.metadataEl.createDiv({
+					cls: "journal-day-metadata-row journal-day-metadata-tags",
+				});
+				const label = row.createSpan({
+					cls: "journal-day-metadata-label journal-day-metadata-tags-label",
+				});
+				setIcon(label, "tag");
+				label.querySelector("svg")?.setAttribute("aria-hidden", "true");
+				setTooltip(label, "Tags");
+				const list = row.createDiv({ cls: "journal-day-tags" });
+				for (const tag of tags) list.createSpan({ cls: "journal-day-tag", text: `#${tag}` });
+			}
+		}
+
+		this.metadataEl.hidden = this.metadataEl.childElementCount === 0;
+	}
+
+	private parseFrontmatter(content: string): Record<string, unknown> {
+		const info = getFrontMatterInfo(content);
+		if (!info.exists) return {};
+		try {
+			const parsed: unknown = parseYaml(info.frontmatter);
+			return isRecord(parsed) ? parsed : {};
+		} catch (error) {
+			console.warn(`Journal View: could not parse properties for ${this.path}`, error);
+			return {};
+		}
+	}
+
+	private frontmatterTags(frontmatter: Record<string, unknown>): string[] {
+		let parsed: string[] | null;
+		try {
+			parsed = parseFrontMatterTags(frontmatter);
+		} catch (error) {
+			console.warn(`Journal View: could not parse tags for ${this.path}`, error);
+			return [];
+		}
+		const tags: string[] = [];
+		const seen = new Set<string>();
+		for (const rawTag of parsed ?? []) {
+			const tag = rawTag.trim().replace(/^#+/, "");
+			const key = tag.toLocaleLowerCase();
+			if (!tag || seen.has(key)) continue;
+			seen.add(key);
+			tags.push(tag);
+		}
+		return tags;
 	}
 
 	private async deleteNote(): Promise<void> {
@@ -490,6 +604,7 @@ export class DaySection {
 		const content = await this.readContent();
 		if (this.destroyed) return;
 		this.lastKnownContent = content;
+		this.refreshMetadata(content);
 		await this.renderPreview(content);
 	}
 
@@ -815,6 +930,10 @@ export class DaySection {
 
 	/** Applies a change that happened outside the journal (sync, another tab). */
 	applyExternalContent(content: string): void {
+		// Frontmatter can safely update while a dirty body waits to save: the body
+		// conflict guard below remains in force, while the read-only strip reflects
+		// the newest complete file immediately.
+		this.refreshMetadata(content);
 		if (!this.editor) {
 			this.lastKnownContent = content;
 			this.externalReloadPending = false;
@@ -849,6 +968,7 @@ export class DaySection {
 	async reload(knownContent?: string): Promise<void> {
 		const content = knownContent ?? (await this.readContent());
 		if (this.destroyed) return;
+		this.refreshMetadata(content);
 		if (this.editor) {
 			this.applyExternalContent(content);
 			return;
@@ -905,6 +1025,7 @@ export class DaySection {
 			this.lastKnownContent = await this.host.app.vault.process(file, (content) =>
 				replaceNoteBody(content, body),
 			);
+			this.refreshMetadata(this.lastKnownContent);
 			return true;
 		} catch (error) {
 			console.error(`Journal View: could not save ${this.path}`, error);

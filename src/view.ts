@@ -1,6 +1,7 @@
 import { ItemView, Scope, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { AnchorHost, START_GUTTER, ScrollAnchor } from "./anchor";
+import { AppearanceModal } from "./appearance";
 import { DatePickerModal } from "./datePicker";
 import { DayHost, DaySection } from "./day";
 import { DayWalker, isOffsetReachable } from "./dayWalk";
@@ -62,6 +63,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private find?: JournalFind;
 	/** The open date picker, which has to go when the view does. */
 	private picker: DatePickerModal | null = null;
+	/** Appearance settings owned by this view while its modal is open. */
+	private appearance: AppearanceModal | null = null;
 	private readonly anchoring = new ScrollAnchor(this);
 	private readonly editors = new EditorWindow(this);
 	private walker!: DayWalker;
@@ -164,6 +167,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 		this.toolbar = new JournalToolbar(this, {
 			onToggleFilter: () => void this.toggleHideEmptyDays(),
+			onShowAppearance: () => this.openAppearance(),
 			onShowFind: () => this.showFind(),
 			onGoToDate: () => this.openDatePicker(),
 			onGoToToday: () => this.goToToday(true),
@@ -190,9 +194,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	async onClose(): Promise<void> {
-		// The picker holds this view in its callback, so a leaf that closes
-		// while it is open would leave it able to navigate a dead journal.
+		// Modals hold this view in their callbacks, so they have to go with it.
 		this.picker?.close();
+		this.appearance?.close();
 		this.find?.destroy();
 		this.find = undefined;
 		this.toolbar?.destroy();
@@ -950,6 +954,18 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		picker.open();
 	}
 
+	/** Opens the global metadata display controls. */
+	private openAppearance(): void {
+		this.appearance?.close();
+		const appearance = new AppearanceModal(this.app, this.plugin, {
+			onDismiss: () => {
+				if (this.appearance === appearance) this.appearance = null;
+			},
+		});
+		this.appearance = appearance;
+		appearance.open();
+	}
+
 	/**
 	 * Moves the journal to `date`. A day already in the window is scrolled to;
 	 * anything further away is a rebuild around that day. A day with no note is
@@ -1232,6 +1248,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.settingsPending = true;
 			return;
 		}
+		// Appearance settings do not change the editor or the day window. Repaint
+		// their small read-only strips in place and let the resize anchor absorb
+		// any height change without moving the reader.
+		for (const section of this.sections) section.refreshMetadata();
 		const signature = this.rebuildSettingsSignature();
 		if (signature === this.appliedSettingsSignature) {
 			const previousMax = this.appliedMaxLoadedDays;
