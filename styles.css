@@ -434,8 +434,12 @@ button.journal-day-metadata-value-button:focus-visible {
 	color: var(--text-accent);
 }
 
+button.journal-day-metadata-value-empty {
+	padding-inline: var(--size-2-2);
+}
+
 button.journal-day-metadata-value-button:focus-visible,
-.journal-day-tag:focus-visible,
+.journal-day-tag-remove:focus-visible,
 .journal-day-tag-add:focus-visible,
 .journal-day-metadata-clear:focus-visible {
 	outline: 2px solid var(--background-modifier-border-focus);
@@ -522,45 +526,86 @@ button.journal-day-metadata-value-button:focus-visible,
 	display: inline-flex;
 	align-items: center;
 	gap: var(--size-2-1);
+	font: inherit;
+	line-height: inherit;
+	height: 18px;
+	padding: 0 var(--size-2-2) 0 calc(var(--size-2-2) + 2px);
+	border-radius: var(--radius-s);
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+	overflow-wrap: anywhere;
+	box-sizing: border-box;
+}
+
+.journal-day-tag-remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	appearance: none;
 	border: 0;
 	box-shadow: none;
-	font: inherit;
-	line-height: inherit;
-	height: auto;
-	padding: 1px var(--size-2-2);
-	border-radius: var(--radius-s);
-	background-color: var(--background-modifier-hover);
-	color: var(--text-accent);
-	overflow-wrap: anywhere;
-}
-
-button.journal-day-tag {
-	cursor: var(--cursor);
-}
-
-button.journal-day-tag:hover {
-	background-color: var(--background-modifier-active-hover);
-}
-
-.journal-day-tag-x {
+	background: transparent;
+	width: 12px;
+	height: 14px;
+	padding: 0;
 	color: var(--text-muted);
-	font-size: 1.1em;
-	line-height: 0.8;
+	font: inherit;
+	font-size: 1em;
+	line-height: 1;
+	cursor: var(--cursor);
+	transition: opacity 100ms ease-in-out, color 100ms ease-in-out;
+}
+
+.journal-day-tag-remove:hover {
+	color: var(--text-normal);
+}
+
+@media (hover: hover) {
+	.journal-day-tag-text {
+		transform: translateX(6px);
+		transition: transform 100ms ease-in-out;
+	}
+
+	.journal-day-tag-remove {
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.journal-day-tag:hover .journal-day-tag-text,
+	.journal-day-tag:focus-within .journal-day-tag-text {
+		transform: translateX(0);
+	}
+
+	.journal-day-tag:hover .journal-day-tag-remove,
+	.journal-day-tag:focus-within .journal-day-tag-remove {
+		opacity: 1;
+		pointer-events: auto;
+	}
 }
 
 .journal-day-tag-add {
-	--icon-size: var(--icon-xs);
-	width: 20px;
-	height: 20px;
+	--icon-size: 12px;
+	width: 18px;
+	min-width: 18px;
+	max-width: 18px;
+	height: 18px;
+	min-height: 18px;
+	max-height: 18px;
 	padding: 2px;
 	border-radius: var(--radius-s);
 	color: var(--text-muted);
 	background-color: var(--background-modifier-hover);
+	box-sizing: border-box;
 }
 
-.journal-day-tag-input {
+.journal-day-metadata-row.journal-day-metadata-tags .journal-day-tag-input {
 	width: min(9rem, 34vw);
+	height: 20px;
+	min-height: 20px;
+	max-height: 20px;
+	padding-block: 0;
+	margin: 0;
+	box-sizing: border-box;
 }
 
 .journal-day-body {
@@ -935,8 +980,31 @@ button.journal-picker-day.is-out-of-range:hover {
 	width: min(16rem, 45vw);
 }
 
+.journal-appearance-setting-name {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+.journal-appearance-setting-icon {
+	display: inline-flex;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.journal-appearance-setting-icon svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+.modal.journal-appearance-modal .modal-content .journal-appearance-properties-heading.setting-item {
+	padding-bottom: var(--size-2-2);
+}
+
 .modal.journal-appearance-modal .modal-content .journal-appearance-add-property.setting-item {
 	border-top: 0;
+	padding-top: var(--size-2-3);
+	padding-bottom: var(--size-2-3);
 }
 
 .journal-appearance-properties {
@@ -947,6 +1015,26 @@ button.journal-picker-day.is-out-of-range:hover {
 
 .journal-appearance-properties > .setting-item:first-child {
 	border-top: 1px solid var(--background-modifier-border);
+}
+
+.modal.journal-appearance-modal .modal-content .journal-appearance-properties > .setting-item {
+	align-items: center;
+	min-height: 0;
+	padding-top: var(--size-2-2);
+	padding-bottom: var(--size-2-2);
+}
+
+.modal.journal-appearance-modal
+	.modal-content
+	.journal-appearance-properties
+	> .setting-item
+	> .setting-item-info,
+.modal.journal-appearance-modal
+	.modal-content
+	.journal-appearance-properties
+	> .setting-item
+	> .setting-item-control {
+	align-self: center;
 }
 
 .journal-appearance-empty {

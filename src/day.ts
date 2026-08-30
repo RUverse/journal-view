@@ -73,7 +73,7 @@ class JournalTagSuggest extends AbstractInputSuggest<string> {
 	}
 
 	renderSuggestion(value: string, el: HTMLElement): void {
-		el.setText(`#${value}`);
+		el.setText(value);
 	}
 
 	selectSuggestion(value: string): void {
@@ -220,12 +220,28 @@ function parsePropertyDraft(kind: PropertyEditKind, draft: string): ParsedProper
 		}
 	}
 
-	return { valid: true, remove: false, value: draft };
+	return { valid: true, remove: false, value: trimmed };
 }
 
 function normalizedTag(raw: string): string | null {
 	const tag = raw.trim().replace(/^#+/, "");
 	return tag && !/[\s,]/.test(tag) ? tag : null;
+}
+
+function sameMetadataValue(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if ((!Array.isArray(left) && !isRecord(left)) || (!Array.isArray(right) && !isRecord(right))) {
+		return false;
+	}
+	try {
+		return JSON.stringify(left) === JSON.stringify(right);
+	} catch {
+		return false;
+	}
+}
+
+function storedTagMatches(value: unknown, target: string): boolean {
+	return typeof value === "string" && normalizedTag(value)?.toLocaleLowerCase() === target;
 }
 
 function sameFindRange(left: FindRange | null, right: FindRange | null): boolean {
@@ -291,7 +307,8 @@ export class DaySection {
 	private tagEdit: TagEditState | null = null;
 	private tagSuggest: JournalTagSuggest | null = null;
 	private refreshingMetadata = false;
-	private tagBlurTimer = 0;
+	private tagPointerCleanup: (() => void) | null = null;
+	private tagSuggestionPointerDown = false;
 	private metadataWrites: Promise<void> = Promise.resolve();
 	private pendingProperties = new Set<string>();
 	private tagsPending = false;
@@ -564,8 +581,9 @@ export class DaySection {
 		if (this.destroyed) return;
 		this.latestContent = content;
 		this.captureMetadataEdit();
-		window.clearTimeout(this.tagBlurTimer);
-		this.tagBlurTimer = 0;
+		this.tagPointerCleanup?.();
+		this.tagPointerCleanup = null;
+		this.tagSuggestionPointerDown = false;
 		this.refreshingMetadata = true;
 		this.tagSuggest?.close();
 		this.tagSuggest = null;
@@ -600,11 +618,13 @@ export class DaySection {
 				if (this.propertyEdit?.property.toLocaleLowerCase() === key) {
 					this.renderPropertyEditor(row, this.propertyEdit);
 				} else {
+					const valueText = metadataText(entry?.[1]);
 					const value = row.createEl("button", {
 						cls: "journal-day-metadata-value journal-day-metadata-value-button",
-						text: metadataText(entry?.[1]),
+						text: valueText,
 						attr: { type: "button", "aria-label": `Edit ${property}` },
 					});
+					value.toggleClass("journal-day-metadata-value-empty", valueText === "—");
 					value.disabled = pending;
 					value.addEventListener("click", (event) => {
 						event.stopPropagation();
@@ -658,8 +678,9 @@ export class DaySection {
 			this.commitPropertyEdit(this.propertyEdit);
 			if (this.propertyEdit) return; // invalid input stays open until corrected or cancelled
 		}
-		window.clearTimeout(this.tagBlurTimer);
-		this.tagBlurTimer = 0;
+		this.tagPointerCleanup?.();
+		this.tagPointerCleanup = null;
+		this.tagSuggestionPointerDown = false;
 		this.tagSuggest?.close();
 		this.tagSuggest = null;
 		this.tagEdit = null;
@@ -683,11 +704,12 @@ export class DaySection {
 		const input = editor.createEl("input", {
 			cls: "journal-day-property-input",
 			attr: {
-				type: state.kind === "number" ? "number" : state.kind === "boolean" ? "checkbox" : "text",
+				type: state.kind === "boolean" ? "checkbox" : "text",
 				"aria-label": `Edit ${state.property}`,
 			},
 		});
 		state.inputEl = input;
+		if (state.kind === "number") input.inputMode = "decimal";
 		if (state.kind === "boolean") input.checked = state.draft === "true";
 		else input.value = state.draft;
 		this.syncInvalidMetadataInput(input, state.invalid);
@@ -711,15 +733,14 @@ export class DaySection {
 				state.draft = String(input.checked);
 				this.commitPropertyEdit(state);
 			});
-		} else {
-			input.addEventListener("blur", (event) => {
-				const related = event.relatedTarget as Node | null;
-				if (this.refreshingMetadata || editor.contains(related)) return;
-				window.setTimeout(() => {
-					if (this.propertyEdit === state && !this.refreshingMetadata) this.commitPropertyEdit(state);
-				}, 0);
-			});
 		}
+		input.addEventListener("blur", (event) => {
+			const related = event.relatedTarget as Node | null;
+			if (this.refreshingMetadata || editor.contains(related)) return;
+			window.setTimeout(() => {
+				if (this.propertyEdit === state && !this.refreshingMetadata) this.commitPropertyEdit(state);
+			}, 0);
+		});
 
 		const clear = editor.createEl("button", {
 			cls: "clickable-icon journal-day-metadata-clear",
@@ -749,12 +770,23 @@ export class DaySection {
 
 	private commitPropertyEdit(state: PropertyEditState, forceRemove = false): void {
 		if (this.propertyEdit !== state) return;
+		const draft = state.inputEl?.type === "checkbox" ? String(state.inputEl.checked) : state.draft;
+		if (!forceRemove && this.propertyDraftUnchanged(state.property, state.kind, draft)) {
+			this.propertyEdit = null;
+			this.refreshMetadata();
+			return;
+		}
 		const parsed = forceRemove
 			? { valid: true, remove: true }
-			: parsePropertyDraft(state.kind, state.inputEl?.type === "checkbox" ? String(state.inputEl.checked) : state.draft);
+			: parsePropertyDraft(state.kind, draft);
 		if (!parsed.valid) {
 			state.invalid = parsed.error ?? "Enter a valid value.";
 			if (state.inputEl) this.syncInvalidMetadataInput(state.inputEl, state.invalid);
+			return;
+		}
+		if (!this.propertyWriteNeeded(state.property, parsed.remove, parsed.value)) {
+			this.propertyEdit = null;
+			this.refreshMetadata();
 			return;
 		}
 
@@ -766,6 +798,22 @@ export class DaySection {
 			this.pendingProperties.delete(pendingKey);
 			if (!this.destroyed) this.refreshMetadata();
 		});
+	}
+
+	private propertyWriteNeeded(property: string, remove: boolean, value: unknown): boolean {
+		const frontmatter = this.parseFrontmatter(this.latestContent);
+		const entry = Object.entries(frontmatter).find(
+			([key]) => key.toLocaleLowerCase() === property.toLocaleLowerCase(),
+		);
+		return remove ? entry !== undefined : !entry || !sameMetadataValue(entry[1], value);
+	}
+
+	private propertyDraftUnchanged(property: string, kind: PropertyEditKind, draft: string): boolean {
+		const frontmatter = this.parseFrontmatter(this.latestContent);
+		const entry = Object.entries(frontmatter).find(
+			([key]) => key.toLocaleLowerCase() === property.toLocaleLowerCase(),
+		);
+		return !!entry && propertyDraft(entry[1], kind) === draft;
 	}
 
 	private renderTags(frontmatter: Record<string, unknown>): void {
@@ -784,14 +832,15 @@ export class DaySection {
 		const list = row.createDiv({ cls: "journal-day-tags" });
 
 		for (const tag of tags) {
-			const chip = list.createEl("button", {
-				cls: "journal-day-tag journal-day-tag-remove",
+			const chip = list.createSpan({ cls: "journal-day-tag" });
+			chip.createSpan({ cls: "journal-day-tag-text", text: tag });
+			const remove = chip.createEl("button", {
+				cls: "journal-day-tag-remove",
 				attr: { type: "button", "aria-label": `Remove tag ${tag}` },
 			});
-			chip.createSpan({ text: `#${tag}` });
-			chip.createSpan({ cls: "journal-day-tag-x", text: "×", attr: { "aria-hidden": "true" } });
-			chip.disabled = this.tagsPending;
-			chip.addEventListener("click", (event) => {
+			remove.createSpan({ text: "×", attr: { "aria-hidden": "true" } });
+			remove.disabled = this.tagsPending;
+			remove.addEventListener("click", (event) => {
 				event.stopPropagation();
 				this.removeTag(tag);
 			});
@@ -844,11 +893,18 @@ export class DaySection {
 			input,
 			() => state.suggestions,
 			(value) => {
-				window.clearTimeout(this.tagBlurTimer);
-				this.tagBlurTimer = 0;
 				this.commitTag(state, value, currentTags);
 			},
 		);
+		const document = input.ownerDocument;
+		const onPointerDown = (event: PointerEvent): void => {
+			const target = event.target instanceof Element ? event.target : null;
+			if (target?.closest(".suggestion-container")) {
+				this.tagSuggestionPointerDown = true;
+			}
+		};
+		document.addEventListener("pointerdown", onPointerDown, true);
+		this.tagPointerCleanup = () => document.removeEventListener("pointerdown", onPointerDown, true);
 		input.addEventListener("input", () => {
 			state.draft = input.value;
 			state.invalid = null;
@@ -865,20 +921,23 @@ export class DaySection {
 		});
 		input.addEventListener("blur", () => {
 			if (this.refreshingMetadata) return;
-			window.clearTimeout(this.tagBlurTimer);
-			this.tagBlurTimer = window.setTimeout(() => {
-				this.tagBlurTimer = 0;
+			window.setTimeout(() => {
+				if (this.tagSuggestionPointerDown) {
+					this.tagSuggestionPointerDown = false;
+					return;
+				}
 				if (this.tagEdit === state && state.inputEl === input && input.ownerDocument.activeElement !== input) {
 					this.cancelTagEdit(state);
 				}
-			}, 150);
+			}, 0);
 		});
 	}
 
 	private cancelTagEdit(state: TagEditState): void {
 		if (this.tagEdit !== state) return;
-		window.clearTimeout(this.tagBlurTimer);
-		this.tagBlurTimer = 0;
+		this.tagPointerCleanup?.();
+		this.tagPointerCleanup = null;
+		this.tagSuggestionPointerDown = false;
 		this.tagSuggest?.close();
 		this.tagSuggest = null;
 		this.tagEdit = null;
@@ -894,13 +953,14 @@ export class DaySection {
 			return;
 		}
 		if (currentTags.some((current) => current.toLocaleLowerCase() === tag.toLocaleLowerCase())) {
-			state.invalid = `#${tag} is already present.`;
+			state.invalid = `${tag} is already present.`;
 			if (state.inputEl) this.syncInvalidMetadataInput(state.inputEl, state.invalid);
 			return;
 		}
 
-		window.clearTimeout(this.tagBlurTimer);
-		this.tagBlurTimer = 0;
+		this.tagPointerCleanup?.();
+		this.tagPointerCleanup = null;
+		this.tagSuggestionPointerDown = false;
 		this.tagSuggest?.close();
 		this.tagSuggest = null;
 		this.tagEdit = null;
@@ -939,6 +999,7 @@ export class DaySection {
 	}
 
 	private writeProperty(property: string, remove: boolean, value: unknown): Promise<void> {
+		if (!this.propertyWriteNeeded(property, remove, value)) return Promise.resolve();
 		return this.enqueueMetadataWrite(`update ${property}`, (frontmatter) => {
 			const actual = Object.keys(frontmatter).find(
 				(key) => key.toLocaleLowerCase() === property.toLocaleLowerCase(),
@@ -952,19 +1013,46 @@ export class DaySection {
 	}
 
 	private writeTag(action: "add" | "remove", tag: string): Promise<void> {
+		if (!this.tagWriteNeeded(action, tag)) return Promise.resolve();
 		return this.enqueueMetadataWrite(`${action} tag ${tag}`, (frontmatter) => {
 			const actual = Object.keys(frontmatter).find((key) => key.toLocaleLowerCase() === "tags");
-			const tags = this.frontmatterTags(frontmatter);
 			const target = tag.toLocaleLowerCase();
-			const next =
-				action === "add"
-					? tags.some((current) => current.toLocaleLowerCase() === target)
-						? tags
-						: [...tags, tag]
-					: tags.filter((current) => current.toLocaleLowerCase() !== target);
-			if (next.length) frontmatter[actual ?? "tags"] = next;
-			else if (actual) delete frontmatter[actual];
+			if (!actual) {
+				if (action === "add") frontmatter.tags = [tag];
+				return;
+			}
+
+			const stored = frontmatter[actual];
+			if (Array.isArray(stored)) {
+				if (action === "add") {
+					if (!stored.some((value) => storedTagMatches(value, target))) stored.push(tag);
+				} else {
+					for (let index = stored.length - 1; index >= 0; index--) {
+						if (storedTagMatches(stored[index], target)) stored.splice(index, 1);
+					}
+					if (!stored.length) delete frontmatter[actual];
+				}
+				return;
+			}
+
+			if (action === "add") {
+				if (!storedTagMatches(stored, target)) frontmatter[actual] = [stored, tag];
+			} else if (storedTagMatches(stored, target)) {
+				delete frontmatter[actual];
+			}
 		});
+	}
+
+	private tagWriteNeeded(action: "add" | "remove", tag: string): boolean {
+		const frontmatter = this.parseFrontmatter(this.latestContent);
+		const actual = Object.keys(frontmatter).find((key) => key.toLocaleLowerCase() === "tags");
+		if (!actual) return action === "add";
+		const stored = frontmatter[actual];
+		const target = tag.toLocaleLowerCase();
+		const present = Array.isArray(stored)
+			? stored.some((value) => storedTagMatches(value, target))
+			: storedTagMatches(stored, target);
+		return action === "add" ? !present : present;
 	}
 
 	private enqueueMetadataWrite(
@@ -1613,8 +1701,9 @@ export class DaySection {
 		this.destroyed = true;
 		this.focusSettleToken++;
 		window.clearTimeout(this.saveTimer);
-		window.clearTimeout(this.tagBlurTimer);
-		this.tagBlurTimer = 0;
+		this.tagPointerCleanup?.();
+		this.tagPointerCleanup = null;
+		this.tagSuggestionPointerDown = false;
 		this.tagSuggest?.close();
 		this.tagSuggest = null;
 		this.propertyEdit = null;

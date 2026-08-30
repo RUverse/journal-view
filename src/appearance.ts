@@ -1,4 +1,4 @@
-import { AbstractInputSuggest, App, Modal, Notice, Setting } from "obsidian";
+import { AbstractInputSuggest, App, Modal, Notice, Setting, setIcon } from "obsidian";
 import type JournalViewPlugin from "./main";
 
 interface AppearanceModalOptions {
@@ -54,7 +54,7 @@ export class AppearanceModal extends Modal {
 		this.titleEl.setText("Customization");
 		this.knownProperties = this.discoverProperties();
 
-		new Setting(this.contentEl)
+		const tagsSetting = new Setting(this.contentEl)
 			.setName("Display tags")
 			.setDesc("Show tags from each daily note's frontmatter above its body.")
 			.addToggle((toggle) =>
@@ -63,10 +63,23 @@ export class AppearanceModal extends Modal {
 					this.persist();
 				}),
 			);
+		tagsSetting.nameEl.addClass("journal-appearance-setting-name");
+		const tagsIcon = tagsSetting.nameEl.createSpan({ cls: "journal-appearance-setting-icon" });
+		setIcon(tagsIcon, "tags");
+		tagsIcon.setAttribute("aria-hidden", "true");
+		tagsSetting.nameEl.prepend(tagsIcon);
 
-		new Setting(this.contentEl)
+		const propertiesSetting = new Setting(this.contentEl)
 			.setName("Properties")
-			.setDesc("Choose frontmatter properties to show on every existing daily note.");
+			.setDesc("Choose frontmatter properties to show on every existing daily note.")
+			.setClass("journal-appearance-properties-heading");
+		propertiesSetting.nameEl.addClass("journal-appearance-setting-name");
+		const propertiesIcon = propertiesSetting.nameEl.createSpan({
+			cls: "journal-appearance-setting-icon",
+		});
+		setIcon(propertiesIcon, "list-tree");
+		propertiesIcon.setAttribute("aria-hidden", "true");
+		propertiesSetting.nameEl.prepend(propertiesIcon);
 
 		const add = new Setting(this.contentEl).setName("Add property");
 		add.settingEl.addClass("journal-appearance-add-property");
