@@ -1057,6 +1057,26 @@ button.journal-picker-day.is-out-of-range:hover {
 	padding: var(--size-4-3) 0;
 }
 
+button.journal-appearance-settings-link {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: max-content;
+	height: auto;
+	margin: var(--size-4-3) auto 0;
+	padding: var(--size-2-2) var(--size-4-2);
+	border: 0;
+	box-shadow: none;
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+button.journal-appearance-settings-link:hover {
+	background-color: var(--background-modifier-border);
+	color: var(--text-normal);
+}
+
 /* -------------------------------------------------------------- settings -- */
 
 .journal-settings-note {

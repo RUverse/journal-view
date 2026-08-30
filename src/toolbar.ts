@@ -41,12 +41,6 @@ export class JournalToolbar {
 			this.labelEl = toolbar.createDiv({ cls: "journal-toolbar-label", text: "Journal" });
 			const buttons = toolbar.createDiv({ cls: "journal-toolbar-actions" });
 
-			this.filterButton = buttons.createEl("button", {
-				cls: "clickable-icon journal-toolbar-button",
-			});
-			this.filterButton.addEventListener("click", () => actions.onToggleFilter());
-			this.buttons.push(this.filterButton);
-
 			const appearanceButton = buttons.createEl("button", {
 				cls: "clickable-icon journal-toolbar-button",
 				attr: { "aria-haspopup": "dialog" },
@@ -55,6 +49,12 @@ export class JournalToolbar {
 			setTooltip(appearanceButton, "Customization");
 			appearanceButton.addEventListener("click", () => actions.onShowAppearance());
 			this.buttons.push(appearanceButton);
+
+			this.filterButton = buttons.createEl("button", {
+				cls: "clickable-icon journal-toolbar-button",
+			});
+			this.filterButton.addEventListener("click", () => actions.onToggleFilter());
+			this.buttons.push(this.filterButton);
 
 			const findButton = buttons.createEl("button", {
 				cls: "clickable-icon journal-toolbar-button",
@@ -115,8 +115,8 @@ export class JournalToolbar {
 		// controls rather than the date destinations on the right. Appearance is
 		// the adjacent description of what each shown day contains.
 		const left = view.containerEl.querySelector(".view-header-left");
-		left?.append(this.filterButton, appearanceButton);
-		this.buttons.push(this.filterButton, appearanceButton);
+		left?.append(appearanceButton, this.filterButton);
+		this.buttons.push(appearanceButton, this.filterButton);
 	}
 
 	setLabel(text: string): void {

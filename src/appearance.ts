@@ -5,6 +5,11 @@ interface AppearanceModalOptions {
 	onDismiss?(): void;
 }
 
+interface SettingsController {
+	open(): void;
+	openTabById(id: string): void;
+}
+
 /** Autocomplete attached to the property-name field. */
 class PropertySuggest extends AbstractInputSuggest<string> {
 	constructor(
@@ -122,6 +127,16 @@ export class AppearanceModal extends Modal {
 
 		this.propertyList = this.contentEl.createDiv({ cls: "journal-appearance-properties" });
 		this.renderPropertyList();
+
+		const settingsLink = this.contentEl.createEl("button", {
+			cls: "journal-appearance-settings-link",
+			text: "Open all settings",
+			attr: { type: "button" },
+		});
+		settingsLink.addEventListener("click", (event) => {
+			event.preventDefault();
+			this.openPluginSettings();
+		});
 	}
 
 	onClose(): void {
@@ -204,6 +219,17 @@ export class AppearanceModal extends Modal {
 					.onClick(() => this.removeProperty(index)),
 			);
 		});
+	}
+
+	private openPluginSettings(): void {
+		const settings = (this.app as App & { setting?: SettingsController }).setting;
+		if (!settings) {
+			new Notice("Journal view: could not open plugin settings");
+			return;
+		}
+		this.close();
+		settings.open();
+		settings.openTabById(this.plugin.manifest.id);
 	}
 
 	private persist(): void {
