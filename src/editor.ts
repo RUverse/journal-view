@@ -1,4 +1,4 @@
-import { App, TFile } from "obsidian";
+import { App, FileView, TFile, WorkspaceLeaf } from "obsidian";
 import { StateEffect, StateField } from "@codemirror/state";
 import type { EditorState, TransactionSpec } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
@@ -124,11 +124,38 @@ interface ActiveEditorOwner {
 
 interface WorkspaceEditorHost {
 	activeEditor: unknown;
+	lastActiveFile?: TFile | null;
 	getActiveFile(): TFile | null;
 	trigger(name: string, ...data: unknown[]): void;
 }
 
 type WorkspaceEditorUpdate = "claim" | "release" | "file";
+
+let currentlyActiveDayEditor: ActiveEditorOwner | null = null;
+
+// Keeps the day being edited as the activeEditor when the user clicks on a non-editor
+// leaf, for example a widget tab on a sidebar.
+// This fixes an issue where the file pane's "auto reveal current file" would break
+// when you click on a sidebar.
+export function onActiveLeafChange(app: App, leaf: WorkspaceLeaf | null): void {
+	// If we aren't using the journal view, do nothing.
+	if (!currentlyActiveDayEditor) return;
+	try {
+		// If the user is switching to a file, do nothing.
+		if (leaf?.view instanceof FileView) {
+			currentlyActiveDayEditor = null;
+			return;
+		}
+		// If the user clicked into a non-file pane (i.e. the sidebar), and nothing else
+		// has claimed activeEditor, reassign activeEditor back to the day the user was
+		// just editing.
+		const workspace = app.workspace as unknown as WorkspaceEditorHost;
+		if (!workspace.activeEditor) workspace.activeEditor = currentlyActiveDayEditor;
+	} catch (error) {
+		// just in case the activeEditor API ever changes
+		console.warn("Journal View: failed to keep workspace.activeEditor", error);
+	}
+}
 
 function focusStayedInside(container: HTMLElement, event: FocusEvent): boolean {
 	const NodeCtor = container.ownerDocument.defaultView?.Node;
@@ -153,22 +180,33 @@ function updateWorkspaceEditor(
 			// The embedded editor itself may have assigned this owner before its
 			// focus event bubbles to us; it does not emit the file notification.
 			workspace.activeEditor = owner;
-			workspace.trigger("file-open", owner.file);
+			currentlyActiveDayEditor = owner;
+			notifyFileOpen(workspace, owner.file);
 		} else if (update === "release") {
+			if (notifyRelease && currentlyActiveDayEditor === owner) currentlyActiveDayEditor = null;
 			const owned = workspace.activeEditor === owner;
 			if (owned) workspace.activeEditor = null;
 			else if (workspace.activeEditor !== null) return;
 			// A view owns many mounted editors. Only the one the workspace still
 			// considers current should clear file followers during bulk teardown.
 			if (notifyRelease && (owned || workspace.getActiveFile() === owner.file)) {
-				workspace.trigger("file-open", null);
+				notifyFileOpen(workspace, null);
 			}
 		} else if (update === "file" && workspace.activeEditor === owner) {
-			workspace.trigger("file-open", owner.file);
+			notifyFileOpen(workspace, owner.file);
 		}
 	} catch (error) {
 		console.warn("Journal View: could not update the workspace editor", error);
 	}
+}
+
+/**
+ * Announces a file the way Obsidian does, keeping its record of what it last
+ * announced.
+ */
+function notifyFileOpen(workspace: WorkspaceEditorHost, file: TFile | null): void {
+	if ("lastActiveFile" in workspace) workspace.lastActiveFile = file;
+	workspace.trigger("file-open", file);
 }
 
 /**

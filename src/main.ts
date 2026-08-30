@@ -1,5 +1,6 @@
 import { MarkdownView, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
+import { onActiveLeafChange } from "./editor";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
@@ -64,6 +65,7 @@ export default class JournalViewPlugin extends Plugin {
 		);
 		this.registerEvent(this.app.workspace.on("file-open", () => this.syncDailyNoteActions()));
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.syncDailyNoteActions()));
+		this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => onActiveLeafChange(this.app, leaf)));
 		this.register(() => this.clearDailyNoteActions());
 
 		this.registerView(VIEW_TYPE_JOURNAL, (leaf) => new JournalView(leaf, this));
