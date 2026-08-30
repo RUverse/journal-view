@@ -1,4 +1,5 @@
 import { App, Component, MarkdownRenderer, Notice, TFile, getFrontMatterInfo, setIcon, setTooltip } from "obsidian";
+import type { WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { JournalEditor, createJournalEditor } from "./editor";
 import type { Moment } from "./moment";
@@ -16,6 +17,7 @@ const REVEAL_FRAMES = 10;
 /** The bits of the journal view a day needs to talk to. */
 export interface DayHost {
 	app: App;
+	leaf: WorkspaceLeaf;
 	plugin: JournalViewPlugin;
 	/** Called when a day's underlying file appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
@@ -623,6 +625,8 @@ export class DaySection {
 			this.editor = createJournalEditor(
 				{
 					app: this.host.app,
+					leaf: this.host.leaf,
+					workspaceEditors: this.host.plugin.workspaceEditors,
 					container: this.bodyEl,
 					value: body,
 					placeholder,

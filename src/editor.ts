@@ -7,6 +7,8 @@ import type { FindRange } from "./findText";
 
 export interface JournalEditorOptions {
 	app: App;
+	leaf: WorkspaceLeaf;
+	workspaceEditors: WorkspaceEditorBridge;
 	container: HTMLElement;
 	value: string;
 	placeholder: string;
@@ -103,9 +105,8 @@ interface InternalEditorInstance {
 	unload?(): void;
 }
 
-interface InternalEditorOwner {
+interface InternalEditorOwner extends ActiveEditorOwner {
 	app: App;
-	file: TFile | null;
 	hoverPopover: null;
 	getMode(): string;
 	getFile(): TFile | null;
@@ -120,40 +121,99 @@ interface InternalEditorOwner {
 
 interface ActiveEditorOwner {
 	file: TFile | null;
+	leaf: WorkspaceLeaf;
 }
 
 interface WorkspaceEditorHost {
 	activeEditor: unknown;
 	lastActiveFile?: TFile | null;
+	recentFileTracker?: {
+		onFileOpen(file: TFile | null, previous: TFile | null): void;
+	};
 	getActiveFile(): TFile | null;
 	trigger(name: string, ...data: unknown[]): void;
 }
 
 type WorkspaceEditorUpdate = "claim" | "release" | "file";
 
-let currentlyActiveDayEditor: ActiveEditorOwner | null = null;
+/**
+ * Bridges journal editors into Obsidian's workspace bookkeeping. The state is
+ * owned by one plugin/app instance, while the per-leaf map prevents one journal
+ * tab from lending its hidden editor to another.
+ */
+export class WorkspaceEditorBridge {
+	private readonly journalLeaves = new WeakSet<WorkspaceLeaf>();
+	private readonly activeByLeaf = new WeakMap<WorkspaceLeaf, ActiveEditorOwner>();
+	private lastActive: ActiveEditorOwner | null = null;
 
-// Keeps the day being edited as the activeEditor when the user clicks on a non-editor
-// leaf, for example a widget tab on a sidebar.
-// This fixes an issue where the file pane's "auto reveal current file" would break
-// when you click on a sidebar.
-export function onActiveLeafChange(app: App, leaf: WorkspaceLeaf | null): void {
-	// If we aren't using the journal view, do nothing.
-	if (!currentlyActiveDayEditor) return;
-	try {
-		// If the user is switching to a file, do nothing.
-		if (leaf?.view instanceof FileView) {
-			currentlyActiveDayEditor = null;
-			return;
+	constructor(private readonly app: App) {}
+
+	registerJournalLeaf(leaf: WorkspaceLeaf): () => void {
+		this.journalLeaves.add(leaf);
+		return () => {
+			this.journalLeaves.delete(leaf);
+			const owner = this.activeByLeaf.get(leaf);
+			this.activeByLeaf.delete(leaf);
+			if (this.lastActive === owner) this.lastActive = null;
+		};
+	}
+
+	/**
+	 * Restores the last day while a non-file pane is active. Journal tabs restore
+	 * their own day; real files keep Obsidian's native editor; deferred leaves are
+	 * left alone until their eventual view type is knowable.
+	 */
+	onActiveLeafChange(leaf: WorkspaceLeaf | null): void {
+		try {
+			if (leaf?.isDeferred) return;
+			if (leaf?.view instanceof FileView) {
+				this.lastActive = null;
+				return;
+			}
+
+			let owner = this.lastActive;
+			if (leaf && this.journalLeaves.has(leaf)) {
+				owner = this.activeByLeaf.get(leaf) ?? null;
+				this.lastActive = owner;
+			}
+			if (!owner) return;
+
+			const workspace = this.app.workspace as unknown as WorkspaceEditorHost;
+			if (!workspace.activeEditor) workspace.activeEditor = owner;
+		} catch (error) {
+			console.warn("Journal View: failed to keep workspace.activeEditor", error);
 		}
-		// If the user clicked into a non-file pane (i.e. the sidebar), and nothing else
-		// has claimed activeEditor, reassign activeEditor back to the day the user was
-		// just editing.
-		const workspace = app.workspace as unknown as WorkspaceEditorHost;
-		if (!workspace.activeEditor) workspace.activeEditor = currentlyActiveDayEditor;
-	} catch (error) {
-		// just in case the activeEditor API ever changes
-		console.warn("Journal View: failed to keep workspace.activeEditor", error);
+	}
+
+	update(owner: ActiveEditorOwner, update: WorkspaceEditorUpdate, notifyRelease = false): void {
+		try {
+			const workspace = this.app.workspace as unknown as WorkspaceEditorHost;
+			if (update === "claim") {
+				// The embedded editor itself may have assigned this owner before its
+				// focus event bubbles to us; it does not emit the file notification.
+				workspace.activeEditor = owner;
+				this.activeByLeaf.set(owner.leaf, owner);
+				this.lastActive = owner;
+				notifyFileOpen(workspace, owner.file);
+			} else if (update === "release") {
+				if (notifyRelease) {
+					if (this.activeByLeaf.get(owner.leaf) === owner) this.activeByLeaf.delete(owner.leaf);
+					if (this.lastActive === owner) this.lastActive = null;
+				}
+				const owned = workspace.activeEditor === owner;
+				if (owned) workspace.activeEditor = null;
+				else if (workspace.activeEditor !== null) return;
+				// A view owns many mounted editors. Only the one the workspace still
+				// considers current should clear file followers during bulk teardown.
+				if (notifyRelease && (owned || workspace.getActiveFile() === owner.file)) {
+					notifyFileOpen(workspace, null);
+				}
+			} else if (update === "file" && workspace.activeEditor === owner) {
+				notifyFileOpen(workspace, owner.file);
+			}
+		} catch (error) {
+			console.warn("Journal View: could not update the workspace editor", error);
+		}
 	}
 }
 
@@ -168,44 +228,20 @@ function focusStayedInside(container: HTMLElement, event: FocusEvent): boolean {
  * assigning `activeEditor` is enough for editor commands and `getActiveFile`,
  * but does not tell Outline, Backlinks, or Properties to follow it.
  */
-function updateWorkspaceEditor(
-	app: App,
-	owner: ActiveEditorOwner,
-	update: WorkspaceEditorUpdate,
-	notifyRelease = false,
-): void {
-	try {
-		const workspace = app.workspace as unknown as WorkspaceEditorHost;
-		if (update === "claim") {
-			// The embedded editor itself may have assigned this owner before its
-			// focus event bubbles to us; it does not emit the file notification.
-			workspace.activeEditor = owner;
-			currentlyActiveDayEditor = owner;
-			notifyFileOpen(workspace, owner.file);
-		} else if (update === "release") {
-			if (notifyRelease && currentlyActiveDayEditor === owner) currentlyActiveDayEditor = null;
-			const owned = workspace.activeEditor === owner;
-			if (owned) workspace.activeEditor = null;
-			else if (workspace.activeEditor !== null) return;
-			// A view owns many mounted editors. Only the one the workspace still
-			// considers current should clear file followers during bulk teardown.
-			if (notifyRelease && (owned || workspace.getActiveFile() === owner.file)) {
-				notifyFileOpen(workspace, null);
-			}
-		} else if (update === "file" && workspace.activeEditor === owner) {
-			notifyFileOpen(workspace, owner.file);
-		}
-	} catch (error) {
-		console.warn("Journal View: could not update the workspace editor", error);
-	}
-}
-
-/**
- * Announces a file the way Obsidian does, keeping its record of what it last
- * announced.
- */
 function notifyFileOpen(workspace: WorkspaceEditorHost, file: TFile | null): void {
-	if ("lastActiveFile" in workspace) workspace.lastActiveFile = file;
+	if ("lastActiveFile" in workspace) {
+		const previous = workspace.lastActiveFile ?? null;
+		if (previous !== file) {
+			try {
+				// Obsidian normally records the file being left immediately before it
+				// updates lastActiveFile. A manual notification must preserve that step.
+				workspace.recentFileTracker?.onFileOpen(file, previous);
+			} catch (error) {
+				console.warn("Journal View: could not preserve recent-file tracking", error);
+			}
+		}
+		workspace.lastActiveFile = file;
+	}
 	workspace.trigger("file-open", file);
 }
 
@@ -283,6 +319,7 @@ class RichEditor implements JournalEditor {
 		this.owner = {
 			app: options.app,
 			file: options.file,
+			leaf: options.leaf,
 			hoverPopover: null,
 			getMode: () => "source",
 			getFile: () => this.options.file,
@@ -332,14 +369,14 @@ class RichEditor implements JournalEditor {
 
 		this.focusIn = (event) => {
 			if (focusStayedInside(options.container, event)) return;
-			updateWorkspaceEditor(this.options.app, this.owner, "claim");
+			this.options.workspaceEditors.update(this.owner, "claim");
 			this.scheduleWorkspaceContent();
 			this.options.onFocus();
 		};
 		this.focusOut = (event) => {
 			if (focusStayedInside(options.container, event)) return;
 			this.cancelWorkspaceContent();
-			updateWorkspaceEditor(this.options.app, this.owner, "release");
+			this.options.workspaceEditors.update(this.owner, "release");
 			this.options.onBlur();
 		};
 		options.container.addEventListener("focusin", this.focusIn);
@@ -441,7 +478,7 @@ class RichEditor implements JournalEditor {
 	setFile(file: TFile | null): void {
 		this.options.file = file;
 		this.owner.file = file;
-		updateWorkspaceEditor(this.options.app, this.owner, "file");
+		this.options.workspaceEditors.update(this.owner, "file");
 		this.scheduleWorkspaceContent();
 	}
 
@@ -574,7 +611,7 @@ class RichEditor implements JournalEditor {
 		// A blur deliberately leaves file-following panes on the last edited day.
 		// Teardown runs after the internal editor has finished its own focus work,
 		// then clears the owner unless another editor claimed the workspace.
-		updateWorkspaceEditor(this.options.app, this.owner, "release", true);
+		this.options.workspaceEditors.update(this.owner, "release", true);
 		this.instance = null;
 		this.options.container.empty();
 	}
