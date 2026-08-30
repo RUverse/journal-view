@@ -49,12 +49,26 @@ interface TagEditState {
 	selectionEnd: number | null;
 }
 
+interface PropertyListEditState {
+	property: string;
+	draft: string;
+	invalid: string | null;
+	inputEl: HTMLInputElement | null;
+	wasFocused: boolean;
+	selectionStart: number | null;
+	selectionEnd: number | null;
+}
+
 interface ParsedPropertyDraft {
 	valid: boolean;
 	remove: boolean;
 	value?: unknown;
 	error?: string;
 }
+
+type PropertyListMutation =
+	| { action: "add"; value: string }
+	| { action: "remove"; index: number; value: unknown };
 
 /** Autocomplete for the tag input inside a day's metadata strip. */
 class JournalTagSuggest extends AbstractInputSuggest<string> {
@@ -304,6 +318,7 @@ export class DaySection {
 	/** Newest complete file content, including external frontmatter held off from a dirty editor. */
 	private latestContent = "";
 	private propertyEdit: PropertyEditState | null = null;
+	private propertyListEdit: PropertyListEditState | null = null;
 	private tagEdit: TagEditState | null = null;
 	private tagSuggest: JournalTagSuggest | null = null;
 	private refreshingMetadata = false;
@@ -594,6 +609,7 @@ export class DaySection {
 			const { displayProperties, showTags } = this.host.plugin.settings;
 			if (!this.file || (!displayProperties.length && !showTags)) {
 				this.propertyEdit = null;
+				this.propertyListEdit = null;
 				this.tagEdit = null;
 				return;
 			}
@@ -601,6 +617,12 @@ export class DaySection {
 			const displayed = new Set(displayProperties.map((property) => property.toLocaleLowerCase()));
 			if (this.propertyEdit && !displayed.has(this.propertyEdit.property.toLocaleLowerCase())) {
 				this.propertyEdit = null;
+			}
+			if (
+				this.propertyListEdit &&
+				!displayed.has(this.propertyListEdit.property.toLocaleLowerCase())
+			) {
+				this.propertyListEdit = null;
 			}
 			if (!showTags) this.tagEdit = null;
 
@@ -612,13 +634,22 @@ export class DaySection {
 				const row = this.metadataEl.createDiv({ cls: "journal-day-metadata-row" });
 				row.createSpan({ cls: "journal-day-metadata-label", text: property });
 				const pending = this.pendingProperties.has(key);
+				const propertyValue = entry?.[1];
+				if (
+					this.propertyListEdit?.property.toLocaleLowerCase() === key &&
+					!Array.isArray(propertyValue)
+				) {
+					this.propertyListEdit = null;
+				}
 				row.toggleClass("journal-day-metadata-pending", pending);
 				if (pending) row.setAttribute("aria-busy", "true");
 
 				if (this.propertyEdit?.property.toLocaleLowerCase() === key) {
 					this.renderPropertyEditor(row, this.propertyEdit);
+				} else if (Array.isArray(propertyValue)) {
+					this.renderPropertyList(row, property, propertyValue, pending);
 				} else {
-					const valueText = metadataText(entry?.[1]);
+					const valueText = metadataText(propertyValue);
 					const value = row.createEl("button", {
 						cls: "journal-day-metadata-value journal-day-metadata-value-button",
 						text: valueText,
@@ -628,7 +659,7 @@ export class DaySection {
 					value.disabled = pending;
 					value.addEventListener("click", (event) => {
 						event.stopPropagation();
-						this.startPropertyEdit(property, entry?.[1]);
+						this.startPropertyEdit(property, propertyValue);
 					});
 				}
 			}
@@ -641,9 +672,156 @@ export class DaySection {
 		}
 	}
 
+	private renderPropertyList(
+		row: HTMLElement,
+		property: string,
+		items: unknown[],
+		pending: boolean,
+	): void {
+		row.addClass("journal-day-metadata-list");
+		const list = row.createDiv({
+			cls: "journal-day-property-list",
+			attr: { "aria-label": `${property} values` },
+		});
+		for (const [index, item] of items.entries()) {
+			const text = nestedMetadataText(item) || "—";
+			const chip = list.createSpan({ cls: "journal-day-tag journal-day-property-list-item" });
+			chip.createSpan({ cls: "journal-day-tag-text", text });
+			const remove = chip.createEl("button", {
+				cls: "journal-day-tag-remove",
+				attr: { type: "button", "aria-label": `Remove ${text} from ${property}` },
+			});
+			remove.createSpan({ text: "×", attr: { "aria-hidden": "true" } });
+			remove.disabled = pending;
+			remove.addEventListener("click", (event) => {
+				event.stopPropagation();
+				this.removePropertyListItem(property, index, item);
+			});
+		}
+
+		if (this.propertyListEdit?.property.toLocaleLowerCase() === property.toLocaleLowerCase()) {
+			this.renderPropertyListEditor(list, this.propertyListEdit, pending);
+		} else {
+			const add = list.createEl("button", {
+				cls: "clickable-icon journal-day-tag-add journal-day-property-list-add",
+				attr: { type: "button", "aria-label": `Add item to ${property}` },
+			});
+			setIcon(add, "plus");
+			setTooltip(add, `Add item to ${property}`);
+			add.disabled = pending;
+			add.addEventListener("click", (event) => {
+				event.stopPropagation();
+				this.startPropertyListEdit(property);
+			});
+		}
+	}
+
+	private startPropertyListEdit(property: string): void {
+		if (!this.file || this.pendingProperties.has(property.toLocaleLowerCase())) return;
+		if (this.propertyEdit) {
+			this.commitPropertyEdit(this.propertyEdit);
+			if (this.propertyEdit) return;
+		}
+		this.tagPointerCleanup?.();
+		this.tagPointerCleanup = null;
+		this.tagSuggestionPointerDown = false;
+		this.tagSuggest?.close();
+		this.tagSuggest = null;
+		this.tagEdit = null;
+		this.propertyListEdit = {
+			property,
+			draft: "",
+			invalid: null,
+			inputEl: null,
+			wasFocused: true,
+			selectionStart: 0,
+			selectionEnd: 0,
+		};
+		this.refreshMetadata();
+	}
+
+	private renderPropertyListEditor(
+		list: HTMLElement,
+		state: PropertyListEditState,
+		pending: boolean,
+	): void {
+		const input = list.createEl("input", {
+			cls: "journal-day-tag-input journal-day-property-list-input",
+			attr: {
+				type: "text",
+				placeholder: "Add item",
+				"aria-label": `Add item to ${state.property}`,
+			},
+		});
+		input.value = state.draft;
+		input.readOnly = pending;
+		state.inputEl = input;
+		this.syncInvalidMetadataInput(input, state.invalid);
+		input.addEventListener("input", () => {
+			state.draft = input.value;
+			state.invalid = null;
+			this.syncInvalidMetadataInput(input, null);
+		});
+		input.addEventListener("keydown", (event) => {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				this.cancelPropertyListEdit(state);
+			} else if (event.key === "Enter") {
+				event.preventDefault();
+				this.commitPropertyListItem(state);
+			}
+		});
+		input.addEventListener("blur", () => {
+			if (this.refreshingMetadata) return;
+			window.setTimeout(() => {
+				if (
+					this.propertyListEdit === state &&
+					state.inputEl === input &&
+					input.ownerDocument.activeElement !== input
+				) {
+					this.cancelPropertyListEdit(state);
+				}
+			}, 0);
+		});
+	}
+
+	private cancelPropertyListEdit(state: PropertyListEditState): void {
+		if (this.propertyListEdit !== state) return;
+		this.propertyListEdit = null;
+		this.refreshMetadata();
+	}
+
+	private commitPropertyListItem(state: PropertyListEditState): void {
+		if (this.propertyListEdit !== state) return;
+		const value = state.draft.trim();
+		if (!value) {
+			state.invalid = "Enter a list item.";
+			if (state.inputEl) this.syncInvalidMetadataInput(state.inputEl, state.invalid);
+			return;
+		}
+		this.propertyListEdit = null;
+		this.updatePropertyList(state.property, { action: "add", value });
+	}
+
+	private removePropertyListItem(property: string, index: number, value: unknown): void {
+		if (this.pendingProperties.has(property.toLocaleLowerCase())) return;
+		this.updatePropertyList(property, { action: "remove", index, value });
+	}
+
+	private updatePropertyList(property: string, mutation: PropertyListMutation): void {
+		const pendingKey = property.toLocaleLowerCase();
+		if (this.pendingProperties.has(pendingKey)) return;
+		this.pendingProperties.add(pendingKey);
+		this.refreshMetadata();
+		void this.writePropertyList(property, mutation).finally(() => {
+			this.pendingProperties.delete(pendingKey);
+			if (!this.destroyed) this.refreshMetadata();
+		});
+	}
+
 	private captureMetadataEdit(): void {
 		const active = this.metadataEl.ownerDocument.activeElement;
-		for (const state of [this.propertyEdit, this.tagEdit]) {
+		for (const state of [this.propertyEdit, this.propertyListEdit, this.tagEdit]) {
 			const input = state?.inputEl;
 			if (!state || !input) continue;
 			if (input.type === "checkbox") state.draft = String(input.checked);
@@ -657,7 +835,7 @@ export class DaySection {
 	}
 
 	private restoreMetadataFocus(): void {
-		for (const state of [this.propertyEdit, this.tagEdit]) {
+		for (const state of [this.propertyEdit, this.propertyListEdit, this.tagEdit]) {
 			if (!state?.wasFocused || !state.inputEl) continue;
 			const input = state.inputEl;
 			window.requestAnimationFrame(() => {
@@ -684,6 +862,7 @@ export class DaySection {
 		this.tagSuggest?.close();
 		this.tagSuggest = null;
 		this.tagEdit = null;
+		this.propertyListEdit = null;
 		const kind = propertyEditKind(value);
 		this.propertyEdit = {
 			property,
@@ -713,11 +892,16 @@ export class DaySection {
 		if (state.kind === "boolean") input.checked = state.draft === "true";
 		else input.value = state.draft;
 		this.syncInvalidMetadataInput(input, state.invalid);
+		window.requestAnimationFrame(() => {
+			if (this.destroyed || !input.isConnected || state.inputEl !== input) return;
+			this.resizePropertyInput(input);
+		});
 
 		input.addEventListener("input", () => {
 			state.draft = input.type === "checkbox" ? String(input.checked) : input.value;
 			state.invalid = null;
 			this.syncInvalidMetadataInput(input, null);
+			this.resizePropertyInput(input);
 		});
 		input.addEventListener("keydown", (event) => {
 			if (event.key === "Escape") {
@@ -753,6 +937,13 @@ export class DaySection {
 			event.stopPropagation();
 			this.commitPropertyEdit(state, true);
 		});
+	}
+
+	private resizePropertyInput(input: HTMLInputElement): void {
+		if (input.type === "checkbox") return;
+		input.setCssProps({ "--journal-property-input-width": "0px" });
+		const borderWidth = input.offsetWidth - input.clientWidth;
+		input.setCssProps({ "--journal-property-input-width": `${input.scrollWidth + borderWidth}px` });
 	}
 
 	private syncInvalidMetadataInput(input: HTMLInputElement, error: string | null): void {
@@ -868,6 +1059,7 @@ export class DaySection {
 			this.commitPropertyEdit(this.propertyEdit);
 			if (this.propertyEdit) return;
 		}
+		this.propertyListEdit = null;
 		this.tagEdit = {
 			draft: "",
 			invalid: null,
@@ -1010,6 +1202,47 @@ export class DaySection {
 				frontmatter[actual ?? property] = value;
 			}
 		});
+	}
+
+	private writePropertyList(property: string, mutation: PropertyListMutation): Promise<void> {
+		if (!this.propertyListWriteNeeded(property, mutation)) return Promise.resolve();
+		return this.enqueueMetadataWrite(`update ${property}`, (frontmatter) => {
+			const actual = Object.keys(frontmatter).find(
+				(key) => key.toLocaleLowerCase() === property.toLocaleLowerCase(),
+			);
+			if (!actual) {
+				if (mutation.action === "add") frontmatter[property] = [mutation.value];
+				return;
+			}
+
+			const stored = frontmatter[actual];
+			if (!Array.isArray(stored)) throw new Error(`${actual} is no longer a list`);
+			if (mutation.action === "add") {
+				stored.push(mutation.value);
+				return;
+			}
+
+			let index = mutation.index;
+			if (!sameMetadataValue(stored[index], mutation.value)) {
+				index = stored.findIndex((item) => sameMetadataValue(item, mutation.value));
+			}
+			if (index >= 0) stored.splice(index, 1);
+		});
+	}
+
+	private propertyListWriteNeeded(property: string, mutation: PropertyListMutation): boolean {
+		const frontmatter = this.parseFrontmatter(this.latestContent);
+		const actual = Object.keys(frontmatter).find(
+			(key) => key.toLocaleLowerCase() === property.toLocaleLowerCase(),
+		);
+		if (!actual) return mutation.action === "add";
+		const stored = frontmatter[actual];
+		if (!Array.isArray(stored)) return false;
+		if (mutation.action === "add") return true;
+		return (
+			sameMetadataValue(stored[mutation.index], mutation.value) ||
+			stored.some((item) => sameMetadataValue(item, mutation.value))
+		);
 	}
 
 	private writeTag(action: "add" | "remove", tag: string): Promise<void> {
@@ -1707,6 +1940,7 @@ export class DaySection {
 		this.tagSuggest?.close();
 		this.tagSuggest = null;
 		this.propertyEdit = null;
+		this.propertyListEdit = null;
 		this.tagEdit = null;
 		this.stopRevealing();
 		// Anything unsaved goes to the queue, which outlives this object.

@@ -55,7 +55,7 @@ export class AppearanceModal extends Modal {
 		this.knownProperties = this.discoverProperties();
 
 		const tagsSetting = new Setting(this.contentEl)
-			.setName("Display tags")
+			.setName("Tags")
 			.setDesc("Show tags from each daily note's frontmatter above its body.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.showTags).onChange((value) => {
