@@ -134,6 +134,20 @@ interface WorkspaceEditorHost {
 	trigger(name: string, ...data: unknown[]): void;
 }
 
+interface InternalWordCountPlugin {
+	enabled?: boolean;
+	statusBarEl?: {
+		toggle?(visible: boolean): void;
+	};
+	instance?: {
+		onQuickPreview?(file: TFile | null, content: string): void;
+	};
+}
+
+interface InternalPluginHost {
+	getPluginById(id: string): InternalWordCountPlugin | null | undefined;
+}
+
 type WorkspaceEditorUpdate = "claim" | "release" | "file";
 
 /**
@@ -246,17 +260,30 @@ function notifyFileOpen(workspace: WorkspaceEditorHost, file: TFile | null): voi
 }
 
 /**
- * Publishes the focused editor's in-memory text through the same workspace
- * event as a native Markdown view. Core consumers such as Word Count use this
- * instead of `editor-change`, because the vault can still hold an older value
- * while the editor is being changed.
+ * Publishes the focused editor's in-memory text to Word Count. Existing notes
+ * use the same workspace event as a native Markdown view. A day without a file
+ * cannot: `getActiveFile()` falls back to the last real file, so Word Count
+ * rejects a null preview and retains that file's count. Calling its guarded
+ * preview handler directly is the only way to represent the unsaved editor
+ * without broadcasting an empty preview for an unrelated file.
  */
 function publishWorkspaceContent(app: App, owner: ActiveEditorOwner, content: string): void {
 	try {
 		const workspace = app.workspace as unknown as WorkspaceEditorHost;
-		if (owner.file && workspace.activeEditor === owner) {
+		if (workspace.activeEditor !== owner) return;
+		if (owner.file) {
 			workspace.trigger("quick-preview", owner.file, content);
+			return;
 		}
+
+		const internalPlugins = app.internalPlugins as unknown as InternalPluginHost | undefined;
+		const plugin = internalPlugins?.getPluginById("word-count");
+		const onQuickPreview = plugin?.instance?.onQuickPreview;
+		if (!plugin?.enabled || typeof onQuickPreview !== "function") return;
+		plugin.statusBarEl?.toggle?.(true);
+		// The handler strips frontmatter and Markdown syntax before counting. Its
+		// file argument is only an identity check against the current active file.
+		onQuickPreview.call(plugin.instance, workspace.getActiveFile(), content);
 	} catch (error) {
 		console.warn("Journal View: could not publish the active editor content", error);
 	}
