@@ -37,6 +37,7 @@ Some Customization is only visible in the customization menu accessible from the
 | Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View |
 | Day order | Oldest to newest | Reverses the complete timeline when set to newest to oldest |
 | Daily header format | `dddd, D MMMM` | Controls how each daily header displays its date |
+| Daily header style | Subtle | Shows each date subtly, as an H1, or hides the date display |
 | Group days by year | On | Marks year boundaries between consecutive visible daily entries |
 | Group days by month | Off | Groups daily entries beneath compact month and year headings |
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |

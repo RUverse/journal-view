@@ -374,11 +374,21 @@ export class DaySection {
 		this.monthEl.createSpan({ cls: "journal-month-year", text: date.format("YYYY") });
 		this.monthEl.hidden = true;
 		this.cardEl = this.el.createDiv({ cls: "journal-day-card" });
-		this.headerEl = this.cardEl.createDiv({ cls: "journal-day-header" });
+		const headerStyle = this.host.plugin.settings.headerStyle;
+		this.headerEl = this.cardEl.createDiv({
+			cls: `journal-day-header journal-day-header-${headerStyle}`,
+		});
 		this.titleEl = this.headerEl.createDiv({ cls: "journal-day-title" });
-		this.titleEl.createSpan({ cls: "journal-day-date", text: this.formatHeader() });
-		const relative = this.relativeLabel();
-		if (relative) this.titleEl.createSpan({ cls: "journal-day-badge", text: relative });
+		if (headerStyle !== "hidden") {
+			this.titleEl.createSpan({
+				cls: "journal-day-date",
+				text: this.formatHeader(),
+			});
+			const relative = this.relativeLabel();
+			if (relative) this.titleEl.createSpan({ cls: "journal-day-badge", text: relative });
+		} else {
+			this.titleEl.hidden = true;
+		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 
 		this.metadataEl = this.cardEl.createDiv({ cls: "journal-day-metadata" });

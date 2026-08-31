@@ -212,6 +212,7 @@ button.journal-find-button.is-active {
 }
 
 .journal-day-card {
+	position: relative;
 	border-radius: var(--radius-m);
 	padding: var(--size-4-2) var(--size-4-3) var(--size-4-3);
 	transition: background-color 120ms ease-in-out;
@@ -300,13 +301,58 @@ button.journal-find-button.is-active {
 	min-width: 0;
 }
 
+.journal-day-title[hidden] {
+	display: none;
+}
+
 .journal-day-date {
+	min-width: 0;
 	font-size: var(--font-ui-small);
 	font-weight: var(--font-semibold);
 	color: var(--text-muted);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+.journal-day-header-h1 {
+	border-bottom: none;
+}
+
+.journal-day-header-h1 .journal-day-date {
+	margin: 0;
+	padding-block: 0.08em;
+	color: var(--h1-color);
+	font-family: var(--h1-font);
+	font-size: var(--h1-size);
+	font-style: var(--h1-style);
+	font-variant: var(--h1-variant);
+	font-weight: var(--h1-weight);
+	letter-spacing: var(--h1-letter-spacing);
+	line-height: var(--h1-line-height);
+}
+
+/* Hidden dates should not leave an empty header band. Keep the note actions
+   available without letting their invisible state reserve layout space. */
+.journal-day-header-hidden {
+	height: 0;
+	margin: 0;
+	padding: 0;
+	border-bottom: none;
+}
+
+.journal-day-header-hidden .journal-day-actions {
+	position: absolute;
+	z-index: 1;
+	top: var(--size-4-2);
+	right: var(--size-4-3);
+	pointer-events: none;
+}
+
+.journal-day:hover .journal-day-header-hidden .journal-day-actions,
+.journal-day-focused .journal-day-header-hidden .journal-day-actions,
+.journal-day-header-hidden .journal-day-actions:focus-within {
+	pointer-events: auto;
 }
 
 /* A quiet marker, not a call to action: today is already highlighted by its

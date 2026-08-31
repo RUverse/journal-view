@@ -14,7 +14,7 @@ import {
 	clampLoadedDays,
 	clampSaveDelay,
 } from "./settings";
-import type { DaySortDirection } from "./settings";
+import type { DailyHeaderStyle, DaySortDirection } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 
 export default class JournalViewPlugin extends Plugin {
@@ -242,6 +242,7 @@ export default class JournalViewPlugin extends Plugin {
 			folder: stringSetting(saved.folder, DEFAULT_SETTINGS.folder),
 			templatePath: stringSetting(saved.templatePath, DEFAULT_SETTINGS.templatePath),
 			headerFormat: headerFormatSetting(saved.headerFormat, typeof saved.showMonthSeparators === "boolean"),
+			headerStyle: headerStyleSetting(saved.headerStyle),
 			showMonthSeparators: booleanSetting(
 				saved.showMonthSeparators,
 				DEFAULT_SETTINGS.showMonthSeparators,
@@ -286,6 +287,10 @@ function headerFormatSetting(value: unknown, hasGroupingSetting: boolean): strin
 		return DEFAULT_SETTINGS.headerFormat;
 	}
 	return format;
+}
+
+function headerStyleSetting(value: unknown): DailyHeaderStyle {
+	return value === "h1" || value === "hidden" ? value : DEFAULT_SETTINGS.headerStyle;
 }
 
 function saveDelaySetting(value: unknown): number {

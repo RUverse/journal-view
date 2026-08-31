@@ -12,6 +12,7 @@ export const MONTH_SEPARATOR_DAY_FORMAT = "dddd, D";
 export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
+export type DailyHeaderStyle = "subtle" | "h1" | "hidden";
 export type JournalFilterMode = "include" | "exclude";
 export type JournalFilterValue = string | number | boolean;
 
@@ -33,6 +34,8 @@ export interface JournalViewSettings {
 	templatePath: string;
 	/** How the date is written in each day's header. */
 	headerFormat: string;
+	/** How prominently each day's date is displayed. */
+	headerStyle: DailyHeaderStyle;
 	/** Show month/year once above a group rather than inside every day. */
 	showMonthSeparators: boolean;
 	/** Group rendered days beneath year boundary headings. */
@@ -62,6 +65,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	folder: "",
 	templatePath: "",
 	headerFormat: "dddd, D MMMM",
+	headerStyle: "subtle",
 	showMonthSeparators: false,
 	groupDaysByYear: true,
 	// Obsidian debounces its own `TextFileView.requestSave` by the same amount,
@@ -114,12 +118,20 @@ interface JournalSliderSetting extends JournalSettingBase {
 	};
 }
 
+type JournalDropdownControl =
+	| {
+			type: "dropdown";
+			key: "daySortDirection";
+			options: Record<DaySortDirection, string>;
+	  }
+	| {
+			type: "dropdown";
+			key: "headerStyle";
+			options: Record<DailyHeaderStyle, string>;
+	  };
+
 interface JournalDropdownSetting extends JournalSettingBase {
-	control: {
-		type: "dropdown";
-		key: "daySortDirection";
-		options: Record<DaySortDirection, string>;
-	};
+	control: JournalDropdownControl;
 }
 
 type JournalSetting =
@@ -203,6 +215,15 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							type: "text",
 							key: "headerFormat",
 							placeholder: DEFAULT_SETTINGS.headerFormat,
+						},
+					},
+					{
+						name: "Daily header style",
+						desc: "Choose how prominently each day's date appears.",
+						control: {
+							type: "dropdown",
+							key: "headerStyle",
+							options: { subtle: "Subtle", h1: "H1", hidden: "Hidden" },
 						},
 					},
 					{
@@ -307,6 +328,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				break;
 			case "daySortDirection":
 				if (value === "ascending" || value === "descending") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
+			case "headerStyle":
+				if (value === "subtle" || value === "h1" || value === "hidden") {
 					this.plugin.settings[key] = value;
 					changed = true;
 				}
