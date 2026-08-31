@@ -153,6 +153,10 @@ export class JournalFind {
 		this.matches = [];
 
 		for (const [sectionIndex, section] of this.host.sections.entries()) {
+			if (section.isHidden) {
+				section.setFindState(query, this.caseSensitive, [], null);
+				continue;
+			}
 			const ranges = findLiteralRanges(section.searchText(), query, this.caseSensitive);
 			section.setFindState(query, this.caseSensitive, ranges, null);
 			for (const range of ranges) this.matches.push({ section, sectionIndex, key: section.key, ...range });
@@ -233,7 +237,8 @@ export class JournalFind {
 		const loadedKeys = new Set(this.host.sections.map((section) => section.key));
 		const edge = direction > 0 ? this.host.sections[this.host.sections.length - 1].key : this.host.sections[0].key;
 		const dateDirection = (direction * this.host.sortStep()) as -1 | 1;
-		const keys = this.host.plugin.index.keysFrom(edge, dateDirection);
+		this.host.plugin.filteredIndex.ensureCurrent();
+		const keys = this.host.plugin.filteredIndex.keysFrom(edge, dateDirection);
 		const today = createMoment().startOf("day");
 
 		try {

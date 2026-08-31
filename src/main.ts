@@ -1,6 +1,7 @@
 import { MarkdownView, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
 import { WorkspaceEditorBridge } from "./editor";
+import { FilteredDailyNoteIndex, filterRulesSetting } from "./filter";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
@@ -20,8 +21,11 @@ export default class JournalViewPlugin extends Plugin {
 	settings: JournalViewSettings = { ...DEFAULT_SETTINGS };
 	daily!: DailyNoteResolver;
 	index!: DailyNoteIndex;
+	filteredIndex!: FilteredDailyNoteIndex;
 	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
+	private settingsTab: JournalViewSettingTab | null = null;
+	private filterControlListeners = new Set<() => void>();
 	/** Target dates handed to journal views before Obsidian constructs them. */
 	private initialDates = new Map<WorkspaceLeaf, Moment>();
 
@@ -43,32 +47,62 @@ export default class JournalViewPlugin extends Plugin {
 		this.updateViews();
 	}
 
+	/** Refreshes metadata filtering before open views read the new rule set. */
+	notifyFiltersImmediately(): void {
+		this.filteredIndex.ensureCurrent();
+		this.syncFilterControls();
+		this.updateViews();
+	}
+
+	/** Keeps the modal and settings-tab copies of the note-only toggle in sync. */
+	onFilterControlsChanged(listener: () => void): () => void {
+		this.filterControlListeners.add(listener);
+		return () => this.filterControlListeners.delete(listener);
+	}
+
+	private syncFilterControls(): void {
+		this.settingsTab?.syncFilterControls();
+		for (const listener of this.filterControlListeners) listener();
+	}
+
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.daily = new DailyNoteResolver(this.app, () => this.settings);
 		this.index = new DailyNoteIndex(this.app, this.daily);
+		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
 
 		// The index has to be registered before any view, so it is already up to
 		// date by the time a view reacts to the same vault event.
 		this.app.workspace.onLayoutReady(() => {
 			this.index.rebuild();
+			this.filteredIndex.rebuild();
 			this.syncDailyNoteActions();
 		});
 		this.registerEvent(
 			this.app.vault.on("create", (file) => {
-				if (file instanceof TFile) this.index.handleCreate(file);
+				if (file instanceof TFile) {
+					this.index.handleCreate(file);
+					this.filteredIndex.ensureCurrent();
+				}
 			}),
 		);
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
 				this.index.handleDelete(file.path);
+				this.filteredIndex.ensureCurrent();
 			}),
 		);
 		this.registerEvent(
 			this.app.vault.on("rename", (file, oldPath) => {
 				this.index.handleDelete(oldPath);
 				if (file instanceof TFile) this.index.handleCreate(file);
+				this.filteredIndex.ensureCurrent();
 				this.syncDailyNoteActions();
+			}),
+		);
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (file) => {
+				this.filteredIndex.handleMetadataChange(file);
 			}),
 		);
 		this.registerEvent(this.app.workspace.on("file-open", () => this.syncDailyNoteActions()));
@@ -105,7 +139,8 @@ export default class JournalViewPlugin extends Plugin {
 			},
 		});
 
-		this.addSettingTab(new JournalViewSettingTab(this.app, this));
+		this.settingsTab = new JournalViewSettingTab(this.app, this);
+		this.addSettingTab(this.settingsTab);
 	}
 
 	onunload(): void {
@@ -199,7 +234,7 @@ export default class JournalViewPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const saved: unknown = await this.loadData();
 		if (!isRecord(saved)) {
-			this.settings = { ...DEFAULT_SETTINGS, displayProperties: [] };
+			this.settings = { ...DEFAULT_SETTINGS, filterRules: [], displayProperties: [] };
 			return;
 		}
 		this.settings = {
@@ -220,6 +255,7 @@ export default class JournalViewPlugin extends Plugin {
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
+			filterRules: filterRulesSetting(saved.filterRules),
 			showTags: booleanSetting(saved.showTags, DEFAULT_SETTINGS.showTags),
 			displayProperties: propertyNamesSetting(saved.displayProperties),
 			daySortDirection: daySortDirectionSetting(saved.daySortDirection),
@@ -227,7 +263,9 @@ export default class JournalViewPlugin extends Plugin {
 	}
 
 	async saveSettings(scheduleViewUpdate = true): Promise<void> {
+		this.syncFilterControls();
 		await this.saveData(this.settings);
+		this.filteredIndex?.ensureCurrent();
 		this.syncDailyNoteActions();
 		if (scheduleViewUpdate) this.notifyViews();
 	}

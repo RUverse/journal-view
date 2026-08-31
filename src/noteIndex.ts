@@ -4,13 +4,24 @@ import { createMoment } from "./moment";
 
 export const DAY_KEY_FORMAT = "YYYY-MM-DD";
 
+/** Chronologically ordered set of daily-note keys used by walkers and navigation. */
+export interface OrderedDayIndex {
+	readonly version: number;
+	has(key: string): boolean;
+	readonly size: number;
+	range(): { first: string; last: string } | null;
+	next(key: string): string | null;
+	prev(key: string): string | null;
+	keysFrom(key: string, direction: -1 | 1): string[];
+}
+
 /**
  * Knows which days actually have a note, so the view can jump straight from one
  * existing day to the next instead of walking the calendar one day at a time.
  *
  * Keys are `YYYY-MM-DD`, which sorts chronologically as plain strings.
  */
-export class DailyNoteIndex {
+export class DailyNoteIndex implements OrderedDayIndex {
 	private keys = new Set<string>();
 	private sorted: string[] = [];
 	private sortedDirty = true;
@@ -39,6 +50,11 @@ export class DailyNoteIndex {
 	/** Rebuilds only if the daily-note configuration moved since the last scan. */
 	ensureCurrent(): void {
 		if (JSON.stringify(this.resolver.config()) !== this.signature) this.rebuild();
+	}
+
+	/** One resolved configuration for callers scanning more than one path. */
+	resolvedConfig(): ResolvedDailyConfig {
+		return this.resolver.config();
 	}
 
 	/** The day a path represents, or null if it is not a daily note. */
