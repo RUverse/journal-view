@@ -84,6 +84,11 @@
 	padding-inline: var(--size-4-2);
 }
 
+button.journal-filter-button.is-active,
+.journal-filter-button.is-active {
+	color: var(--text-accent);
+}
+
 /* ----------------------------------------------------------- find bar --- */
 
 .journal-find-bar {
@@ -1075,6 +1080,102 @@ button.journal-appearance-settings-link {
 button.journal-appearance-settings-link:hover {
 	background-color: var(--background-modifier-border);
 	color: var(--text-normal);
+}
+
+/* --------------------------------------------------------- filter modal -- */
+
+.journal-filter-modal {
+	width: min(680px, 94vw);
+}
+
+.journal-filter-modal .modal-content {
+	margin-top: var(--size-4-2);
+}
+
+.modal.journal-filter-modal .journal-filter-metadata-heading.setting-item {
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.modal.journal-filter-modal .journal-filter-add.setting-item {
+	align-items: flex-start;
+	border-top: 0;
+}
+
+.journal-filter-add .setting-item-control {
+	display: flex;
+	flex-wrap: nowrap;
+	justify-content: flex-end;
+	min-width: 0;
+	gap: var(--size-2-2);
+}
+
+.journal-filter-add select,
+.journal-filter-add button {
+	flex: 0 0 auto;
+	width: auto;
+}
+
+.journal-filter-add input[type="text"] {
+	flex: 1 1 11rem;
+	min-width: 0;
+	width: min(11rem, 28vw);
+	max-width: 11rem;
+	box-sizing: border-box;
+}
+
+.journal-filter-add.is-property input[type="text"] {
+	flex-basis: 8rem;
+	width: min(8rem, 20vw);
+	max-width: 8rem;
+}
+
+.journal-filter-add input[hidden] {
+	display: none;
+}
+
+.journal-filter-rules {
+	margin-top: var(--size-4-2);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.modal.journal-filter-modal .journal-filter-rules > .setting-item:first-child {
+	border-top: 0;
+	padding-top: var(--size-4-3);
+}
+
+.modal.journal-filter-modal .journal-filter-rules > .setting-item {
+	align-items: center;
+	min-height: 0;
+	padding-top: var(--size-2-3);
+	padding-bottom: var(--size-2-3);
+}
+
+.modal.journal-filter-modal .journal-filter-rules > .setting-item > .setting-item-info,
+.modal.journal-filter-modal .journal-filter-rules > .setting-item > .setting-item-control {
+	align-self: center;
+}
+
+.journal-filter-empty {
+	padding: var(--size-4-3) 0;
+}
+
+@media (max-width: 520px) {
+	.modal.journal-filter-modal .journal-filter-add.setting-item {
+		display: block;
+	}
+
+	.journal-filter-add .setting-item-control {
+		flex-wrap: wrap;
+		justify-content: flex-start;
+		margin-top: var(--size-4-2);
+	}
+
+	.journal-filter-add input[type="text"],
+	.journal-filter-add.is-property input[type="text"] {
+		width: min(100%, 13rem);
+		max-width: none;
+		flex: 1 1 9rem;
+	}
 }
 
 /* -------------------------------------------------------------- settings -- */

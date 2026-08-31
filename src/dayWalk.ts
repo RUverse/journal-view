@@ -1,6 +1,7 @@
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
-import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
+import { DAY_KEY_FORMAT } from "./noteIndex";
+import type { OrderedDayIndex } from "./noteIndex";
 
 /** Hard stop so empty-day scrolling cannot allocate forever (~13 years). */
 export const MAX_OFFSET = 5000;
@@ -26,21 +27,16 @@ export function isOffsetReachable(offset: number, hideEmpty: boolean, indexed: b
  */
 export class DayWalker {
 	/**
-	 * Days the filter is not allowed to take away, as offsets: today, and the
-	 * day the view was last sent to. Sorted, so a walk can ask which comes next.
+	 * Today is the only date the filter is not allowed to take away.
 	 */
-	private readonly pinned: number[];
+	private readonly pinned = [0];
 
 	constructor(
 		readonly today: Moment,
-		private index: DailyNoteIndex,
+		private notes: OrderedDayIndex,
+		private matchingNotes: OrderedDayIndex,
 		private hideEmpty: () => boolean,
-		pinned?: Moment,
-	) {
-		const offset = pinned ? pinned.clone().startOf("day").diff(today, "days") : 0;
-		const kept = this.isReachable(offset) ? [0, offset] : [0];
-		this.pinned = Array.from(new Set(kept)).sort((a, b) => a - b);
-	}
+	) {}
 
 	dateFor(offset: number): Moment {
 		return this.today.clone().add(offset, "days");
@@ -56,15 +52,14 @@ export class DayWalker {
 
 	/**
 	 * The next day the view should render in `direction`. With empty days
-	 * hidden this skips straight to the next day that actually has a note, so
+	 * hidden this skips straight to the next matching note, so
 	 * the view never has to materialise a run of blank days to cross a gap -
-	 * except for a pinned day, which belongs in the journal whether it has a
-	 * note or not, so a walk that would step over one stops there instead.
+	 * except for Today, so a walk that would step over it stops there instead.
 	 */
 	next(from: number, direction: -1 | 1): number | null {
 		if (this.hideEmpty()) {
 			const key = this.keyFor(from);
-			const found = direction < 0 ? this.index.prev(key) : this.index.next(key);
+			const found = direction < 0 ? this.matchingNotes.prev(key) : this.matchingNotes.next(key);
 			const noted = found ? this.offsetFor(found) : null;
 			// Whichever comes first: the next day with a note, or the next day
 			// that is kept regardless.
@@ -76,8 +71,19 @@ export class DayWalker {
 			// were checked when the walker was built.
 			return direction < 0 ? Math.max(...candidates) : Math.min(...candidates);
 		}
-		const offset = from + direction;
-		return isOffsetReachable(offset, false, false) ? offset : null;
+		let offset = from + direction;
+		while (isOffsetReachable(offset, false, false)) {
+			if (this.isVisible(offset)) return offset;
+			offset += direction;
+		}
+		return null;
+	}
+
+	/** Whether this date belongs in the filtered journal. Today is unconditional. */
+	isVisible(offset: number): boolean {
+		if (this.isPinned(offset)) return true;
+		const key = this.keyFor(offset);
+		return this.notes.has(key) ? this.matchingNotes.has(key) : !this.hideEmpty();
 	}
 
 	/** True for a day that is shown whether or not it has a note. */
@@ -96,17 +102,15 @@ export class DayWalker {
 	}
 
 	/**
-	 * The offset a window should be built around. Hiding empty days can take
-	 * away the very day the reader was looking at, so an anchor that will not
-	 * survive is moved to whichever surviving day is closest to it - unless it
-	 * is pinned, which is how a day the reader asked for by date is kept.
+	 * The offset a window should be built around. Filters can take away the day
+	 * the reader was looking at, so a non-surviving anchor moves to the nearest
+	 * visible date instead.
 	 */
 	origin(around?: Moment): number {
 		if (!around) return 0;
 		const offset = around.clone().startOf("day").diff(this.today, "days");
 		if (!this.isReachable(offset)) return 0;
-		if (!this.hideEmpty()) return offset;
-		if (this.isPinned(offset) || this.index.has(this.keyFor(offset))) return offset;
+		if (this.isVisible(offset)) return offset;
 
 		const before = this.next(offset, -1);
 		const after = this.next(offset, 1);
@@ -116,6 +120,6 @@ export class DayWalker {
 	}
 
 	private isReachable(offset: number): boolean {
-		return isOffsetReachable(offset, this.hideEmpty(), this.index.has(this.keyFor(offset)));
+		return isOffsetReachable(offset, this.hideEmpty(), this.matchingNotes.has(this.keyFor(offset)));
 	}
 }

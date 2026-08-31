@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting, requireApiVersion } from "obsidian";
-import type { SettingDefinitionItem } from "obsidian";
+import type { SettingDefinitionItem, ToggleComponent } from "obsidian";
 import type JournalViewPlugin from "./main";
 
 export const MIN_SAVE_DELAY = 200;
@@ -12,6 +12,17 @@ export const MONTH_SEPARATOR_DAY_FORMAT = "dddd, D";
 export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
+export type JournalFilterMode = "include" | "exclude";
+export type JournalFilterValue = string | number | boolean;
+
+export type JournalFilterRule =
+	| { kind: "tag"; mode: JournalFilterMode; tag: string }
+	| {
+			kind: "property";
+			mode: JournalFilterMode;
+			property: string;
+			value: JournalFilterValue;
+	  };
 
 export interface JournalViewSettings {
 	/** Overrides the daily-note date format. Empty = inherit from the vault. */
@@ -36,6 +47,8 @@ export interface JournalViewSettings {
 	focusTodayOnOpen: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
+	/** Tag and property rules that decide which existing notes are visible. */
+	filterRules: JournalFilterRule[];
 	/** Show frontmatter tags above each existing note's body. */
 	showTags: boolean;
 	/** Frontmatter property names shown above each existing note's body. */
@@ -58,6 +71,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
+	filterRules: [],
 	showTags: false,
 	displayProperties: [],
 	daySortDirection: "ascending",
@@ -126,6 +140,8 @@ interface LegacySliderTooltip {
 }
 
 export class JournalViewSettingTab extends PluginSettingTab {
+	private hideEmptyToggle: ToggleComponent | null = null;
+
 	constructor(app: App, private plugin: JournalViewPlugin) {
 		super(app, plugin);
 	}
@@ -311,6 +327,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 
 	display(): void {
 		const { containerEl } = this;
+		this.hideEmptyToggle = null;
 		containerEl.empty();
 		for (const group of this.definitions()) {
 			new Setting(containerEl).setName(group.heading).setHeading();
@@ -339,11 +356,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				);
 				break;
 			case "toggle":
-				setting.addToggle((toggle) =>
+				setting.addToggle((toggle) => {
+					if (control.key === "hideEmptyDays") this.hideEmptyToggle = toggle;
 					toggle
 						.setValue(this.plugin.settings[control.key])
-						.onChange((value) => this.setControlValue(control.key, value)),
-				);
+						.onChange((value) => this.setControlValue(control.key, value));
+				});
 				break;
 			case "slider":
 				setting.addSlider((slider) => {
@@ -363,6 +381,10 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				);
 				break;
 		}
+	}
+
+	syncFilterControls(): void {
+		this.hideEmptyToggle?.setValue(this.plugin.settings.hideEmptyDays);
 	}
 }
 

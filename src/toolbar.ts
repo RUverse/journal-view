@@ -15,7 +15,7 @@ function applyIcon(el: HTMLElement, ...names: string[]): void {
 
 /** What the toolbar's controls ask the view to do. */
 export interface ToolbarActions {
-	onToggleFilter(): void;
+	onShowFilter(): void;
 	onShowAppearance(): void;
 	onShowFind(): void;
 	onGoToDate(): void;
@@ -51,9 +51,11 @@ export class JournalToolbar {
 			this.buttons.push(appearanceButton);
 
 			this.filterButton = buttons.createEl("button", {
-				cls: "clickable-icon journal-toolbar-button",
+				cls: "clickable-icon journal-toolbar-button journal-filter-button",
+				attr: { "aria-haspopup": "dialog" },
 			});
-			this.filterButton.addEventListener("click", () => actions.onToggleFilter());
+			applyIcon(this.filterButton, "filter");
+			this.filterButton.addEventListener("click", () => actions.onShowFilter());
 			this.buttons.push(this.filterButton);
 
 			const findButton = buttons.createEl("button", {
@@ -104,8 +106,10 @@ export class JournalToolbar {
 		setTooltip(findButton, "Find in journal");
 		this.buttons.push(findButton);
 
-		this.filterButton = view.addAction("filter", "Filter days", () => actions.onToggleFilter());
-		this.filterButton.addClass("journal-toolbar-button");
+		this.filterButton = view.addAction("filter", "Filter notes", () => actions.onShowFilter());
+		this.filterButton.addClasses(["journal-toolbar-button", "journal-filter-button"]);
+		applyIcon(this.filterButton, "filter");
+		this.filterButton.setAttribute("aria-haspopup", "dialog");
 		const appearanceButton = view.addAction("settings-2", "Customization", () => actions.onShowAppearance());
 		appearanceButton.addClass("journal-toolbar-button");
 		applyIcon(appearanceButton, "settings-2", "settings");
@@ -126,11 +130,11 @@ export class JournalToolbar {
 		if (this.labelEl.getText() !== text) this.labelEl.setText(text);
 	}
 
-	setFilter(on: boolean): void {
-		applyIcon(this.filterButton, on ? "filter" : "filter-x", "filter");
-		setTooltip(this.filterButton, on ? "Showing only days with notes" : "Showing every day");
-		this.filterButton.toggleClass("is-active", on);
-		this.filterButton.setAttribute("aria-pressed", String(on));
+	setFilter(active: boolean): void {
+		applyIcon(this.filterButton, "filter");
+		setTooltip(this.filterButton, active ? "Filter notes (filters active)" : "Filter notes");
+		this.filterButton.toggleClass("is-active", active);
+		this.filterButton.removeAttribute("aria-pressed");
 	}
 
 	setVisible(visible: boolean): void {

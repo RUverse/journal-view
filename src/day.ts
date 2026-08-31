@@ -105,12 +105,14 @@ export interface DayHost {
 	plugin: JournalViewPlugin;
 	/** Called when a day's underlying file appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
-	/** True for a day that stays in the journal even with empty days hidden. */
-	isPinnedDay(day: DaySection): boolean;
+	/** True when this date passes the journal's current visibility rules. */
+	isVisibleDay(day: DaySection): boolean;
 	/** True while a day is out of sight, where its body can be swapped unseen. */
 	isOffScreen(day: DaySection): boolean;
 	/** Re-indexes find results after this day's visible body changes. */
 	onDayContentChanged(day: DaySection): void;
+	/** Re-applies filtering after a focused editing session settles. */
+	onDayFocusChanged(day: DaySection): void;
 	/** Re-centres a navigation after focus-driven editor and template layout settles. */
 	onDayFocusSettled(day: DaySection): void;
 	/** Opens the journal-wide find UI from an embedded editor command. */
@@ -384,6 +386,14 @@ export class DaySection {
 		this.bodyEl = this.cardEl.createDiv({ cls: "journal-day-body" });
 
 		this.el.addEventListener("click", (event) => this.onClick(event));
+		this.el.addEventListener("focusout", () => {
+			// Focus often moves between the editor and metadata controls inside the
+			// same day. Wait for that move to settle before releasing the temporary
+			// focused-day visibility guard.
+			window.setTimeout(() => {
+				if (!this.destroyed && !this.hasFocus) this.host.onDayFocusChanged(this);
+			}, 0);
+		});
 
 		this.refreshState();
 	}
@@ -552,10 +562,7 @@ export class DaySection {
 		this.el.toggleClass("journal-day-today", this.isToday);
 		this.el.toggleClass("journal-day-empty", !this.exists);
 		this.el.toggleClass("journal-day-future", this.offset > 0);
-		this.el.toggleClass(
-			"journal-day-hidden",
-			!this.exists && !this.host.isPinnedDay(this) && this.host.plugin.settings.hideEmptyDays,
-		);
+		this.refreshVisibility();
 
 		this.bodyEl.dataset.placeholder = this.exists ? "Empty note" : "Start typing to create this note";
 		this.actionsEl.empty();
@@ -591,6 +598,11 @@ export class DaySection {
 			});
 		}
 		this.refreshMetadata();
+	}
+
+	/** Re-applies only the state that can change when focus leaves a filtered day. */
+	refreshVisibility(): void {
+		this.el.toggleClass("journal-day-hidden", !this.host.isVisibleDay(this));
 	}
 
 	/** Rebuilds the editable strip from the latest complete note content. */
@@ -1718,7 +1730,9 @@ export class DaySection {
 		this.el.removeClass("journal-day-focused");
 		// Leaving a day the reader only looked at costs them nothing.
 		if (this.withdrawTemplate()) return;
-		void this.flush();
+		void this.flush().finally(() => {
+			if (!this.destroyed) this.host.onDayFocusChanged(this);
+		});
 	}
 
 	/**

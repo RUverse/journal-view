@@ -19,6 +19,8 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
   the daily note only when you need it.
 - **Rediscover past entries.** Search across your journal to quickly find notes, ideas, and memories
   from any day.
+- **Focus the timeline.** Filter daily notes by tags or exact property values, with include and
+  exclude rules that also carry through to calendar navigation and journal search.
 - **Stay responsive across years of notes.** Journal View keeps the days around you ready to edit
   while efficiently handling the rest of your timeline.
 
@@ -42,6 +44,22 @@ Some Customization is only visible in the customization menu accessible from the
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
+
+## Filters
+
+Select the funnel button in the journal toolbar to open the filters. **Show only days with notes** is
+enabled by default; Today remains visible even when it is empty or does not match the metadata
+filters. Turn that option off to keep empty days available for writing while still hiding existing
+notes that do not match.
+
+Tag filters use tags from both frontmatter and note content. A parent tag also matches its nested
+tags, so `#project` matches `#project/client`. Property filters compare exact string, number, or
+boolean values, and a list property matches when one of its items equals the configured value.
+
+Every include filter must match. A note matching any exclude filter is hidden, even if it satisfies
+all includes. The funnel uses the accent color whenever a tag or property filter is active; the
+note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, and **Find in
+journal** searches only the notes currently included.
 
 ## Privacy
 
