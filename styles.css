@@ -418,8 +418,7 @@ button.journal-day-create:hover {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	column-gap: var(--size-2-3);
-	row-gap: var(--size-2-2);
+	gap: var(--size-2-2) var(--size-2-3);
 	/* Match the header's bottom margin so the strip has the same breathing
 	   room above and below it. */
 	margin: 0 0 var(--size-2-3);
