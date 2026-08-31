@@ -67,10 +67,9 @@ export class JournalToolbar {
 			this.buttons.push(findButton);
 
 			const dateButton = buttons.createEl("button", {
-				cls: "clickable-icon journal-toolbar-button journal-toolbar-labeled-button",
+				cls: "clickable-icon journal-toolbar-button",
 			});
 			applyIcon(dateButton, "calendar-search", "calendar-days", "calendar");
-			dateButton.createSpan({ text: "Go to" });
 			setTooltip(dateButton, "Go to date");
 			dateButton.addEventListener("click", () => actions.onGoToDate());
 			this.buttons.push(dateButton);
