@@ -278,12 +278,12 @@ function publishWorkspaceContent(app: App, owner: ActiveEditorOwner, content: st
 
 		const internalPlugins = app.internalPlugins as unknown as InternalPluginHost | undefined;
 		const plugin = internalPlugins?.getPluginById("word-count");
-		const onQuickPreview = plugin?.instance?.onQuickPreview;
-		if (!plugin?.enabled || typeof onQuickPreview !== "function") return;
+		const instance = plugin?.instance;
+		if (!plugin?.enabled || typeof instance?.onQuickPreview !== "function") return;
 		plugin.statusBarEl?.toggle?.(true);
 		// The handler strips frontmatter and Markdown syntax before counting. Its
 		// file argument is only an identity check against the current active file.
-		onQuickPreview.call(plugin.instance, workspace.getActiveFile(), content);
+		instance.onQuickPreview(workspace.getActiveFile(), content);
 	} catch (error) {
 		console.warn("Journal View: could not publish the active editor content", error);
 	}
