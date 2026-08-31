@@ -1,4 +1,4 @@
-import { App, TFile } from "obsidian";
+import { App, FileView, TFile, WorkspaceLeaf } from "obsidian";
 import { StateEffect, StateField } from "@codemirror/state";
 import type { EditorState, TransactionSpec } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
@@ -7,6 +7,8 @@ import type { FindRange } from "./findText";
 
 export interface JournalEditorOptions {
 	app: App;
+	leaf: WorkspaceLeaf;
+	workspaceEditors: WorkspaceEditorBridge;
 	container: HTMLElement;
 	value: string;
 	placeholder: string;
@@ -70,6 +72,8 @@ interface InternalCodeMirror {
 const REVEAL_LINES = 4;
 /** Used only when the editor cannot say how tall its lines are. */
 const FALLBACK_LINE_HEIGHT = 24;
+/** Republish after Obsidian's async file read and delayed focus notification. */
+const WORKSPACE_CONTENT_DELAY = 50;
 
 const setFindDecorations = StateEffect.define<DecorationSet>();
 const findDecorations = StateField.define<DecorationSet>({
@@ -95,15 +99,14 @@ interface InternalEditorInstance {
 	editor?: InternalEditorApi;
 	get?(): string | null;
 	set?(value: string, clear: boolean): void;
-	onUpdate?: (update: unknown, changed: boolean) => void;
+	onUpdate?: (update: { selectionSet?: boolean }, changed: boolean) => void;
 	load?(): void;
 	destroy?(): void;
 	unload?(): void;
 }
 
-interface InternalEditorOwner {
+interface InternalEditorOwner extends ActiveEditorOwner {
 	app: App;
-	file: TFile | null;
 	hoverPopover: null;
 	getMode(): string;
 	getFile(): TFile | null;
@@ -118,9 +121,115 @@ interface InternalEditorOwner {
 
 interface ActiveEditorOwner {
 	file: TFile | null;
+	leaf: WorkspaceLeaf;
+}
+
+interface WorkspaceEditorHost {
+	activeEditor: unknown;
+	lastActiveFile?: TFile | null;
+	recentFileTracker?: {
+		onFileOpen(file: TFile | null, previous: TFile | null): void;
+	};
+	getActiveFile(): TFile | null;
+	trigger(name: string, ...data: unknown[]): void;
+}
+
+interface InternalWordCountPlugin {
+	enabled?: boolean;
+	statusBarEl?: {
+		toggle?(visible: boolean): void;
+	};
+	instance?: {
+		onQuickPreview?(file: TFile | null, content: string): void;
+	};
+}
+
+interface InternalPluginHost {
+	getPluginById(id: string): InternalWordCountPlugin | null | undefined;
 }
 
 type WorkspaceEditorUpdate = "claim" | "release" | "file";
+
+/**
+ * Bridges journal editors into Obsidian's workspace bookkeeping. The state is
+ * owned by one plugin/app instance, while the per-leaf map prevents one journal
+ * tab from lending its hidden editor to another.
+ */
+export class WorkspaceEditorBridge {
+	private readonly journalLeaves = new WeakSet<WorkspaceLeaf>();
+	private readonly activeByLeaf = new WeakMap<WorkspaceLeaf, ActiveEditorOwner>();
+	private lastActive: ActiveEditorOwner | null = null;
+
+	constructor(private readonly app: App) {}
+
+	registerJournalLeaf(leaf: WorkspaceLeaf): () => void {
+		this.journalLeaves.add(leaf);
+		return () => {
+			this.journalLeaves.delete(leaf);
+			const owner = this.activeByLeaf.get(leaf);
+			this.activeByLeaf.delete(leaf);
+			if (this.lastActive === owner) this.lastActive = null;
+		};
+	}
+
+	/**
+	 * Restores the last day while a non-file pane is active. Journal tabs restore
+	 * their own day; real files keep Obsidian's native editor; deferred leaves are
+	 * left alone until their eventual view type is knowable.
+	 */
+	onActiveLeafChange(leaf: WorkspaceLeaf | null): void {
+		try {
+			if (leaf?.isDeferred) return;
+			if (leaf?.view instanceof FileView) {
+				this.lastActive = null;
+				return;
+			}
+
+			let owner = this.lastActive;
+			if (leaf && this.journalLeaves.has(leaf)) {
+				owner = this.activeByLeaf.get(leaf) ?? null;
+				this.lastActive = owner;
+			}
+			if (!owner) return;
+
+			const workspace = this.app.workspace as unknown as WorkspaceEditorHost;
+			if (!workspace.activeEditor) workspace.activeEditor = owner;
+		} catch (error) {
+			console.warn("Journal View: failed to keep workspace.activeEditor", error);
+		}
+	}
+
+	update(owner: ActiveEditorOwner, update: WorkspaceEditorUpdate, notifyRelease = false): void {
+		try {
+			const workspace = this.app.workspace as unknown as WorkspaceEditorHost;
+			if (update === "claim") {
+				// The embedded editor itself may have assigned this owner before its
+				// focus event bubbles to us; it does not emit the file notification.
+				workspace.activeEditor = owner;
+				this.activeByLeaf.set(owner.leaf, owner);
+				this.lastActive = owner;
+				notifyFileOpen(workspace, owner.file);
+			} else if (update === "release") {
+				if (notifyRelease) {
+					if (this.activeByLeaf.get(owner.leaf) === owner) this.activeByLeaf.delete(owner.leaf);
+					if (this.lastActive === owner) this.lastActive = null;
+				}
+				const owned = workspace.activeEditor === owner;
+				if (owned) workspace.activeEditor = null;
+				else if (workspace.activeEditor !== null) return;
+				// A view owns many mounted editors. Only the one the workspace still
+				// considers current should clear file followers during bulk teardown.
+				if (notifyRelease && (owned || workspace.getActiveFile() === owner.file)) {
+					notifyFileOpen(workspace, null);
+				}
+			} else if (update === "file" && workspace.activeEditor === owner) {
+				notifyFileOpen(workspace, owner.file);
+			}
+		} catch (error) {
+			console.warn("Journal View: could not update the workspace editor", error);
+		}
+	}
+}
 
 function focusStayedInside(container: HTMLElement, event: FocusEvent): boolean {
 	const NodeCtor = container.ownerDocument.defaultView?.Node;
@@ -133,37 +242,50 @@ function focusStayedInside(container: HTMLElement, event: FocusEvent): boolean {
  * assigning `activeEditor` is enough for editor commands and `getActiveFile`,
  * but does not tell Outline, Backlinks, or Properties to follow it.
  */
-function updateWorkspaceEditor(
-	app: App,
-	owner: ActiveEditorOwner,
-	update: WorkspaceEditorUpdate,
-	notifyRelease = false,
-): void {
-	try {
-		const workspace = app.workspace as unknown as {
-			activeEditor: unknown;
-			getActiveFile(): TFile | null;
-			trigger(name: string, ...data: unknown[]): void;
-		};
-		if (update === "claim") {
-			// The embedded editor itself may have assigned this owner before its
-			// focus event bubbles to us; it does not emit the file notification.
-			workspace.activeEditor = owner;
-			workspace.trigger("file-open", owner.file);
-		} else if (update === "release") {
-			const owned = workspace.activeEditor === owner;
-			if (owned) workspace.activeEditor = null;
-			else if (workspace.activeEditor !== null) return;
-			// A view owns many mounted editors. Only the one the workspace still
-			// considers current should clear file followers during bulk teardown.
-			if (notifyRelease && (owned || workspace.getActiveFile() === owner.file)) {
-				workspace.trigger("file-open", null);
+function notifyFileOpen(workspace: WorkspaceEditorHost, file: TFile | null): void {
+	if ("lastActiveFile" in workspace) {
+		const previous = workspace.lastActiveFile ?? null;
+		if (previous !== file) {
+			try {
+				// Obsidian normally records the file being left immediately before it
+				// updates lastActiveFile. A manual notification must preserve that step.
+				workspace.recentFileTracker?.onFileOpen(file, previous);
+			} catch (error) {
+				console.warn("Journal View: could not preserve recent-file tracking", error);
 			}
-		} else if (update === "file" && workspace.activeEditor === owner) {
-			workspace.trigger("file-open", owner.file);
 		}
+		workspace.lastActiveFile = file;
+	}
+	workspace.trigger("file-open", file);
+}
+
+/**
+ * Publishes the focused editor's in-memory text to Word Count. Existing notes
+ * use the same workspace event as a native Markdown view. A day without a file
+ * cannot: `getActiveFile()` falls back to the last real file, so Word Count
+ * rejects a null preview and retains that file's count. Calling its guarded
+ * preview handler directly is the only way to represent the unsaved editor
+ * without broadcasting an empty preview for an unrelated file.
+ */
+function publishWorkspaceContent(app: App, owner: ActiveEditorOwner, content: string): void {
+	try {
+		const workspace = app.workspace as unknown as WorkspaceEditorHost;
+		if (workspace.activeEditor !== owner) return;
+		if (owner.file) {
+			workspace.trigger("quick-preview", owner.file, content);
+			return;
+		}
+
+		const internalPlugins = app.internalPlugins as unknown as InternalPluginHost | undefined;
+		const plugin = internalPlugins?.getPluginById("word-count");
+		const onQuickPreview = plugin?.instance?.onQuickPreview;
+		if (!plugin?.enabled || typeof onQuickPreview !== "function") return;
+		plugin.statusBarEl?.toggle?.(true);
+		// The handler strips frontmatter and Markdown syntax before counting. Its
+		// file argument is only an identity check against the current active file.
+		onQuickPreview.call(plugin.instance, workspace.getActiveFile(), content);
 	} catch (error) {
-		console.warn("Journal View: could not update the workspace editor", error);
+		console.warn("Journal View: could not publish the active editor content", error);
 	}
 }
 
@@ -212,6 +334,7 @@ class RichEditor implements JournalEditor {
 	private owner: InternalEditorOwner;
 	private focusIn: (event: FocusEvent) => void;
 	private focusOut: (event: FocusEvent) => void;
+	private workspaceContentTimer = 0;
 	private readyFrame = 0;
 	private readyReported = false;
 	private destroyed = false;
@@ -223,6 +346,7 @@ class RichEditor implements JournalEditor {
 		this.owner = {
 			app: options.app,
 			file: options.file,
+			leaf: options.leaf,
 			hoverPopover: null,
 			getMode: () => "source",
 			getFile: () => this.options.file,
@@ -250,8 +374,13 @@ class RichEditor implements JournalEditor {
 
 		const instance = this.instance;
 		const original = instance.onUpdate;
-		instance.onUpdate = (update: unknown, changed: boolean) => {
+		instance.onUpdate = (update, changed) => {
 			original?.call(instance, update, changed);
+			// Obsidian's selection event falls back to the active file view when
+			// the selection is empty. A journal is not a file view, so republish
+			// this day's text after both edits and collapsed-cursor moves. Leave a
+			// real selection alone: Word Count intentionally reports its count.
+			if (changed || update.selectionSet) this.scheduleWorkspaceContent();
 			if (changed) this.options.onChange();
 		};
 
@@ -267,16 +396,43 @@ class RichEditor implements JournalEditor {
 
 		this.focusIn = (event) => {
 			if (focusStayedInside(options.container, event)) return;
-			updateWorkspaceEditor(this.options.app, this.owner, "claim");
+			this.options.workspaceEditors.update(this.owner, "claim");
+			this.scheduleWorkspaceContent();
 			this.options.onFocus();
 		};
 		this.focusOut = (event) => {
 			if (focusStayedInside(options.container, event)) return;
-			updateWorkspaceEditor(this.options.app, this.owner, "release");
+			this.cancelWorkspaceContent();
+			this.options.workspaceEditors.update(this.owner, "release");
 			this.options.onBlur();
 		};
 		options.container.addEventListener("focusin", this.focusIn);
 		options.container.addEventListener("focusout", this.focusOut);
+	}
+
+	/**
+	 * Publishes now, then once more after the file-open read and focus events
+	 * normally settle. A real selection keeps Obsidian's selection count.
+	 */
+	private scheduleWorkspaceContent(): void {
+		this.cancelWorkspaceContent();
+		if (this.owner.getSelection()) return;
+		this.publishCurrentContent();
+		this.workspaceContentTimer = window.setTimeout(() => {
+			this.workspaceContentTimer = 0;
+			if (!this.destroyed) this.publishCurrentContent();
+		}, WORKSPACE_CONTENT_DELAY);
+	}
+
+	/** A failed internal read must not masquerade as an empty note. */
+	private publishCurrentContent(): void {
+		const content = this.readValue();
+		if (content !== null) publishWorkspaceContent(this.options.app, this.owner, content);
+	}
+
+	private cancelWorkspaceContent(): void {
+		if (this.workspaceContentTimer) window.clearTimeout(this.workspaceContentTimer);
+		this.workspaceContentTimer = 0;
 	}
 
 	/** Releases the preview-height guard only after CodeMirror has measured its DOM. */
@@ -302,14 +458,18 @@ class RichEditor implements JournalEditor {
 		this.options.onReady();
 	}
 
-	getValue(): string {
+	private readValue(): string | null {
 		try {
 			if (typeof this.instance?.get === "function") return this.instance.get() ?? "";
 			return this.instance?.editor?.getValue?.() ?? "";
 		} catch (error) {
 			console.warn("Journal View: could not read editor contents", error);
-			return "";
+			return null;
 		}
+	}
+
+	getValue(): string {
+		return this.readValue() ?? "";
 	}
 
 	setValue(value: string, preserveSelection = false): void {
@@ -345,7 +505,8 @@ class RichEditor implements JournalEditor {
 	setFile(file: TFile | null): void {
 		this.options.file = file;
 		this.owner.file = file;
-		updateWorkspaceEditor(this.options.app, this.owner, "file");
+		this.options.workspaceEditors.update(this.owner, "file");
+		this.scheduleWorkspaceContent();
 	}
 
 	focus(): void {
@@ -459,6 +620,7 @@ class RichEditor implements JournalEditor {
 
 	destroy(): void {
 		this.destroyed = true;
+		this.cancelWorkspaceContent();
 		if (this.readyFrame) window.cancelAnimationFrame(this.readyFrame);
 		this.readyFrame = 0;
 		this.options.container.removeEventListener("focusin", this.focusIn);
@@ -476,7 +638,7 @@ class RichEditor implements JournalEditor {
 		// A blur deliberately leaves file-following panes on the last edited day.
 		// Teardown runs after the internal editor has finished its own focus work,
 		// then clears the owner unless another editor claimed the workspace.
-		updateWorkspaceEditor(this.options.app, this.owner, "release", true);
+		this.options.workspaceEditors.update(this.owner, "release", true);
 		this.instance = null;
 		this.options.container.empty();
 	}

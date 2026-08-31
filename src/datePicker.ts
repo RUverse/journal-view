@@ -2,7 +2,8 @@ import { App, Modal, moment } from "obsidian";
 import { MAX_OFFSET } from "./dayWalk";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
-import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
+import { DAY_KEY_FORMAT } from "./noteIndex";
+import type { OrderedDayIndex } from "./noteIndex";
 
 /** Months built either side of the current one when the picker opens. */
 const INITIAL_MONTHS = 6;
@@ -15,13 +16,15 @@ const MAX_MONTHS = 36;
 
 export interface DatePickerOptions {
 	/** Which days have a note, for the dots under the numbers. */
-	index: DailyNoteIndex;
+	index: OrderedDayIndex;
 	/** Today, as the view measures it. */
 	today: Moment;
 	/** The day the journal is currently showing, if it has one. */
 	current?: Moment;
 	/** Indexed notes beyond the empty-day safety range can be opened. */
 	allowDistantNotes: boolean;
+	/** The timeline's complete visibility rule, including empty days and Today. */
+	isVisible(date: Moment): boolean;
 	onPick(date: Moment): void;
 	/** Called whenever the picker goes away, however it was dismissed. */
 	onDismiss?(): void;
@@ -303,6 +306,7 @@ export class DatePickerModal extends Modal {
 			attr: { type: "button", "data-date": key, "aria-label": date.format("dddd, D MMMM YYYY") },
 		});
 
+		const visible = this.options.isVisible(date);
 		if (this.options.index.has(key)) cell.addClass("has-note");
 		if (key === this.todayKey) {
 			cell.addClass("is-today");
@@ -314,7 +318,7 @@ export class DatePickerModal extends Modal {
 		}
 		const inStandardRange = key >= this.standardMinKey && key <= this.standardMaxKey;
 		const isDistantNote = this.options.allowDistantNotes && this.options.index.has(key);
-		if (!inStandardRange && !isDistantNote) {
+		if ((!inStandardRange && !isDistantNote) || !visible) {
 			cell.addClass("is-out-of-range");
 			cell.disabled = true;
 			return cell;

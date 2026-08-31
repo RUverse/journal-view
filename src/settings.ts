@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting, requireApiVersion } from "obsidian";
-import type { SettingDefinitionItem } from "obsidian";
+import type { SettingDefinitionItem, ToggleComponent } from "obsidian";
 import type JournalViewPlugin from "./main";
 
 export const MIN_SAVE_DELAY = 200;
@@ -12,6 +12,18 @@ export const MONTH_SEPARATOR_DAY_FORMAT = "dddd, D";
 export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
+export type DailyHeaderStyle = "subtle" | "h1" | "hidden";
+export type JournalFilterMode = "include" | "exclude";
+export type JournalFilterValue = string | number | boolean;
+
+export type JournalFilterRule =
+	| { kind: "tag"; mode: JournalFilterMode; tag: string }
+	| {
+			kind: "property";
+			mode: JournalFilterMode;
+			property: string;
+			value: JournalFilterValue;
+	  };
 
 export interface JournalViewSettings {
 	/** Overrides the daily-note date format. Empty = inherit from the vault. */
@@ -22,6 +34,8 @@ export interface JournalViewSettings {
 	templatePath: string;
 	/** How the date is written in each day's header. */
 	headerFormat: string;
+	/** How prominently each day's date is displayed. */
+	headerStyle: DailyHeaderStyle;
 	/** Show month/year once above a group rather than inside every day. */
 	showMonthSeparators: boolean;
 	/** Group rendered days beneath year boundary headings. */
@@ -36,6 +50,12 @@ export interface JournalViewSettings {
 	focusTodayOnOpen: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
+	/** Tag and property rules that decide which existing notes are visible. */
+	filterRules: JournalFilterRule[];
+	/** Show frontmatter tags above each existing note's body. */
+	showTags: boolean;
+	/** Frontmatter property names shown above each existing note's body. */
+	displayProperties: string[];
 	/** Chronological direction in which days are laid out. */
 	daySortDirection: DaySortDirection;
 }
@@ -45,6 +65,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	folder: "",
 	templatePath: "",
 	headerFormat: "dddd, D MMMM",
+	headerStyle: "subtle",
 	showMonthSeparators: false,
 	groupDaysByYear: true,
 	// Obsidian debounces its own `TextFileView.requestSave` by the same amount,
@@ -54,6 +75,9 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	richEditor: true,
 	focusTodayOnOpen: true,
 	hideEmptyDays: true,
+	filterRules: [],
+	showTags: false,
+	displayProperties: [],
 	daySortDirection: "ascending",
 };
 
@@ -94,12 +118,20 @@ interface JournalSliderSetting extends JournalSettingBase {
 	};
 }
 
+type JournalDropdownControl =
+	| {
+			type: "dropdown";
+			key: "daySortDirection";
+			options: Record<DaySortDirection, string>;
+	  }
+	| {
+			type: "dropdown";
+			key: "headerStyle";
+			options: Record<DailyHeaderStyle, string>;
+	  };
+
 interface JournalDropdownSetting extends JournalSettingBase {
-	control: {
-		type: "dropdown";
-		key: "daySortDirection";
-		options: Record<DaySortDirection, string>;
-	};
+	control: JournalDropdownControl;
 }
 
 type JournalSetting =
@@ -120,6 +152,8 @@ interface LegacySliderTooltip {
 }
 
 export class JournalViewSettingTab extends PluginSettingTab {
+	private hideEmptyToggle: ToggleComponent | null = null;
+
 	constructor(app: App, private plugin: JournalViewPlugin) {
 		super(app, plugin);
 	}
@@ -181,6 +215,15 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							type: "text",
 							key: "headerFormat",
 							placeholder: DEFAULT_SETTINGS.headerFormat,
+						},
+					},
+					{
+						name: "Daily header style",
+						desc: "Choose how prominently each day's date appears.",
+						control: {
+							type: "dropdown",
+							key: "headerStyle",
+							options: { subtle: "Subtle", h1: "H1", hidden: "Hidden" },
 						},
 					},
 					{
@@ -289,6 +332,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					changed = true;
 				}
 				break;
+			case "headerStyle":
+				if (value === "subtle" || value === "h1" || value === "hidden") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
 			case "richEditor":
 			case "focusTodayOnOpen":
 			case "hideEmptyDays":
@@ -305,6 +354,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 
 	display(): void {
 		const { containerEl } = this;
+		this.hideEmptyToggle = null;
 		containerEl.empty();
 		for (const group of this.definitions()) {
 			new Setting(containerEl).setName(group.heading).setHeading();
@@ -333,11 +383,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				);
 				break;
 			case "toggle":
-				setting.addToggle((toggle) =>
+				setting.addToggle((toggle) => {
+					if (control.key === "hideEmptyDays") this.hideEmptyToggle = toggle;
 					toggle
 						.setValue(this.plugin.settings[control.key])
-						.onChange((value) => this.setControlValue(control.key, value)),
-				);
+						.onChange((value) => this.setControlValue(control.key, value));
+				});
 				break;
 			case "slider":
 				setting.addSlider((slider) => {
@@ -357,6 +408,10 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				);
 				break;
 		}
+	}
+
+	syncFilterControls(): void {
+		this.hideEmptyToggle?.setValue(this.plugin.settings.hideEmptyDays);
 	}
 }
 

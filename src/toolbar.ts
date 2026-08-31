@@ -15,7 +15,8 @@ function applyIcon(el: HTMLElement, ...names: string[]): void {
 
 /** What the toolbar's controls ask the view to do. */
 export interface ToolbarActions {
-	onToggleFilter(): void;
+	onShowFilter(): void;
+	onShowAppearance(): void;
 	onShowFind(): void;
 	onGoToDate(): void;
 	onGoToToday(): void;
@@ -40,10 +41,21 @@ export class JournalToolbar {
 			this.labelEl = toolbar.createDiv({ cls: "journal-toolbar-label", text: "Journal" });
 			const buttons = toolbar.createDiv({ cls: "journal-toolbar-actions" });
 
-			this.filterButton = buttons.createEl("button", {
+			const appearanceButton = buttons.createEl("button", {
 				cls: "clickable-icon journal-toolbar-button",
+				attr: { "aria-haspopup": "dialog" },
 			});
-			this.filterButton.addEventListener("click", () => actions.onToggleFilter());
+			applyIcon(appearanceButton, "settings-2", "settings");
+			setTooltip(appearanceButton, "Customization");
+			appearanceButton.addEventListener("click", () => actions.onShowAppearance());
+			this.buttons.push(appearanceButton);
+
+			this.filterButton = buttons.createEl("button", {
+				cls: "clickable-icon journal-toolbar-button journal-filter-button",
+				attr: { "aria-haspopup": "dialog" },
+			});
+			applyIcon(this.filterButton, "filter");
+			this.filterButton.addEventListener("click", () => actions.onShowFilter());
 			this.buttons.push(this.filterButton);
 
 			const findButton = buttons.createEl("button", {
@@ -55,10 +67,9 @@ export class JournalToolbar {
 			this.buttons.push(findButton);
 
 			const dateButton = buttons.createEl("button", {
-				cls: "clickable-icon journal-toolbar-button journal-toolbar-labeled-button",
+				cls: "clickable-icon journal-toolbar-button",
 			});
 			applyIcon(dateButton, "calendar-search", "calendar-days", "calendar");
-			dateButton.createSpan({ text: "Go to" });
 			setTooltip(dateButton, "Go to date");
 			dateButton.addEventListener("click", () => actions.onGoToDate());
 			this.buttons.push(dateButton);
@@ -94,12 +105,21 @@ export class JournalToolbar {
 		setTooltip(findButton, "Find in journal");
 		this.buttons.push(findButton);
 
-		this.filterButton = view.addAction("filter", "Filter days", () => actions.onToggleFilter());
-		this.filterButton.addClass("journal-toolbar-button");
+		this.filterButton = view.addAction("filter", "Filter notes", () => actions.onShowFilter());
+		this.filterButton.addClasses(["journal-toolbar-button", "journal-filter-button"]);
+		applyIcon(this.filterButton, "filter");
+		this.filterButton.setAttribute("aria-haspopup", "dialog");
+		const appearanceButton = view.addAction("settings-2", "Customization", () => actions.onShowAppearance());
+		appearanceButton.addClass("journal-toolbar-button");
+		applyIcon(appearanceButton, "settings-2", "settings");
+		setTooltip(appearanceButton, "Customization");
+		appearanceButton.setAttribute("aria-haspopup", "dialog");
 		// Filter describes what the journal shows, so keep it with the navigation
-		// controls rather than the date destinations on the right.
-		view.containerEl.querySelector(".view-header-left")?.appendChild(this.filterButton);
-		this.buttons.push(this.filterButton);
+		// controls rather than the date destinations on the right. Appearance is
+		// the adjacent description of what each shown day contains.
+		const left = view.containerEl.querySelector(".view-header-left");
+		left?.append(appearanceButton, this.filterButton);
+		this.buttons.push(appearanceButton, this.filterButton);
 	}
 
 	setLabel(text: string): void {
@@ -109,11 +129,11 @@ export class JournalToolbar {
 		if (this.labelEl.getText() !== text) this.labelEl.setText(text);
 	}
 
-	setFilter(on: boolean): void {
-		applyIcon(this.filterButton, on ? "filter" : "filter-x", "filter");
-		setTooltip(this.filterButton, on ? "Showing only days with notes" : "Showing every day");
-		this.filterButton.toggleClass("is-active", on);
-		this.filterButton.setAttribute("aria-pressed", String(on));
+	setFilter(active: boolean): void {
+		applyIcon(this.filterButton, "filter");
+		setTooltip(this.filterButton, active ? "Filter notes (filters active)" : "Filter notes");
+		this.filterButton.toggleClass("is-active", active);
+		this.filterButton.removeAttribute("aria-pressed");
 	}
 
 	setVisible(visible: boolean): void {

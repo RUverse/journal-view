@@ -1,7 +1,10 @@
-import { ItemView, Scope, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, Scope, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { AnchorHost, START_GUTTER, ScrollAnchor } from "./anchor";
+import { AppearanceModal } from "./appearance";
 import { DatePickerModal } from "./datePicker";
+import { FilterModal } from "./filterModal";
+import { isFilterActive } from "./filter";
 import { DayHost, DaySection } from "./day";
 import { DayWalker, isOffsetReachable } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
@@ -62,18 +65,16 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private find?: JournalFind;
 	/** The open date picker, which has to go when the view does. */
 	private picker: DatePickerModal | null = null;
+	/** Appearance settings owned by this view while its modal is open. */
+	private appearance: AppearanceModal | null = null;
+	/** Filter settings owned by this view while its modal is open. */
+	private filterModal: FilterModal | null = null;
 	private readonly anchoring = new ScrollAnchor(this);
 	private readonly editors = new EditorWindow(this);
 	private walker!: DayWalker;
 
 	private byPath = new Map<string, DaySection>();
 	private today: Moment = createMoment().startOf("day");
-	/**
-	 * A day the reader went to by date. It stays in the journal even with empty
-	 * days hidden - being asked for by name is reason enough to show a day.
-	 */
-	private visited: Moment | null = null;
-
 	private resizeObserver: ResizeObserver | null = null;
 	private scrollFrame = 0;
 	private animFrame = 0;
@@ -115,6 +116,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private appliedMaxLoadedDays = 0;
 	private configSignature = "";
 	private indexVersion = -1;
+	private filteredIndexVersion = -1;
 	private initialDate?: Moment;
 
 	constructor(
@@ -122,6 +124,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		readonly plugin: JournalViewPlugin,
 	) {
 		super(leaf);
+		this.register(plugin.workspaceEditors.registerJournalLeaf(leaf));
 		// Obsidian's workspace scope handles Escape before the find bar's DOM
 		// listener can. Claim it only while focus is in journal-wide find, leaving
 		// embedded-editor Escape handling (including Vim mode) untouched.
@@ -163,7 +166,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.contentEl.addClass("journal-content");
 
 		this.toolbar = new JournalToolbar(this, {
-			onToggleFilter: () => void this.toggleHideEmptyDays(),
+			onShowFilter: () => this.openFilter(),
+			onShowAppearance: () => this.openAppearance(),
 			onShowFind: () => this.showFind(),
 			onGoToDate: () => this.openDatePicker(),
 			onGoToToday: () => this.goToToday(true),
@@ -182,17 +186,21 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerDomEvent(this.containerEl, "keydown", (event) => this.onKeydown(event), { capture: true });
 		this.registerVaultEvents();
 
-		const initialDate = this.initialDate;
+		let initialDate = this.initialDate;
 		this.initialDate = undefined;
-		if (initialDate) this.visited = initialDate.clone().startOf("day");
+		if (initialDate && !this.isDateVisible(initialDate)) {
+			initialDate = undefined;
+			new Notice("That day is hidden by the current journal filters. Showing today instead.");
+		}
 		await this.build(initialDate, !initialDate);
 		if (initialDate) this.focusOriginWhenReady();
 	}
 
 	async onClose(): Promise<void> {
-		// The picker holds this view in its callback, so a leaf that closes
-		// while it is open would leave it able to navigate a dead journal.
+		// Modals hold this view in their callbacks, so they have to go with it.
 		this.picker?.close();
+		this.appearance?.close();
+		this.filterModal?.close();
 		this.find?.destroy();
 		this.find = undefined;
 		this.toolbar?.destroy();
@@ -224,7 +232,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	async flushAll(): Promise<void> {
-		await Promise.all(this.sections.map((section) => section.flush()));
+		await Promise.all(this.sections.map((section) => section.flush(true)));
 	}
 
 	/* --------------------------------------------------------------- build */
@@ -242,12 +250,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.today = createMoment().startOf("day");
 		this.configSignature = JSON.stringify(this.plugin.daily.config());
 		this.plugin.index.ensureCurrent();
+		this.plugin.filteredIndex.ensureCurrent();
 		this.indexVersion = this.plugin.index.version;
+		this.filteredIndexVersion = this.plugin.filteredIndex.version;
 		this.walker = new DayWalker(
 			this.today,
 			this.plugin.index,
+			this.plugin.filteredIndex,
 			() => this.plugin.settings.hideEmptyDays,
-			this.visited ?? undefined,
 		);
 		this.exhausted = { start: false, end: false };
 		this.loading = { start: false, end: false };
@@ -357,6 +367,18 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private createSection(offset: number): DaySection {
 		return new DaySection(this, this.walker.dateFor(offset), offset);
+	}
+
+	/** Shared visibility predicate for the timeline, calendar and direct navigation. */
+	private isDateVisible(date: Moment): boolean {
+		const day = date.clone().startOf("day");
+		if (day.isSame(createMoment().startOf("day"), "day")) return true;
+		this.plugin.index.ensureCurrent();
+		this.plugin.filteredIndex.ensureCurrent();
+		const key = day.format("YYYY-MM-DD");
+		return this.plugin.index.has(key)
+			? this.plugin.filteredIndex.has(key)
+			: !this.plugin.settings.hideEmptyDays;
 	}
 
 	/** Date offset step made by moving down through the rendered timeline. */
@@ -904,17 +926,6 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	goToToday(focus = false): void {
 		const now = createMoment().startOf("day");
-		// Coming home also gives up the day the reader went to by date; today
-		// is pinned in its own right.
-		const droppedVisited = this.visited !== null && !this.visited.isSame(now, "day");
-		this.visited = null;
-		if (droppedVisited && this.plugin.settings.hideEmptyDays) {
-			void this.rebuild().then(() => {
-				const section = this.sectionAt(0);
-				if (focus && section) this.focusAfterCenter(section, true);
-			});
-			return;
-		}
 		const section = this.sectionAt(0);
 		if (!now.isSame(this.today, "day") || !section) {
 			// Midnight has passed, or today was trimmed away after a long
@@ -935,12 +946,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// The dots come straight from the index, so it has to agree with the
 		// vault's current daily-note configuration before any of them are drawn.
 		this.plugin.index.ensureCurrent();
+		this.plugin.filteredIndex.ensureCurrent();
 		this.picker?.close();
 		const picker = new DatePickerModal(this.app, {
-			index: this.plugin.index,
+			index: this.plugin.filteredIndex,
 			today: createMoment().startOf("day"),
 			current: this.visibleDate(),
 			allowDistantNotes: this.plugin.settings.hideEmptyDays,
+			isVisible: (date) => this.isDateVisible(date),
 			onPick: (date) => this.goToDate(date),
 			onDismiss: () => {
 				if (this.picker === picker) this.picker = null;
@@ -950,11 +963,33 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		picker.open();
 	}
 
+	/** Opens the global journal visibility controls. */
+	private openFilter(): void {
+		this.filterModal?.close();
+		const filterModal = new FilterModal(this.app, this.plugin, {
+			onDismiss: () => {
+				if (this.filterModal === filterModal) this.filterModal = null;
+			},
+		});
+		this.filterModal = filterModal;
+		filterModal.open();
+	}
+
+	/** Opens the global metadata display controls. */
+	private openAppearance(): void {
+		this.appearance?.close();
+		const appearance = new AppearanceModal(this.app, this.plugin, {
+			onDismiss: () => {
+				if (this.appearance === appearance) this.appearance = null;
+			},
+		});
+		this.appearance = appearance;
+		appearance.open();
+	}
+
 	/**
-	 * Moves the journal to `date`. A day already in the window is scrolled to;
-	 * anything further away is a rebuild around that day. A day with no note is
-	 * shown either way, empty days hidden or not - it is where the reader asked
-	 * to be, and it is where they would start writing.
+	 * Moves the journal to a visible `date`. The same predicate is used by every
+	 * caller so direct navigation cannot temporarily reveal a filtered note.
 	 */
 	goToDate(date: Moment, focus = true): void {
 		// A date can arrive from a picker that outlived the view it was opened
@@ -965,11 +1000,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		window.clearTimeout(this.initialFocusTimer);
 		this.initialFocusTimer = 0;
 		const day = date.clone().startOf("day");
+		if (!this.isDateVisible(day)) {
+			new Notice("That day is hidden by the current journal filters. Showing today instead.");
+			this.goToToday(focus);
+			return;
+		}
 		const offset = day.diff(this.today, "days");
-		const indexed = this.plugin.index.has(this.walker.keyFor(offset));
+		const indexed = this.plugin.filteredIndex.has(this.walker.keyFor(offset));
 		if (!isOffsetReachable(offset, this.plugin.settings.hideEmptyDays, indexed)) return;
-		const changedVisited = !this.visited?.isSame(day, "day");
-		this.visited = day;
 		// A view built while hidden has not committed to a scroll position yet.
 		// Rebuild around the requested day so its first measurable resize cannot
 		// centre the old origin over this navigation.
@@ -979,14 +1017,6 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			});
 			return;
 		}
-		if (changedVisited && this.plugin.settings.hideEmptyDays) {
-			void this.rebuild(day).then(() => {
-				const section = this.sectionAt(this.origin);
-				if (focus && section) this.focusAfterCenter(section, false);
-			});
-			return;
-		}
-
 		const section = createMoment().startOf("day").isSame(this.today, "day") ? this.sectionAt(offset) : undefined;
 		if (section) {
 			// Focusing only once the animation has arrived: focus scrolls the
@@ -1038,7 +1068,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
 				this.syncWithIndex();
-				const section = this.byPath.get(file.path);
+				let section = this.byPath.get(file.path);
+				if (!section) section = this.ensureVisiblePath(file.path);
 				if (!section || section.file?.path !== file.path) return;
 				this.byPath.delete(file.path);
 				section.setFile(null);
@@ -1053,6 +1084,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 					this.byPath.delete(oldPath);
 					previous.setFile(null);
 				}
+				if (!previous) this.ensureVisiblePath(oldPath);
 				if (file instanceof TFile) this.attachFile(file);
 				else this.syncWithIndex();
 			}),
@@ -1060,8 +1092,19 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (file, data) => {
-				const section = this.byPath.get(file.path);
-				if (section?.file?.path === file.path) void section.reload(data);
+				const indexChanged = this.syncWithIndex();
+				let section = this.byPath.get(file.path);
+				if (!section && indexChanged) {
+					const key = this.plugin.index.keyForPath(file.path);
+					if (key && this.plugin.filteredIndex.has(key)) {
+						section = this.ensureSectionFor(this.walker.offsetFor(key));
+					}
+				}
+				if (section?.file?.path === file.path) {
+					section.refreshState();
+					this.syncDateSeparators();
+					void section.reload(data);
+				}
 			}),
 		);
 
@@ -1091,7 +1134,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			// A note can appear for a day the view skipped over (sync, another
 			// window, "hide empty days" turned on). Slot it into place.
 			const key = this.plugin.index.keyForPath(file.path);
-			section = key ? this.ensureSectionFor(this.walker.offsetFor(key)) : undefined;
+			const offset = key ? this.walker.offsetFor(key) : null;
+			section = offset !== null && this.walker.isVisible(offset) ? this.ensureSectionFor(offset) : undefined;
 		}
 		if (!section || section.file?.path === file.path) return;
 		if (section.path !== file.path) return;
@@ -1099,14 +1143,27 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		void section.reload();
 	}
 
+	/** Restores a date that became an empty, visible day after a delete or rename. */
+	private ensureVisiblePath(path: string): DaySection | undefined {
+		const key = this.plugin.index.keyForPath(path);
+		if (!key) return undefined;
+		const offset = this.walker.offsetFor(key);
+		return this.walker.isVisible(offset) ? this.ensureSectionFor(offset) : undefined;
+	}
+
 	/**
 	 * A day appearing or disappearing can un-exhaust an end of the journal, so
 	 * loading is allowed to try again.
 	 */
-	private syncWithIndex(): void {
-		if (this.plugin.index.version === this.indexVersion) return;
+	private syncWithIndex(): boolean {
+		const changed =
+			this.plugin.index.version !== this.indexVersion ||
+			this.plugin.filteredIndex.version !== this.filteredIndexVersion;
+		if (!changed) return false;
 		this.indexVersion = this.plugin.index.version;
+		this.filteredIndexVersion = this.plugin.filteredIndex.version;
 		this.exhausted = { start: false, end: false };
+		return true;
 	}
 
 	/** Materialises a day that falls inside the range already rendered. */
@@ -1137,13 +1194,12 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		return section;
 	}
 
-	/**
-	 * Today, and a day the reader went to by date, are the journal's own days
-	 * rather than the index's - the walker decides which, so a day it built
-	 * against the filter is not then hidden by the day itself.
-	 */
-	isPinnedDay(day: DaySection): boolean {
-		return this.walker ? this.walker.isPinned(day.offset) : day.offset === 0;
+	/** Keeps each rendered section aligned with the walker's visibility rules. */
+	isVisibleDay(day: DaySection): boolean {
+		// A focused editor is a transient display guard, not index membership: it
+		// prevents an autosave from dismissing the day underneath the reader while
+		// navigation and future visits remain strictly filtered.
+		return day.hasFocus || (this.walker ? this.walker.isVisible(day.offset) : day.offset === 0);
 	}
 
 	onDayFileChanged(day: DaySection, previousPath: string | null): void {
@@ -1154,6 +1210,15 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	onDayContentChanged(_day: DaySection): void {
+		this.find?.sectionsChanged();
+	}
+
+	onDayFocusChanged(day: DaySection): void {
+		if (!day.el.isConnected) return;
+		const wasHidden = day.isHidden;
+		day.refreshVisibility();
+		if (day.isHidden === wasHidden) return;
+		this.syncDateSeparators();
 		this.find?.sectionsChanged();
 	}
 
@@ -1179,6 +1244,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (signature === this.configSignature) return;
 		this.configSignature = signature;
 		this.plugin.index.ensureCurrent();
+		this.plugin.filteredIndex.ensureCurrent();
 		this.syncWithIndex();
 
 		let changed = false;
@@ -1193,19 +1259,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	/* ------------------------------------------------------------ settings */
 
-	/**
-	 * Flips the same setting the settings tab owns, so every open journal - and
-	 * the tab itself, next time it is drawn - follows along.
-	 */
-	private async toggleHideEmptyDays(): Promise<void> {
-		this.plugin.settings.hideEmptyDays = !this.plugin.settings.hideEmptyDays;
-		this.syncFilterButton();
-		await this.plugin.saveSettings();
-	}
-
 	private syncFilterButton(): void {
 		// Settings can be saved from elsewhere before this view has a toolbar.
-		this.toolbar?.setFilter(this.plugin.settings.hideEmptyDays);
+		this.toolbar?.setFilter(isFilterActive(this.plugin.settings));
 	}
 
 	/** Settings whose existing day DOM cannot adopt safely in place. */
@@ -1216,15 +1272,19 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			folder: settings.folder,
 			templatePath: settings.templatePath,
 			headerFormat: settings.headerFormat,
+			headerStyle: settings.headerStyle,
 			showMonthSeparators: settings.showMonthSeparators,
 			groupDaysByYear: settings.groupDaysByYear,
 			richEditor: settings.richEditor,
 			hideEmptyDays: settings.hideEmptyDays,
+			filterRules: settings.filterRules,
 			daySortDirection: settings.daySortDirection,
 		});
 	}
 
 	async onSettingsChanged(): Promise<void> {
+		this.plugin.filteredIndex.ensureCurrent();
+		this.syncWithIndex();
 		this.syncFilterButton();
 		if (!this.ready) {
 			// A build is in flight against the old values - dropping the change
@@ -1232,6 +1292,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.settingsPending = true;
 			return;
 		}
+		// Appearance settings do not change the editor or the day window. Repaint
+		// their small metadata strips in place and let the resize anchor absorb
+		// any height change without moving the reader.
+		for (const section of this.sections) section.refreshMetadata();
 		const signature = this.rebuildSettingsSignature();
 		if (signature === this.appliedSettingsSignature) {
 			const previousMax = this.appliedMaxLoadedDays;
