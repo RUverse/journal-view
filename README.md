@@ -72,10 +72,12 @@ the two plugins to open content at startup so they do not compete for the active
 ## Date commands
 
 - **Go to today** opens the journal when needed, then focuses today's entry.
-- **Go to yesterday** focuses the closest visible earlier daily note, or yesterday when empty days are shown.
-- **Go to tomorrow** focuses the closest visible later daily note, or tomorrow when empty days are shown.
+- **Go to yesterday** opens or reveals the journal, then focuses yesterday's entry.
+- **Go to tomorrow** opens or reveals the journal, then focuses tomorrow's entry.
 
-All three commands scroll when the target is nearby and snap when it is more than two view heights away.
+Yesterday and tomorrow are shown while focused even when the note-only toggle or a metadata filter
+would normally hide them. All three commands scroll when the target is nearby and snap when it is
+more than two view heights away.
 
 ## Privacy
 
