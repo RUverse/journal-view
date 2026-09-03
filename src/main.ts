@@ -70,10 +70,17 @@ export default class JournalViewPlugin extends Plugin {
 		this.daily = new DailyNoteResolver(this.app, () => this.settings);
 		this.index = new DailyNoteIndex(this.app, this.daily);
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
+		// onLayoutReady queues callbacks without returning an EventRef, so they
+		// need an explicit guard when the plugin unloads before layout restoration.
+		let layoutReadyCallbacksEnabled = true;
+		this.register(() => {
+			layoutReadyCallbacksEnabled = false;
+		});
 
 		// The index has to be registered before any view, so it is already up to
 		// date by the time a view reacts to the same vault event.
 		this.app.workspace.onLayoutReady(() => {
+			if (!layoutReadyCallbacksEnabled) return;
 			this.index.rebuild();
 			this.filteredIndex.rebuild();
 			this.syncDailyNoteActions();
@@ -114,7 +121,7 @@ export default class JournalViewPlugin extends Plugin {
 
 		this.registerView(VIEW_TYPE_JOURNAL, (leaf) => new JournalView(leaf, this));
 		this.app.workspace.onLayoutReady(() => {
-			if (!this.settings.openJournalOnStartup) return;
+			if (!layoutReadyCallbacksEnabled || !this.settings.openJournalOnStartup) return;
 			void this.activateView(false).catch((error: unknown) => {
 				console.error("Journal View: could not open on startup", error);
 			});
