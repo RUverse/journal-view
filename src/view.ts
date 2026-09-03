@@ -92,6 +92,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private initialFocusTimer = 0;
 	/** Cursor placement requested while the pane still had no measurable height. */
 	private focusOnFirstResizeAtEnd: boolean | null = null;
+	/** Command target kept visible only until its editor receives focus. */
+	private commandTargetOffset: number | null = null;
 	/** True while a pointer is held down in the scroller (scrollbar, selection). */
 	private pointerHeld = false;
 	/** Scroll position and pace, used to keep editor work out of a gesture. */
@@ -117,7 +119,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private configSignature = "";
 	private indexVersion = -1;
 	private filteredIndexVersion = -1;
-	private initialTarget?: { date: Moment; focusAtEnd: boolean };
+	private initialTarget?: { date: Moment; focusAtEnd: boolean; revealThroughFilters: boolean };
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -189,11 +191,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const initialTarget = this.initialTarget;
 		this.initialTarget = undefined;
 		let initialDate = initialTarget?.date;
-		if (initialDate && !this.isDateVisible(initialDate)) {
+		if (initialDate && !initialTarget?.revealThroughFilters && !this.isDateVisible(initialDate)) {
 			initialDate = undefined;
 			new Notice("That day is hidden by the current journal filters. Showing today instead.");
 		}
-		await this.build(initialDate, !initialDate);
+		await this.build(initialDate, !initialDate, initialTarget?.revealThroughFilters);
 		if (initialDate) this.focusOriginWhenReady(initialTarget?.focusAtEnd);
 	}
 
@@ -224,6 +226,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		window.clearTimeout(this.initialFocusTimer);
 		this.initialFocusTimer = 0;
 		this.focusOnFirstResizeAtEnd = null;
+		this.commandTargetOffset = null;
 		window.clearTimeout(this.settleTimer);
 		this.settleTimer = 0;
 		for (const section of this.sections) section.destroy();
@@ -243,7 +246,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 * has no day in mind. `focusToday` belongs to the initial open: any later
 	 * rebuild happens under the reader, and taking their cursor would be theft.
 	 */
-	private async build(around?: Moment, focusToday = false): Promise<void> {
+	private async build(around?: Moment, focusToday = false, revealAround = false): Promise<void> {
 		this.ready = false;
 		this.centered = false;
 		const settingsSignature = this.rebuildSettingsSignature();
@@ -271,8 +274,19 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.anchoring.resetSpacer();
 		this.attachResizeObserver();
 
+		// Command navigation may temporarily reveal an otherwise filtered day.
+		const requestedOffset = around?.clone().startOf("day").diff(this.today, "days");
+		const requestedIndexed =
+			requestedOffset !== undefined && this.plugin.filteredIndex.has(this.walker.keyFor(requestedOffset));
+		this.commandTargetOffset =
+			revealAround &&
+			requestedOffset !== undefined &&
+			isOffsetReachable(requestedOffset, requestedIndexed)
+				? requestedOffset
+				: null;
+
 		// The chosen day, plus a few days either side.
-		const origin = (this.origin = this.walker.origin(around));
+		const origin = (this.origin = this.commandTargetOffset ?? this.walker.origin(around));
 		const step = this.sortStep();
 		const before: number[] = [];
 		let edge = origin;
@@ -341,19 +355,19 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// this window was built from; redo it now the view is whole again.
 		if (this.settingsPending) {
 			this.settingsPending = false;
-			await this.rebuild(this.visibleDate(), focusToday);
+			await this.rebuild(this.visibleDate(), focusToday, revealAround);
 		}
 	}
 
 	/** Rebuilds everything, e.g. after the daily-note format changed. */
-	async rebuild(around?: Moment, focusToday = false): Promise<void> {
+	async rebuild(around?: Moment, focusToday = false, revealAround = false): Promise<void> {
 		// Closed for business from here on: flushing is asynchronous, and a
 		// change arriving during it must queue rather than start a second
 		// rebuild alongside this one.
 		this.ready = false;
 		await this.flushAll();
 		this.teardown();
-		await this.build(around, focusToday);
+		await this.build(around, focusToday, revealAround);
 	}
 
 	/** The day the reader is currently looking at, if the view has one. */
@@ -815,9 +829,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// Even an editor that retained focus can have stale offscreen measurements.
 		this.armPendingFocusCenter(section);
 		if (!section.focusEditor(atEnd)) {
+			this.setCommandTarget(null);
 			this.clearPendingFocusCenter();
 			return;
 		}
+		this.setCommandTarget(null);
 		// Cursor reveal registers its frame during focus. Registering this one
 		// afterwards makes the centring correction the last write before paint.
 		this.schedulePendingFocusCenter();
@@ -927,6 +943,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	goToToday(focus = false): void {
+		this.setCommandTarget(null);
 		const now = createMoment().startOf("day");
 		const section = this.sectionAt(0);
 		if (!now.isSame(this.today, "day") || !section) {
@@ -944,8 +961,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	/** Command navigation that keeps the same near-scroll and far-snap behavior as Today. */
-	goToCommandDate(date: Moment, focus = false): void {
-		this.navigateToDate(date, focus, true);
+	goToCommandDate(date: Moment, focus = true): void {
+		this.navigateToDate(date, focus, true, true);
 	}
 
 	/** Opens the calendar, on the day the reader is currently looking at. */
@@ -999,10 +1016,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	 * caller so direct navigation cannot temporarily reveal a filtered note.
 	 */
 	goToDate(date: Moment, focus = true): void {
-		this.navigateToDate(date, focus, false);
+		this.navigateToDate(date, focus, false, false);
 	}
 
-	private navigateToDate(date: Moment, focus: boolean, atEnd: boolean): void {
+	private navigateToDate(date: Moment, focus: boolean, atEnd: boolean, revealThroughFilters: boolean): void {
 		// A date can arrive from a picker that outlived the view it was opened
 		// from - the plugin reloading under it, say.
 		if (!this.scrollEl?.isConnected) return;
@@ -1011,7 +1028,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		window.clearTimeout(this.initialFocusTimer);
 		this.initialFocusTimer = 0;
 		const day = date.clone().startOf("day");
-		if (!this.isDateVisible(day)) {
+		this.setCommandTarget(null);
+		if (!revealThroughFilters && !this.isDateVisible(day)) {
 			new Notice("That day is hidden by the current journal filters. Showing today instead.");
 			this.goToToday(focus);
 			return;
@@ -1019,26 +1037,47 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const offset = day.diff(this.today, "days");
 		const indexed = this.plugin.filteredIndex.has(this.walker.keyFor(offset));
 		if (!isOffsetReachable(offset, indexed)) return;
+		this.setCommandTarget(revealThroughFilters ? offset : null);
 		// A view built while hidden has not committed to a scroll position yet.
 		// Rebuild around the requested day so its first measurable resize cannot
 		// centre the old origin over this navigation.
 		if (!this.centered) {
-			void this.rebuild(day).then(() => {
+			void this.rebuild(day, false, revealThroughFilters).then(() => {
 				if (focus) this.focusOriginWhenReady(atEnd);
 			});
 			return;
 		}
-		const section = createMoment().startOf("day").isSame(this.today, "day") ? this.sectionAt(offset) : undefined;
+		let section = createMoment().startOf("day").isSame(this.today, "day") ? this.sectionAt(offset) : undefined;
+		if (!section && revealThroughFilters) section = this.ensureSectionFor(offset);
 		if (section) {
 			// Focusing only once the animation has arrived: focus scrolls the
 			// editor into view, which would fight it. Same as `goToToday`.
 			this.centerSection(section, focus, atEnd);
 			return;
 		}
-		void this.rebuild(day).then(() => {
+		void this.rebuild(day, false, revealThroughFilters).then(() => {
 			const section = this.sectionAt(this.origin);
 			if (focus && section) this.focusAfterCenter(section, atEnd);
 		});
+	}
+
+	/** Re-applies normal filtering as soon as focus itself can guard the command target. */
+	private setCommandTarget(offset: number | null): void {
+		const previous = this.commandTargetOffset;
+		if (previous === offset) return;
+		this.commandTargetOffset = offset;
+		let changed = false;
+		for (const candidate of new Set([previous, offset])) {
+			if (candidate === null) continue;
+			const section = this.sectionAt(candidate);
+			if (!section) continue;
+			const wasHidden = section.isHidden;
+			section.refreshVisibility();
+			changed = section.isHidden !== wasHidden || changed;
+		}
+		if (!changed) return;
+		this.syncDateSeparators();
+		this.find?.sectionsChanged();
 	}
 
 	private focusOriginWhenReady(atEnd = false): void {
@@ -1207,10 +1246,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	/** Keeps each rendered section aligned with the walker's visibility rules. */
 	isVisibleDay(day: DaySection): boolean {
-		// A focused editor is a transient display guard, not index membership: it
-		// prevents an autosave from dismissing the day underneath the reader while
-		// navigation and future visits remain strictly filtered.
-		return day.hasFocus || (this.walker ? this.walker.isVisible(day.offset) : day.offset === 0);
+		// A command target is shown until it receives focus; focus then becomes the
+		// transient display guard. Neither changes index membership, so leaving the
+		// day restores normal filtering for future visits.
+		return (
+			day.hasFocus ||
+			day.offset === this.commandTargetOffset ||
+			(this.walker ? this.walker.isVisible(day.offset) : day.offset === 0)
+		);
 	}
 
 	onDayFileChanged(day: DaySection, previousPath: string | null): void {

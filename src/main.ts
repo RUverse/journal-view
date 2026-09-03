@@ -22,6 +22,7 @@ type EntryDirection = -1 | 0 | 1;
 interface InitialJournalTarget {
 	date: Moment;
 	focusAtEnd: boolean;
+	revealThroughFilters: boolean;
 }
 
 export default class JournalViewPlugin extends Plugin {
@@ -183,7 +184,12 @@ export default class JournalViewPlugin extends Plugin {
 		});
 	}
 
-	async activateView(forceNewTab = false, date?: Moment, focusAtEnd = false): Promise<void> {
+	async activateView(
+		forceNewTab = false,
+		date?: Moment,
+		focusAtEnd = false,
+		revealThroughFilters = false,
+	): Promise<void> {
 		const { workspace } = this.app;
 		const existing = workspace.getLeavesOfType(VIEW_TYPE_JOURNAL);
 
@@ -198,6 +204,7 @@ export default class JournalViewPlugin extends Plugin {
 				this.initialTargets.set(leaf, {
 					date: date.clone().startOf("day"),
 					focusAtEnd,
+					revealThroughFilters,
 				});
 			}
 			try {
@@ -210,7 +217,7 @@ export default class JournalViewPlugin extends Plugin {
 		}
 		await workspace.revealLeaf(leaf);
 		if (date && !created && leaf.view instanceof JournalView) {
-			if (focusAtEnd) leaf.view.goToCommandDate(date, true);
+			if (revealThroughFilters) leaf.view.goToCommandDate(date, true);
 			else leaf.view.goToDate(date, true);
 		}
 	}
@@ -229,7 +236,7 @@ export default class JournalViewPlugin extends Plugin {
 		const active = workspace.getActiveViewOfType(JournalView);
 		const leaf = active?.leaf ?? existing[0];
 		if (!leaf) {
-			await this.activateView(false, date, true);
+			await this.activateView(false, date, true, direction !== 0);
 			return;
 		}
 
@@ -241,18 +248,7 @@ export default class JournalViewPlugin extends Plugin {
 	}
 
 	private entryDate(direction: EntryDirection): Moment {
-		const today = createMoment().startOf("day");
-		if (direction === 0) return today;
-
-		this.filteredIndex.ensureCurrent();
-		const todayKey = today.format(DAY_KEY_FORMAT);
-		const key = direction < 0 ? this.filteredIndex.prev(todayKey) : this.filteredIndex.next(todayKey);
-		if (key) return createMoment(key, DAY_KEY_FORMAT, true);
-
-		const adjacent = today.clone().add(direction, "days");
-		const adjacentKey = adjacent.format(DAY_KEY_FORMAT);
-		if (!this.settings.hideEmptyDays && !this.index.has(adjacentKey)) return adjacent;
-		return today;
+		return createMoment().startOf("day").add(direction, "days");
 	}
 
 	/** Keeps a native view-header action on every open daily-note pane. */
