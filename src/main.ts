@@ -17,6 +17,14 @@ import {
 import type { DailyHeaderStyle, DaySortDirection } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 
+type EntryDirection = -1 | 0 | 1;
+
+interface InitialJournalTarget {
+	date: Moment;
+	focusAtEnd: boolean;
+	revealThroughFilters: boolean;
+}
+
 export default class JournalViewPlugin extends Plugin {
 	settings: JournalViewSettings = { ...DEFAULT_SETTINGS };
 	daily!: DailyNoteResolver;
@@ -26,8 +34,8 @@ export default class JournalViewPlugin extends Plugin {
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
 	private settingsTab: JournalViewSettingTab | null = null;
 	private filterControlListeners = new Set<() => void>();
-	/** Target dates handed to journal views before Obsidian constructs them. */
-	private initialDates = new Map<WorkspaceLeaf, Moment>();
+	/** Navigation handed to journal views before Obsidian constructs them. */
+	private initialTargets = new Map<WorkspaceLeaf, InitialJournalTarget>();
 
 	private notifyViews = debounce(
 		() => this.updateViews(),
@@ -70,10 +78,17 @@ export default class JournalViewPlugin extends Plugin {
 		this.daily = new DailyNoteResolver(this.app, () => this.settings);
 		this.index = new DailyNoteIndex(this.app, this.daily);
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
+		// onLayoutReady queues callbacks without returning an EventRef, so they
+		// need an explicit guard when the plugin unloads before layout restoration.
+		let layoutReadyCallbacksEnabled = true;
+		this.register(() => {
+			layoutReadyCallbacksEnabled = false;
+		});
 
 		// The index has to be registered before any view, so it is already up to
 		// date by the time a view reacts to the same vault event.
 		this.app.workspace.onLayoutReady(() => {
+			if (!layoutReadyCallbacksEnabled) return;
 			this.index.rebuild();
 			this.filteredIndex.rebuild();
 			this.syncDailyNoteActions();
@@ -113,6 +128,12 @@ export default class JournalViewPlugin extends Plugin {
 		this.register(() => this.clearDailyNoteActions());
 
 		this.registerView(VIEW_TYPE_JOURNAL, (leaf) => new JournalView(leaf, this));
+		this.app.workspace.onLayoutReady(() => {
+			if (!layoutReadyCallbacksEnabled || !this.settings.openJournalOnStartup) return;
+			void this.activateView(false).catch((error: unknown) => {
+				console.error("Journal View: could not open on startup", error);
+			});
+		});
 
 		this.addRibbonIcon("notebook", "Open journal", () => void this.activateView());
 
@@ -131,12 +152,19 @@ export default class JournalViewPlugin extends Plugin {
 		this.addCommand({
 			id: "go-to-today",
 			name: "Go to today",
-			checkCallback: (checking) => {
-				const view = this.app.workspace.getActiveViewOfType(JournalView);
-				if (!view) return false;
-				if (!checking) view.goToToday(true);
-				return true;
-			},
+			callback: () => void this.openJournalEntry(0),
+		});
+
+		this.addCommand({
+			id: "go-to-yesterday",
+			name: "Go to yesterday",
+			callback: () => void this.openJournalEntry(-1),
+		});
+
+		this.addCommand({
+			id: "go-to-tomorrow",
+			name: "Go to tomorrow",
+			callback: () => void this.openJournalEntry(1),
 		});
 
 		this.settingsTab = new JournalViewSettingTab(this.app, this);
@@ -156,7 +184,12 @@ export default class JournalViewPlugin extends Plugin {
 		});
 	}
 
-	async activateView(forceNewTab = false, date?: Moment): Promise<void> {
+	async activateView(
+		forceNewTab = false,
+		date?: Moment,
+		focusAtEnd = false,
+		revealThroughFilters = false,
+	): Promise<void> {
 		const { workspace } = this.app;
 		const existing = workspace.getLeavesOfType(VIEW_TYPE_JOURNAL);
 
@@ -167,24 +200,55 @@ export default class JournalViewPlugin extends Plugin {
 		} else {
 			leaf = workspace.getLeaf(true);
 			created = true;
-			if (date) this.initialDates.set(leaf, date.clone().startOf("day"));
+			if (date) {
+				this.initialTargets.set(leaf, {
+					date: date.clone().startOf("day"),
+					focusAtEnd,
+					revealThroughFilters,
+				});
+			}
 			try {
 				await leaf.setViewState({ type: VIEW_TYPE_JOURNAL, active: true });
 			} finally {
 				// The view normally consumes this during construction; also clear it
 				// when construction fails so a leaf is never left holding stale state.
-				this.initialDates.delete(leaf);
+				this.initialTargets.delete(leaf);
 			}
 		}
 		await workspace.revealLeaf(leaf);
-		if (date && !created && leaf.view instanceof JournalView) leaf.view.goToDate(date, true);
+		if (date && !created && leaf.view instanceof JournalView) {
+			if (revealThroughFilters) leaf.view.goToCommandDate(date, true);
+			else leaf.view.goToDate(date, true);
+		}
 	}
 
-	/** Consumed by a JournalView constructor so its first build uses the target date. */
-	consumeInitialDate(leaf: WorkspaceLeaf): Moment | undefined {
-		const date = this.initialDates.get(leaf);
-		this.initialDates.delete(leaf);
-		return date;
+	/** Consumed by a JournalView constructor so its first build uses the target. */
+	consumeInitialTarget(leaf: WorkspaceLeaf): InitialJournalTarget | undefined {
+		const target = this.initialTargets.get(leaf);
+		this.initialTargets.delete(leaf);
+		return target;
+	}
+
+	private async openJournalEntry(direction: EntryDirection): Promise<void> {
+		const date = this.entryDate(direction);
+		const { workspace } = this.app;
+		const existing = workspace.getLeavesOfType(VIEW_TYPE_JOURNAL);
+		const active = workspace.getActiveViewOfType(JournalView);
+		const leaf = active?.leaf ?? existing[0];
+		if (!leaf) {
+			await this.activateView(false, date, true, direction !== 0);
+			return;
+		}
+
+		await workspace.revealLeaf(leaf);
+		const view = leaf.view;
+		if (!(view instanceof JournalView)) return;
+		if (direction === 0) view.goToToday(true);
+		else view.goToCommandDate(date, true);
+	}
+
+	private entryDate(direction: EntryDirection): Moment {
+		return createMoment().startOf("day").add(direction, "days");
 	}
 
 	/** Keeps a native view-header action on every open daily-note pane. */
@@ -255,6 +319,10 @@ export default class JournalViewPlugin extends Plugin {
 			maxLoadedDays: loadedDaysSetting(saved.maxLoadedDays),
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
 			focusTodayOnOpen: booleanSetting(saved.focusTodayOnOpen, DEFAULT_SETTINGS.focusTodayOnOpen),
+			openJournalOnStartup: booleanSetting(
+				saved.openJournalOnStartup,
+				DEFAULT_SETTINGS.openJournalOnStartup,
+			),
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
 			filterRules: filterRulesSetting(saved.filterRules),
 			showTags: booleanSetting(saved.showTags, DEFAULT_SETTINGS.showTags),

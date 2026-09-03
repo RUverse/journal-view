@@ -1,7 +1,7 @@
 {
 	"id": "journal-view",
 	"name": "Journal View",
-	"version": "1.2.0",
+	"version": "1.2.1",
 	"minAppVersion": "1.7.2",
 	"description": "Turn your daily notes into one continuous, editable journal—scroll through time, jump to any date, and write without leaving the view.",
 	"author": "RUverse",

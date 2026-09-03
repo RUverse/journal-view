@@ -41,6 +41,7 @@ Some Customization is only visible in the customization menu accessible from the
 | Group days by year | On | Marks year boundaries between consecutive visible daily entries |
 | Group days by month | Off | Groups daily entries beneath compact month and year headings |
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |
+| Open journal on startup | Off | Opens or reveals Journal View after Obsidian restores the workspace |
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
@@ -61,6 +62,22 @@ Every include filter must match. A note matching any exclude filter is hidden, e
 all includes. The funnel uses the accent color whenever a tag or property filter is active; the
 note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, and **Find in
 journal** searches only the notes currently included.
+
+## Startup
+
+Journal View is a custom view, so the Homepage plugin cannot select it as a homepage note. Enable
+**Open journal on startup** in Journal View instead. If you also use Homepage, configure only one of
+the two plugins to open content at startup so they do not compete for the active tab.
+
+## Date commands
+
+- **Go to today** opens the journal when needed, then focuses today's entry.
+- **Go to yesterday** opens or reveals the journal, then focuses yesterday's entry.
+- **Go to tomorrow** opens or reveals the journal, then focuses tomorrow's entry.
+
+Yesterday and tomorrow are shown while focused even when the note-only toggle or a metadata filter
+would normally hide them. All three commands scroll when the target is nearby and snap when it is
+more than two view heights away.
 
 ## Privacy
 
