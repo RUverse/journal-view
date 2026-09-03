@@ -9,6 +9,7 @@
 		"lint": "eslint .",
 		"typecheck": "tsc -noEmit -skipLibCheck",
 		"test-vault": "bash scripts/setup-test-vault.sh",
+		"deploy:ios": "node scripts/deploy-ios-test-vault.mjs",
 		"version": "node version-bump.mjs && git add manifest.json versions.json"
 	},
 	"keywords": [

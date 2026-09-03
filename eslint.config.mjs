@@ -17,7 +17,11 @@ export default defineConfig(
 			globals: globals.browser,
 			parserOptions: {
 				projectService: {
-					allowDefaultProject: ["eslint.config.mjs", "manifest.json"],
+					allowDefaultProject: [
+						"eslint.config.mjs",
+						"manifest.json",
+						"scripts/deploy-ios-test-vault.mjs",
+					],
 				},
 				tsconfigRootDir: import.meta.dirname,
 				extraFileExtensions: [".json"],
@@ -25,4 +29,15 @@ export default defineConfig(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		files: ["scripts/deploy-ios-test-vault.mjs"],
+		languageOptions: { globals: globals.node },
+		rules: {
+			// This is a Node-based development script, not code bundled into the
+			// mobile plugin. It deliberately manages a test vault's `.obsidian` files.
+			"obsidianmd/hardcoded-config-path": "off",
+			"obsidianmd/no-nodejs-modules": "off",
+			"obsidianmd/rule-custom-message": "off",
+		},
+	},
 );

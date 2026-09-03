@@ -4,8 +4,8 @@
 # hand. The vault itself is gitignored; this script is what makes it
 # reproducible, so run it instead of hand-rolling a vault.
 #
-# Existing files are left alone, so it is safe to re-run over a vault you have
-# already been typing in.
+# Existing vault content is left alone, so it is safe to re-run over a vault you
+# have already been typing in. The generated testing guide is refreshed.
 #
 # Usage: npm run test-vault
 set -euo pipefail
@@ -29,6 +29,16 @@ write() { # write <relative path> - from stdin, only when the file is missing
 		cat >"$path"
 		echo "  created $1"
 	fi
+}
+
+write_managed() { # write_managed <relative path> - from stdin, replacing generated documentation
+	local path="$vault/$1"
+	local action="created"
+	if [ -e "$path" ]; then
+		action="updated"
+	fi
+	cat >"$path"
+	echo "  $action $1"
 }
 
 write .obsidian/core-plugins.json <<'JSON'
@@ -120,7 +130,7 @@ tags:
 ## Notes
 MARKDOWN
 
-write README-TESTING.md <<'MARKDOWN'
+write_managed README-TESTING.md <<'MARKDOWN'
 # Journal View test vault
 
 Throwaway vault for exercising the plugin by hand. Gitignored, so anything written
@@ -182,6 +192,41 @@ Two things will waste your afternoon if you do not know them:
 Useful while debugging: `dev:errors` (unhandled rejections land here), `dev:console`,
 `dev:dom selector=...`, and `dev:cdp method=Input.insertText params='{"text":"..."}'`
 to type into whatever holds focus.
+
+## Testing on iOS
+
+Desktop mobile emulation still runs Chromium, so use a physical iPhone or iPad
+for WebKit, touch and momentum-scrolling issues. This command builds the plugin,
+copies this test vault into Obsidian's iCloud container as `Journal View Test`,
+installs real plugin files instead of the repository symlink, and adds Journal
+View to the vault's enabled community plugins:
+
+```bash
+npm run deploy:ios
+```
+
+The default destination is:
+
+```text
+~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Journal View Test
+```
+
+If the iCloud container is elsewhere, pass the absolute vault path directly or
+set `JOURNAL_VIEW_IOS_VAULT`:
+
+```bash
+npm run deploy:ios -- "/absolute/path/to/Journal View Test"
+JOURNAL_VIEW_IOS_VAULT="/absolute/path/to/Journal View Test" npm run deploy:ios
+```
+
+Deploying again updates the build and matching test-vault files without deleting
+files created only on iOS. It also preserves the iOS workspace and any other
+enabled community plugins. Wait for iCloud to finish syncing, then restart
+Obsidian or toggle Journal View off and on to load the new build.
+
+For Safari Web Inspector, enable **Settings -> Apps -> Safari -> Advanced -> Web
+Inspector** on iOS. Enable developer features in Safari on the Mac, connect the
+device, open this vault, and select Obsidian under **Develop -> [device]**.
 
 ## Checks worth running
 
