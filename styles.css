@@ -929,7 +929,7 @@ body.is-phone .journal-view .view-content .journal-day-editing .journal-day-body
 	align-items: baseline;
 	gap: var(--size-2-2);
 	padding: var(--size-4-2) 0 var(--size-2-2);
-	background-color: var(--background-primary);
+	background-color: var(--modal-background);
 	font-size: var(--font-ui-small);
 	font-weight: var(--font-semibold);
 	color: var(--text-normal);
