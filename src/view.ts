@@ -94,6 +94,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private focusOnFirstResizeAtEnd: boolean | null = null;
 	/** Command target kept visible only until its editor receives focus. */
 	private commandTargetOffset: number | null = null;
+	/** Invalidates delayed command navigation when a newer destination takes over. */
+	private commandNavigationToken = 0;
 	/** True while a pointer is held down in the scroller (scrollbar, selection). */
 	private pointerHeld = false;
 	/** Scroll position and pace, used to keep editor work out of a gesture. */
@@ -200,6 +202,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	async onClose(): Promise<void> {
+		this.commandNavigationToken++;
 		// Modals hold this view in their callbacks, so they have to go with it.
 		this.picker?.close();
 		this.appearance?.close();
@@ -281,7 +284,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.commandTargetOffset =
 			revealAround &&
 			requestedOffset !== undefined &&
-			isOffsetReachable(requestedOffset, requestedIndexed)
+			isOffsetReachable(requestedOffset, this.plugin.settings.hideEmptyDays, requestedIndexed)
 				? requestedOffset
 				: null;
 
@@ -943,6 +946,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	goToToday(focus = false): void {
+		const navigationToken = ++this.commandNavigationToken;
 		this.setCommandTarget(null);
 		const now = createMoment().startOf("day");
 		const section = this.sectionAt(0);
@@ -950,6 +954,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			// Midnight has passed, or today was trimmed away after a long
 			// scroll - rebuilding recentres on today directly.
 			void this.rebuild().then(() => {
+				if (navigationToken !== this.commandNavigationToken) return;
 				const section = this.sectionAt(0);
 				if (focus && section) this.focusAfterCenter(section, true);
 			});
@@ -1027,6 +1032,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// navigation owns focus now, so do not let that delayed callback steal it.
 		window.clearTimeout(this.initialFocusTimer);
 		this.initialFocusTimer = 0;
+		const navigationToken = ++this.commandNavigationToken;
 		const day = date.clone().startOf("day");
 		this.setCommandTarget(null);
 		if (!revealThroughFilters && !this.isDateVisible(day)) {
@@ -1036,26 +1042,50 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		}
 		const offset = day.diff(this.today, "days");
 		const indexed = this.plugin.filteredIndex.has(this.walker.keyFor(offset));
-		if (!isOffsetReachable(offset, indexed)) return;
-		this.setCommandTarget(revealThroughFilters ? offset : null);
+		if (!isOffsetReachable(offset, this.plugin.settings.hideEmptyDays, indexed)) return;
 		// A view built while hidden has not committed to a scroll position yet.
 		// Rebuild around the requested day so its first measurable resize cannot
 		// centre the old origin over this navigation.
 		if (!this.centered) {
+			this.setCommandTarget(revealThroughFilters ? offset : null);
 			void this.rebuild(day, false, revealThroughFilters).then(() => {
+				if (navigationToken !== this.commandNavigationToken) return;
 				if (focus) this.focusOriginWhenReady(atEnd);
 			});
 			return;
 		}
-		let section = createMoment().startOf("day").isSame(this.today, "day") ? this.sectionAt(offset) : undefined;
-		if (!section && revealThroughFilters) section = this.ensureSectionFor(offset);
+		const timelineCurrent = createMoment().startOf("day").isSame(this.today, "day");
+		const section = timelineCurrent ? this.sectionAt(offset) : undefined;
 		if (section) {
+			this.setCommandTarget(revealThroughFilters ? offset : null);
 			// Focusing only once the animation has arrived: focus scrolls the
 			// editor into view, which would fight it. Same as `goToToday`.
 			this.centerSection(section, focus, atEnd);
 			return;
 		}
+		if (timelineCurrent && revealThroughFilters) {
+			// A filtered target may fall inside the loaded range without having a
+			// section. Insert it while still hidden, then reveal it only after its
+			// real file content is loaded so a blank editor can never replace a note.
+			const fresh = this.ensureSectionFor(offset);
+			if (fresh) {
+				void fresh.reload().then(() => {
+					if (
+						navigationToken !== this.commandNavigationToken ||
+						!fresh.el.isConnected ||
+						!this.centered
+					) {
+						return;
+					}
+					this.setCommandTarget(offset);
+					this.centerSection(fresh, focus, atEnd);
+				});
+				return;
+			}
+		}
+		this.setCommandTarget(revealThroughFilters ? offset : null);
 		void this.rebuild(day, false, revealThroughFilters).then(() => {
+			if (navigationToken !== this.commandNavigationToken) return;
 			const section = this.sectionAt(this.origin);
 			if (focus && section) this.focusAfterCenter(section, atEnd);
 		});
