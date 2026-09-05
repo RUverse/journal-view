@@ -324,6 +324,7 @@ export default class JournalViewPlugin extends Plugin {
 				DEFAULT_SETTINGS.openJournalOnStartup,
 			),
 			hideEmptyDays: booleanSetting(saved.hideEmptyDays, DEFAULT_SETTINGS.hideEmptyDays),
+			hideTodayBackground: booleanSetting(saved.hideTodayBackground, DEFAULT_SETTINGS.hideTodayBackground),
 			filterRules: filterRulesSetting(saved.filterRules),
 			showTags: booleanSetting(saved.showTags, DEFAULT_SETTINGS.showTags),
 			displayProperties: propertyNamesSetting(saved.displayProperties),

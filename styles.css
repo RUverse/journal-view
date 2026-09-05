@@ -731,6 +731,14 @@ button.journal-day-metadata-value-button:focus-visible,
 	--journal-body-pad-bottom: var(--size-4-12);
 }
 
+.journal-today-background-hidden .journal-day-today .journal-day-card {
+	background-color: transparent;
+}
+
+.journal-today-background-hidden .journal-day-today .journal-day-date {
+	color: var(--strong-color, var(--em-color, var(--bold-color, var(--italic-color, var(--text-accent)))));
+}
+
 /* Days without a note yet: visible, but clearly not real content. */
 .journal-day-empty .journal-day-header,
 .journal-day-empty .journal-day-body {
