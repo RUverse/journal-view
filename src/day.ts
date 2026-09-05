@@ -20,6 +20,7 @@ import { SaveQueue } from "./saveQueue";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 import { listenForReaderScrollIntent } from "./readerInput";
+import { mergeProjectedNoteBody, projectNoteBody } from "./noteProjection";
 
 /**
  * Frames a cursor placed at the end of a day is kept on screen for, long
@@ -127,14 +128,7 @@ function noteBody(content: string): string {
 	return content.slice(getFrontMatterInfo(content).contentStart);
 }
 
-/** CodeMirror stores every line break as `\n`, regardless of the file's EOL. */
-function editorBody(content: string): string {
-	return noteBody(content).replace(/\r\n?/g, "\n");
-}
-
-function replaceNoteBody(content: string, body: string): string {
-	return content.slice(0, getFrontMatterInfo(content).contentStart) + body;
-}
+class NoteEditConflict extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -319,6 +313,10 @@ export class DaySection {
 	private endReveal: (() => void) | null = null;
 
 	private lastKnownContent = "";
+	/** The body matching lastKnownContent in the shape shown by this editor. */
+	private lastKnownEditorBody = "";
+	/** Exact note-body prefix omitted when this editor projection was created. */
+	private hiddenNotePrefix: string | null = null;
 	/** Newest complete file content, including external frontmatter held off from a dirty editor. */
 	private latestContent = "";
 	private propertyEdit: PropertyEditState | null = null;
@@ -335,6 +333,12 @@ export class DaySection {
 	private externalReloadPending = false;
 	/** Template text shown in an empty day but not yet accepted by the reader. */
 	private pendingTemplate: string | null = null;
+	/** H1 prefix omitted from the pending template offer. */
+	private pendingTemplatePrefix: string | null = null;
+	/** True after the reader changes an offered template, even to an empty body. */
+	private acceptedTemplateProjection = false;
+	/** Holds a visible-body conflict for the reader to resolve without overwriting either copy. */
+	private saveConflict = false;
 	private saveTimer = 0;
 	private focused = false;
 	/** Invalidates focus-settle work when focus leaves or the day is destroyed. */
@@ -346,6 +350,8 @@ export class DaySection {
 		ranges: FindRange[];
 		selected: FindRange | null;
 	} | null = null;
+	/** Frozen for this section so a settings-triggered flush uses the body shape its editor shows. */
+	private readonly hideDailyNoteH1: boolean;
 
 	file: TFile | null;
 	path: string;
@@ -355,6 +361,7 @@ export class DaySection {
 		readonly date: Moment,
 		readonly offset: number,
 	) {
+		this.hideDailyNoteH1 = host.plugin.settings.hideDailyNoteH1;
 		this.key = date.format("YYYY-MM-DD");
 		this.path = host.plugin.daily.pathFor(date);
 		this.file = host.plugin.daily.fileFor(date);
@@ -468,17 +475,20 @@ export class DaySection {
 	 */
 	private async offerTemplate(): Promise<void> {
 		if (this.file || !this.editor || this.editor.getValue().length > 0) return;
-		const body = editorBody(await this.host.plugin.daily.templateContent(this.date));
+		const template = await this.host.plugin.daily.templateContent(this.date);
+		const projected = projectNoteBody(noteBody(template), this.hideDailyNoteH1);
+		const body = projected.editorBody;
 		// Reading the template yields, so everything above is re-checked: the
 		// reader may have typed, left, or the note may have appeared, in
 		// between. An offer landing after they left would have nothing to
 		// withdraw it.
-		if (!body || this.destroyed || !this.hasFocus) return;
+		if ((!body && projected.hiddenPrefix === null) || this.destroyed || !this.hasFocus) return;
 		if (this.file || !this.editor || this.editor.getValue().length > 0) return;
 
 		// Set first: filling the editor reports a change, and the save that
 		// follows has to already know the text is only an offer.
 		this.pendingTemplate = body;
+		this.pendingTemplatePrefix = projected.hiddenPrefix;
 		this.editor.setValue(body);
 		this.editor.placeCursorAtEnd?.();
 		this.releaseHeight();
@@ -490,13 +500,13 @@ export class DaySection {
 		const pending = this.pendingTemplate;
 		if (pending === null) return false;
 		if (!this.editor || this.editor.getValue() !== pending) {
-			// The reader made it their own; it saves like anything they wrote.
-			this.pendingTemplate = null;
+			// Leave the offer in place until capture records its exact projection.
 			return false;
 		}
 
 		this.pendingTemplate = null;
-		this.editor.setValue(editorBody(this.lastKnownContent));
+		this.pendingTemplatePrefix = null;
+		this.editor.setValue(this.lastKnownEditorBody);
 		this.updateBlankState();
 		// A note can appear between offering the template and this blur. Re-read
 		// it rather than leave the pre-offer content in the editor.
@@ -1426,12 +1436,12 @@ export class DaySection {
 		// An untouched template offer is not the reader's work, so it must not
 		// pin the day to edit mode or fend off content arriving from the vault.
 		if (value === this.pendingTemplate) return false;
-		return value !== editorBody(this.lastKnownContent);
+		return value !== this.lastKnownEditorBody;
 	}
 
 	/** The body as the reader sees it, including edits not yet written to disk. */
 	searchText(): string {
-		return this.editor?.getValue() ?? editorBody(this.lastKnownContent);
+		return this.editor?.getValue() ?? this.lastKnownEditorBody;
 	}
 
 	setFindState(
@@ -1488,6 +1498,19 @@ export class DaySection {
 		}
 	}
 
+	/** Records a vault copy and the stable body projection derived from it. */
+	private adoptContent(
+		content: string,
+		projected = projectNoteBody(noteBody(content), this.hideDailyNoteH1),
+	): string {
+		this.lastKnownContent = content;
+		this.lastKnownEditorBody = projected.editorBody;
+		this.hiddenNotePrefix = projected.hiddenPrefix;
+		this.acceptedTemplateProjection = false;
+		this.saveConflict = false;
+		return projected.editorBody;
+	}
+
 	/**
 	 * Reads the note and renders its preview. The view awaits this before the
 	 * day enters the DOM, so a day is always inserted at its full height.
@@ -1495,17 +1518,16 @@ export class DaySection {
 	async prepare(): Promise<void> {
 		const content = await this.readContent();
 		if (this.destroyed) return;
-		this.lastKnownContent = content;
+		const body = this.adoptContent(content);
 		this.refreshMetadata(content);
-		await this.renderPreview(content);
+		await this.renderPreview(body);
 	}
 
-	/** Renders `content` into a fresh preview container, off-DOM. */
-	private async buildPreview(content: string): Promise<{ component: Component; container: HTMLElement } | null> {
+	/** Renders an editor-shaped note body into a fresh preview container, off-DOM. */
+	private async buildPreview(body: string): Promise<{ component: Component; container: HTMLElement } | null> {
 		const component = new Component();
 		component.load();
 		const container = createDiv({ cls: "journal-day-preview markdown-rendered" });
-		const body = noteBody(content);
 		try {
 			await MarkdownRenderer.render(this.host.app, body, container, this.path, component);
 		} catch (error) {
@@ -1520,7 +1542,7 @@ export class DaySection {
 	}
 
 	/** Swaps whatever the body holds for `built`, in one synchronous step. */
-	private applyPreview(built: { component: Component; container: HTMLElement }, content: string): void {
+	private applyPreview(built: { component: Component; container: HTMLElement }, body: string): void {
 		this.editor?.destroy();
 		this.editor = null;
 		this.previewComponent?.unload();
@@ -1529,7 +1551,7 @@ export class DaySection {
 		this.releaseHeight();
 		this.el.removeClass("journal-day-editing");
 		this.bodyEl.appendChild(built.container);
-		this.el.toggleClass("journal-day-blank", noteBody(content).trim().length === 0);
+		this.el.toggleClass("journal-day-blank", body.trim().length === 0);
 		this.applyFindState();
 	}
 
@@ -1589,17 +1611,17 @@ export class DaySection {
 		for (const parent of parents) parent.normalize();
 	}
 
-	private async renderPreview(content: string): Promise<void> {
+	private async renderPreview(body: string): Promise<void> {
 		if (this.destroyed || this.editor) return;
 		const token = ++this.modeToken;
-		const built = await this.buildPreview(content);
+		const built = await this.buildPreview(body);
 		if (!built) return;
 		if (token !== this.modeToken || this.editor) {
 			// An editor was mounted while the preview rendered; theirs wins.
 			built.component.unload();
 			return;
 		}
-		this.applyPreview(built, content);
+		this.applyPreview(built, body);
 	}
 
 	/* -------------------------------------------------------------- editing */
@@ -1617,13 +1639,14 @@ export class DaySection {
 		if (this.destroyed || this.editor) return;
 		this.modeToken++;
 		this.pendingTemplate = null;
+		this.pendingTemplatePrefix = null;
 		this.heldHeight = this.bodyEl.offsetHeight;
 		this.previewComponent?.unload();
 		this.previewComponent = null;
 		this.bodyEl.empty();
 		if (this.heldHeight > 0) this.bodyEl.setCssProps({ "--journal-held-height": `${this.heldHeight}px` });
 		this.el.addClass("journal-day-editing");
-		const body = editorBody(this.lastKnownContent);
+		const body = this.lastKnownEditorBody;
 		const placeholder = this.exists ? "Empty note" : "Start typing to create this note";
 		const token = this.modeToken;
 		try {
@@ -1658,7 +1681,7 @@ export class DaySection {
 			console.error(`Journal View: could not open an editor for ${this.path}`, error);
 			this.el.removeClass("journal-day-editing");
 			this.bodyEl.empty();
-			void this.renderPreview(this.lastKnownContent);
+			void this.renderPreview(this.lastKnownEditorBody);
 			return;
 		}
 		this.updateBlankState();
@@ -1674,12 +1697,18 @@ export class DaySection {
 		if (this.destroyed || !this.editor || this.unmounting) return;
 		if (this.hasFocus || this.isDirty) return;
 		const content = this.lastKnownContent;
+		// This editor's omission boundary stayed fixed while it was mounted. It
+		// is safe to apply the current hide setting again once the clean editor is
+		// being replaced, including to an H1 the reader just added themselves.
+		const projected = projectNoteBody(noteBody(content), this.hideDailyNoteH1);
+		const body = projected.editorBody;
+		const projectionChanged = body !== this.lastKnownEditorBody;
 		const token = ++this.modeToken;
 		this.unmounting = true;
 		try {
 			// Built while the editor still stands, then swapped in one step, so
 			// the day never spends a frame at zero height.
-			const built = await this.buildPreview(content);
+			const built = await this.buildPreview(body);
 			if (!built) return;
 			// Rendering takes long enough for the day to have been scrolled back
 			// into sight, or for the note to have changed under it. Either way
@@ -1688,13 +1717,16 @@ export class DaySection {
 			const stale =
 				token !== this.modeToken ||
 				this.hasFocus ||
+				this.isDirty ||
 				this.lastKnownContent !== content ||
 				!this.host.isOffScreen(this);
 			if (stale) {
 				built.component.unload();
 				return;
 			}
-			this.applyPreview(built, content);
+			this.adoptContent(content, projected);
+			this.applyPreview(built, body);
+			if (projectionChanged) this.host.onDayContentChanged(this);
 		} finally {
 			this.unmounting = false;
 		}
@@ -1830,15 +1862,25 @@ export class DaySection {
 		// conflict guard below remains in force, while the metadata strip reflects
 		// the newest complete file immediately.
 		this.refreshMetadata(content);
+		// Metadata events for this section's own save can arrive after the queue
+		// settles. Do not reinterpret the editor projection from that same copy.
+		if (content === this.lastKnownContent) {
+			this.externalReloadPending = false;
+			if (!this.isDirty) this.saveConflict = false;
+			return;
+		}
 		if (!this.editor) {
-			this.lastKnownContent = content;
+			this.adoptContent(content);
 			this.externalReloadPending = false;
 			this.host.onDayContentChanged(this);
 			return;
 		}
-		const body = editorBody(content);
+		const projected = projectNoteBody(noteBody(content), this.hideDailyNoteH1);
+		const body = projected.editorBody;
 		if (this.editor.getValue() === body) {
-			this.lastKnownContent = content;
+			this.pendingTemplate = null;
+			this.pendingTemplatePrefix = null;
+			this.adoptContent(content, projected);
 			this.externalReloadPending = false;
 			return;
 		}
@@ -1850,8 +1892,9 @@ export class DaySection {
 		}
 
 		this.pendingTemplate = null;
+		this.pendingTemplatePrefix = null;
 		this.editor.setValue(body, true);
-		this.lastKnownContent = content;
+		this.adoptContent(content, projected);
 		this.externalReloadPending = false;
 		// The held height belongs to content that is no longer what the day
 		// holds; the editor's own height is the honest one now.
@@ -1870,8 +1913,8 @@ export class DaySection {
 			return;
 		}
 		if (content === this.lastKnownContent && this.previewComponent) return;
-		this.lastKnownContent = content;
-		await this.renderPreview(content);
+		const body = this.adoptContent(content);
+		await this.renderPreview(body);
 		this.host.onDayContentChanged(this);
 	}
 
@@ -1890,8 +1933,16 @@ export class DaySection {
 		if (!this.editor) return;
 		const body = this.editor.getValue();
 		if (body === this.pendingTemplate) return; // an offer nobody accepted
+		if (this.pendingTemplate !== null) {
+			this.lastKnownEditorBody = this.pendingTemplate;
+			this.hiddenNotePrefix = this.pendingTemplatePrefix;
+			this.acceptedTemplateProjection = true;
+		}
 		this.pendingTemplate = null;
-		if (body !== editorBody(this.lastKnownContent)) void this.queue.submit(body);
+		this.pendingTemplatePrefix = null;
+		if (body !== this.lastKnownEditorBody && !this.saveConflict) {
+			void this.queue.submit(body);
+		}
 	}
 
 	async flush(commitMetadataDraft = false): Promise<void> {
@@ -1902,13 +1953,46 @@ export class DaySection {
 		if (!this.destroyed && this.externalReloadPending && !this.isDirty) await this.reload();
 	}
 
+	/**
+	 * Saves a recoverable copy when an external edit overlaps a hidden-H1 editor
+	 * change. Closing or rebuilding the view can then never discard the reader's
+	 * only copy of their text.
+	 */
+	private async saveConflictCopy(file: TFile, editorBody: string): Promise<string> {
+		const latestContent = this.latestContent || this.lastKnownContent;
+		const contentStart = getFrontMatterInfo(latestContent).contentStart;
+		const latestBody = latestContent.slice(contentStart);
+		const projected = projectNoteBody(latestBody, this.hiddenNotePrefix !== null);
+		const hiddenPrefix = projected.hiddenPrefix ?? this.hiddenNotePrefix ?? "";
+		const separator = hiddenPrefix && editorBody && !/[\r\n]$/.test(hiddenPrefix) ? "\n" : "";
+		const copyContent = latestContent.slice(0, contentStart) + hiddenPrefix + separator + editorBody;
+		const extension = file.extension ? `.${file.extension}` : "";
+		const basePath = extension && file.path.endsWith(extension) ? file.path.slice(0, -extension.length) : file.path;
+		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+		for (let attempt = 0; attempt < 100; attempt++) {
+			const suffix = attempt ? ` ${attempt + 1}` : "";
+			const path = `${basePath} (Journal View conflict ${stamp}${suffix})${extension}`;
+			if (this.host.app.vault.getAbstractFileByPath(path)) continue;
+			await this.host.app.vault.create(path, copyContent);
+			return path;
+		}
+
+		throw new Error("could not choose a path for the Journal View conflict copy");
+	}
+
 	private async writeValue(body: string): Promise<boolean> {
 		try {
+			const baseEditorBody = this.lastKnownEditorBody;
+			const expectedHiddenPrefix = this.hiddenNotePrefix;
+			const acceptedTemplateProjection = this.acceptedTemplateProjection;
 			let file = this.file;
 			if (!file) {
 				// An untouched placeholder must not litter the vault with empty notes.
-				if (!body.trim()) {
+				if (!body.trim() && !acceptedTemplateProjection) {
 					this.lastKnownContent = body;
+					this.lastKnownEditorBody = body;
+					this.hiddenNotePrefix = null;
 					return true;
 				}
 				// Created from the template, then written over below: the reader
@@ -1919,12 +2003,45 @@ export class DaySection {
 			}
 			// The callback receives the latest vault content, so frontmatter changes
 			// made by Properties, Sync, or another view are not overwritten.
-			this.lastKnownContent = await this.host.app.vault.process(file, (content) =>
-				replaceNoteBody(content, body),
-			);
-			this.refreshMetadata(this.lastKnownContent);
+			let savedHiddenPrefix = expectedHiddenPrefix;
+			const savedContent = await this.host.app.vault.process(file, (content) => {
+				const contentStart = getFrontMatterInfo(content).contentStart;
+				const merged = mergeProjectedNoteBody(
+					content.slice(contentStart),
+					baseEditorBody,
+					body,
+					expectedHiddenPrefix,
+				);
+				if (!merged) throw new NoteEditConflict();
+				savedHiddenPrefix = merged.hiddenPrefix;
+				return content.slice(0, contentStart) + merged.body;
+			});
+			this.lastKnownContent = savedContent;
+			this.lastKnownEditorBody = body;
+			this.hiddenNotePrefix = savedHiddenPrefix;
+			this.acceptedTemplateProjection = false;
+			this.saveConflict = false;
+			this.refreshMetadata(savedContent);
 			return true;
 		} catch (error) {
+			if (error instanceof NoteEditConflict) {
+				try {
+					const file = this.file;
+					if (!file) return false;
+					const copyPath = await this.saveConflictCopy(file, body);
+					this.saveConflict = true;
+					this.externalReloadPending = true;
+					console.warn(`Journal View: ${this.path} changed outside the journal during a save`);
+					new Notice(`This note changed elsewhere. Your journal text was saved to ${copyPath}.`);
+					// The editor remains dirty, but this exact conflicting value should not
+					// retry until the reader reloads or returns it to the known vault body.
+					return true;
+				} catch (backupError) {
+					console.error(`Journal View: could not save a conflict copy for ${this.path}`, backupError);
+					new Notice("This note changed elsewhere and the backup copy could not be saved.");
+					return false;
+				}
+			}
 			console.error(`Journal View: could not save ${this.path}`, error);
 			new Notice(`Journal View: could not save ${this.path}`);
 			return false;
