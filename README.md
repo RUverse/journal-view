@@ -79,6 +79,13 @@ Yesterday and tomorrow are shown while focused even when the note-only toggle or
 would normally hide them. All three commands scroll when the target is nearby and snap when it is
 more than two view heights away.
 
+## Expanding selection
+
+Inside a journal entry, Cmd+A on Mac or Ctrl+A on Windows/Linux selects the current line without
+its list or task marker. Press again to select the current heading's contents, then once more
+for the note body without its leading H1. Moving the cursor or editing starts over. This works
+in both the rich editor and the plain-text fallback.
+
 ## Privacy
 
 Journal View works locally with files in your Obsidian vault. It does not make network requests,

@@ -20,6 +20,7 @@ import { SaveQueue } from "./saveQueue";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 import { listenForReaderScrollIntent } from "./readerInput";
+import { SmartSelection } from "./smartSelection";
 
 /**
  * Frames a cursor placed at the end of a day is kept on screen for, long
@@ -301,6 +302,7 @@ export class DaySection {
 	private bodyEl: HTMLElement;
 
 	private editor: JournalEditor | null = null;
+	private smartSelection = new SmartSelection();
 	private previewComponent: Component | null = null;
 	private destroyed = false;
 	/**
@@ -1743,6 +1745,16 @@ export class DaySection {
 		void this.flush().finally(() => {
 			if (!this.destroyed) this.host.onDayFocusChanged(this);
 		});
+	}
+
+	expandSelection(): boolean {
+		if (!this.editor?.hasFocus()) return false;
+		const selection = this.editor.getSelectionRange();
+		if (!selection) return false;
+		const titleHidden = ("hiddenNotePrefix" in this && typeof this.hiddenNotePrefix === "string") ||
+			("pendingTemplatePrefix" in this && typeof this.pendingTemplatePrefix === "string");
+		this.editor.setSelectionRange(this.smartSelection.expand(this.editor.getValue(), selection, titleHidden));
+		return true;
 	}
 
 	/**

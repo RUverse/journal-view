@@ -144,6 +144,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.showFind();
 			return false;
 		});
+		this.scope.register(["Mod"], "a", () => {
+			if (this.sections.some((section) => section.expandSelection())) return false;
+		});
 		this.initialTarget = plugin.consumeInitialTarget(leaf);
 		// Opening a note (from a day header, or a link inside a day) must not
 		// replace the journal itself.
@@ -738,6 +741,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	private onKeydown(event: KeyboardEvent): void {
+		if (event.defaultPrevented) return;
+		if (event.key.toLowerCase() === "a" && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+			if (this.sections.some((section) => section.expandSelection())) {
+				event.preventDefault();
+				event.stopPropagation();
+			}
+			return;
+		}
 		if (
 			event.key.toLowerCase() !== "f" ||
 			(!event.metaKey && !event.ctrlKey) ||
