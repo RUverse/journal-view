@@ -4,6 +4,10 @@ import type { EditorState, TransactionSpec } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import type { DecorationSet } from "@codemirror/view";
 import type { FindRange } from "./findText";
+export interface TextSelection {
+	anchor: number;
+	head: number;
+}
 
 export interface JournalEditorOptions {
 	app: App;
@@ -24,6 +28,8 @@ export interface JournalEditorOptions {
 
 export interface JournalEditor {
 	getValue(): string;
+	getSelectionRange(): TextSelection | null;
+	setSelectionRange(selection: TextSelection): void;
 	/** Replaces the contents; `preserveSelection` is for a clean external update. */
 	setValue(value: string, preserveSelection?: boolean): void;
 	setFile(file: TFile | null): void;
@@ -472,6 +478,16 @@ class RichEditor implements JournalEditor {
 		return this.readValue() ?? "";
 	}
 
+	getSelectionRange(): TextSelection | null {
+		const range = this.instance?.editor?.cm?.state?.selection.main;
+		return range ? { anchor: range.anchor, head: range.head } : null;
+	}
+
+	setSelectionRange(selection: TextSelection): void {
+		this.instance?.editor?.cm?.dispatch?.({ selection });
+		this.dropScrollRequest();
+	}
+
 	setValue(value: string, preserveSelection = false): void {
 		try {
 			// Obsidian's non-clearing path applies the smallest document change,
@@ -681,6 +697,15 @@ class PlainEditor implements JournalEditor {
 
 	getValue(): string {
 		return this.textarea.value;
+	}
+
+	getSelectionRange(): TextSelection {
+		const { selectionStart: start, selectionEnd: end, selectionDirection } = this.textarea;
+		return selectionDirection === "backward" ? { anchor: end, head: start } : { anchor: start, head: end };
+	}
+
+	setSelectionRange({ anchor, head }: TextSelection): void {
+		this.textarea.setSelectionRange(Math.min(anchor, head), Math.max(anchor, head), head < anchor ? "backward" : "forward");
 	}
 
 	setValue(value: string, preserveSelection = false): void {

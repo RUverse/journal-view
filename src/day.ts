@@ -20,6 +20,7 @@ import { SaveQueue } from "./saveQueue";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 import { listenForReaderScrollIntent } from "./readerInput";
+import { completedTasksPlugin, reorderCompletedTasks } from "./completedTasks";
 
 /**
  * Frames a cursor placed at the end of a day is kept on screen for, long
@@ -301,6 +302,7 @@ export class DaySection {
 	private bodyEl: HTMLElement;
 
 	private editor: JournalEditor | null = null;
+	private completedTasksPending = false;
 	private previewComponent: Component | null = null;
 	private destroyed = false;
 	/**
@@ -1641,6 +1643,7 @@ export class DaySection {
 						this.releaseHeight();
 					},
 					onChange: () => {
+						if (this.editor && this.isDirty) this.completedTasksPending = true;
 						this.releaseHeight();
 						this.updateBlankState();
 						this.scheduleSave();
@@ -1740,6 +1743,7 @@ export class DaySection {
 		this.el.removeClass("journal-day-focused");
 		// Leaving a day the reader only looked at costs them nothing.
 		if (this.withdrawTemplate()) return;
+		if (completedTasksPlugin(this.host.app)?.settings.reorderOnTabChange) this.sortCompletedTasks();
 		void this.flush().finally(() => {
 			if (!this.destroyed) this.host.onDayFocusChanged(this);
 		});
@@ -1876,6 +1880,20 @@ export class DaySection {
 	}
 
 	/* ---------------------------------------------------------------- saving */
+
+	sortCompletedTasks(force = false): boolean {
+		if (this.destroyed || !this.editor || !this.file || ("saveConflict" in this && this.saveConflict === true) || this.externalReloadPending) return false;
+		if (!force && !this.completedTasksPending) return false;
+		const before = this.editor.getValue();
+		if (!reorderCompletedTasks(this.host.app, this.file, this.editor)) return false;
+		this.completedTasksPending = false;
+		if (this.editor.getValue() !== before) {
+			this.updateBlankState();
+			this.host.onDayContentChanged(this);
+			void this.flush();
+		}
+		return true;
+	}
 
 	private scheduleSave(): void {
 		window.clearTimeout(this.saveTimer);

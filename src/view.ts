@@ -15,6 +15,7 @@ import type { FindRange } from "./findText";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { listenForReaderScrollIntent } from "./readerInput";
+import { completedTasksPlugin } from "./completedTasks";
 
 export const VIEW_TYPE_JOURNAL = "journal-view";
 
@@ -90,6 +91,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private endPendingFocusCenter: (() => void) | null = null;
 	/** Delayed editor focus used only by the initial open on today. */
 	private initialFocusTimer = 0;
+	private lastTaskSort = Date.now();
+	private lastEditedDay: DaySection | null = null;
 	/** Cursor placement requested while the pane still had no measurable height. */
 	private focusOnFirstResizeAtEnd: boolean | null = null;
 	/** Command target kept visible only until its editor receives focus. */
@@ -189,6 +192,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerDomEvent(window, "pointerup", () => (this.pointerHeld = false), { passive: true });
 		this.registerDomEvent(this.containerEl, "keydown", (event) => this.onKeydown(event), { capture: true });
 		this.registerVaultEvents();
+		this.registerInterval(window.setInterval(() => {
+			if (this.app.workspace.getActiveViewOfType(JournalView) !== this) return;
+			const interval = completedTasksPlugin(this.app)?.settings.intervalSeconds ?? 0;
+			if (!Number.isFinite(interval) || interval <= 0 || Date.now() - this.lastTaskSort < interval * 1000) return;
+			this.lastTaskSort = Date.now();
+			const day = this.sections.find((section) => section.hasFocus) ?? this.lastEditedDay;
+			day?.sortCompletedTasks();
+		}, 500));
 
 		const initialTarget = this.initialTarget;
 		this.initialTarget = undefined;
@@ -1293,7 +1304,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.syncDateSeparators();
 	}
 
-	onDayContentChanged(_day: DaySection): void {
+	onDayContentChanged(day: DaySection): void {
+		if (day.hasFocus) this.lastEditedDay = day;
 		this.find?.sectionsChanged();
 	}
 

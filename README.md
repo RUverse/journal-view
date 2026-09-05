@@ -79,6 +79,13 @@ Yesterday and tomorrow are shown while focused even when the note-only toggle or
 would normally hide them. All three commands scroll when the target is nearby and snap when it is
 more than two view heights away.
 
+## Completed Tasks
+
+When Completed Tasks is enabled, its sorting rules also apply inside the active journal entry.
+Its interval, task statuses, priorities, ignored words, and `completedTasks: false` setting are
+respected. An interval of zero disables automatic sorting. Reorder on tab change also sorts an
+edited entry when you leave it. Neither plugin modifies the other plugin's files or settings.
+
 ## Privacy
 
 Journal View works locally with files in your Obsidian vault. It does not make network requests,
