@@ -63,6 +63,34 @@ all includes. The funnel uses the accent color whenever a tag or property filter
 note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, and **Find in
 journal** searches only the notes currently included.
 
+## Statistics
+
+Choose **Statistics** in the journal pane's top-right **More options** menu, or
+run **Journal View: Statistics** from the command palette. A separate tab shows
+the current year as a mosaic of daily notes. Use the arrows or enter a year to
+explore another year; **This year** returns to the current one.
+
+Each square represents one day. Missing notes are empty, and existing notes with
+zero words have an outline. The four color levels represent **1–299**, **300–799**,
+**800–1,999**, and **2,000+** words. Hover or select a day to see its date and count,
+then choose **Open in journal** to visit an existing entry. Arrow keys move between
+days; Home and End move to the first and last day of the year. Narrow panes scroll
+horizontally to keep the tiles readable.
+
+Statistics include all daily notes from your configured folder and date format,
+regardless of journal filters. Counts use the saved Markdown body, excluding YAML
+properties: each whitespace-separated token containing a letter or number counts
+as a word. Headings, code, links, and template text can contribute; embedded notes
+are not expanded. Languages without spaces are not segmented into individual
+words. The colors show the note's current length, not words written on that date.
+Changes appear after the note is saved.
+
+Only existing notes in the selected year are read, with two reads at a time and
+progressive updates. A bounded memory cache keeps counts for recently visited
+years; closing Obsidian clears it. Missing notes, counts still loading, and read
+failures have distinct appearances. Large individual notes may take longer to
+count, but counting yields periodically so year navigation remains available.
+
 ## Startup
 
 Journal View is a custom view, so the Homepage plugin cannot select it as a homepage note. Enable

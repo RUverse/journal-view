@@ -240,6 +240,39 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 5. **A template that cannot be read.** Point `daily-notes.json` at a missing file:
    the day stays empty, a warning is logged, and `dev:errors` stays clean.
 
+## Statistics checks
+
+Open the journal's **More options** menu and choose **Statistics**, or run:
+
+```bash
+obsidian vault=test-vault command id=journal-view:statistics
+```
+
+- Check a normal year and a leap year: 365 and 366 tiles, including February 29.
+  Change years using both arrows and the number field, then use **This year**.
+- Create notes with 0, 1, 299, 300, 799, 800, 1999, and 2000 body words. Verify
+  their labels and color levels, and that YAML properties do not add words.
+  An empty note must differ from a missing note, including in the legend.
+- Save an edit, create a note, rename it to another day, and delete it. Only the
+  affected note should need a new content read. Repeat with a folder rename and
+  with changes to the configured daily-note folder and date format.
+- With focus emulation enabled, focus a tile and use arrows, Home, and End.
+  Select a day and choose **Open in journal**. Check a date hidden by timeline
+  filters too; Statistics includes all configured daily notes.
+- Switch years repeatedly during loading and close the tab while it is reading.
+  Old results must not paint into the new year. Simulate a failed read and an
+  edit arriving during a read; failures must not appear as missing or empty notes.
+- Inspect light and dark themes and a narrow pane. Tiles should retain their
+  colors, the legend should wrap, and the grid should scroll horizontally.
+
+For performance checks, generate large fixtures only in this throwaway vault.
+Let Obsidian finish its own initial indexing before timing Statistics. Compare
+the first visit to a year with a cached revisit; count `vault.cachedRead` calls
+and record which paths they touch. A complete leap year should require at most
+366 initial reads, no unrelated note reads, and no reads on an unchanged cached
+revisit. Also measure year-switch latency with multi-megabyte daily notes and
+confirm that the cache stays bounded after visiting more than six full years.
+
 ## Resetting
 
 ```bash
