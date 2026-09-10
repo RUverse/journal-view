@@ -71,8 +71,8 @@ the current year as a mosaic of daily notes. Use the arrows or enter a year to
 explore another year; **This year** returns to the current one.
 
 Each square represents one day. Missing notes are empty, and existing notes with
-zero words have an outline. The four color levels represent **1–299**, **300–799**,
-**800–1,999**, and **2,000+** words. Hover or select a day to see its date and count,
+zero words have an outline. The four color levels represent **1–149**, **150–399**,
+**400–999**, and **1,000+** words. Hover or select a day to see its date and count,
 then choose **Open in journal** to visit an existing entry. Arrow keys move between
 days; Home and End move to the first and last day of the year. Narrow panes scroll
 horizontally to keep the tiles readable.

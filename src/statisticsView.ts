@@ -41,9 +41,11 @@ export class StatisticsView extends ItemView {
 	async setState(state: unknown, result: ViewStateResult): Promise<void> {
 		if (typeof state === "object" && state !== null && "year" in state) {
 			const year = state.year;
-			if (typeof year === "number" && Number.isInteger(year) && year >= 1 && year <= 9999) this.year = year;
+			if (typeof year === "number" && Number.isInteger(year) && year >= 1 && year <= 9999 && year !== this.year) {
+				this.year = year;
+				if (!this.closed) this.renderYear();
+			}
 		}
-		if (!this.closed) this.renderYear();
 		await super.setState(state, result);
 	}
 
@@ -51,7 +53,8 @@ export class StatisticsView extends ItemView {
 		this.closed = false;
 		this.contentEl.empty();
 		this.contentEl.addClass("journal-statistics");
-		const header = this.contentEl.createDiv({ cls: "journal-statistics-header" });
+		const page = this.contentEl.createDiv({ cls: "journal-statistics-page" });
+		const header = page.createDiv({ cls: "journal-statistics-header" });
 		const heading = header.createDiv();
 		heading.createEl("h2", { text: "Your year in words" });
 		heading.createEl("p", { text: "A day at a time, a journal takes shape." });
@@ -69,11 +72,11 @@ export class StatisticsView extends ItemView {
 		this.registerDomEvent(today, "click", () => this.changeYear(Number(createMoment().format("YYYY"))));
 		this.registerDomEvent(this.yearInput, "change", () => this.changeYear(Number(this.yearInput.value)));
 
-		const card = this.contentEl.createDiv({ cls: "journal-statistics-card" });
+		const card = page.createDiv({ cls: "journal-statistics-card" });
 		const scroller = card.createDiv({ cls: "journal-statistics-scroll" });
 		this.grid = scroller.createDiv({ cls: "journal-statistics-grid", attr: { role: "group", "aria-label": "Daily note word counts" } });
 		const legend = card.createDiv({ cls: "journal-statistics-legend" });
-		for (const [level, label] of ["No note", "0 words", "1–299", "300–799", "800–1,999", "2,000+"].entries()) {
+		for (const [level, label] of ["No note", "0 words", "1–149", "150–399", "400–999", "1,000+"].entries()) {
 			const item = legend.createSpan();
 			item.createSpan({ cls: `journal-statistics-swatch ${level === 0 ? "is-missing" : `level-${level - 1}`}`, attr: { "aria-hidden": "true" } });
 			item.createSpan({ text: label });
@@ -90,10 +93,6 @@ export class StatisticsView extends ItemView {
 				console.error("Journal View: could not open statistics entry", error);
 				new Notice("Could not open this journal entry.");
 			});
-		});
-		this.contentEl.createEl("p", {
-			cls: "journal-statistics-note",
-			text: "All daily notes · saved word counts · properties excluded. Colors show the current length of each note, including headings and template text. Journal filters do not apply.",
 		});
 		this.register(this.plugin.statistics.subscribe((paths, folder) => {
 			const relevant = folder

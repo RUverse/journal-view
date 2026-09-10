@@ -13,7 +13,7 @@ interface CountCache {
 export type NoteStatistics = { status: "ready"; words: number } | { status: "error" };
 
 export function wordCountLevel(words: number): number {
-	return words === 0 ? 0 : words < 300 ? 1 : words < 800 ? 2 : words < 2000 ? 3 : 4;
+	return words === 0 ? 0 : words < 150 ? 1 : words < 400 ? 2 : words < 1000 ? 3 : 4;
 }
 
 /** Count whitespace-separated body tokens containing a letter or number.
@@ -114,11 +114,10 @@ export class JournalStatistics extends Component {
 			if (cached) return cached;
 			const path = file.path;
 			const { mtime, size } = file.stat;
-			const revisions = this.revisions;
-			const revision = revisions.get(file) ?? 0;
-			revisions.set(file, revision);
-			const unchanged = () => !this.closed && current() && this.revisions === revisions &&
-				(revisions.get(file) ?? 0) === revision && file.path === path &&
+			const revision = this.revisions.get(file) ?? 0;
+			this.revisions.set(file, revision);
+			const unchanged = () => !this.closed && current() &&
+				(this.revisions.get(file) ?? 0) === revision && file.path === path &&
 				file.stat.mtime === mtime && file.stat.size === size &&
 				this.app.vault.getAbstractFileByPath(path) === file;
 			const content = await this.app.vault.cachedRead(file);

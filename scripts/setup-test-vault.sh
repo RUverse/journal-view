@@ -250,7 +250,7 @@ obsidian vault=test-vault command id=journal-view:statistics
 
 - Check a normal year and a leap year: 365 and 366 tiles, including February 29.
   Change years using both arrows and the number field, then use **This year**.
-- Create notes with 0, 1, 299, 300, 799, 800, 1999, and 2000 body words. Verify
+- Create notes with 0, 1, 149, 150, 399, 400, 999, and 1000 body words. Verify
   their labels and color levels, and that YAML properties do not add words.
   An empty note must differ from a missing note, including in the legend.
 - Save an edit, create a note, rename it to another day, and delete it. Only the

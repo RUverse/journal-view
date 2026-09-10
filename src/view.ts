@@ -165,7 +165,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	onPaneMenu(menu: Menu, source: string): void {
 		super.onPaneMenu(menu, source);
 		menu.addItem((item) => item.setTitle("Statistics").setIcon("chart-no-axes-column-increasing")
-			.onClick(() => this.plugin.openStatistics()));
+			.onClick(() => void this.plugin.openStatistics().catch((error: unknown) => {
+				console.error("Journal View: could not open statistics", error);
+				new Notice("Could not open statistics.");
+			})));
 	}
 
 	/* ----------------------------------------------------------- lifecycle */

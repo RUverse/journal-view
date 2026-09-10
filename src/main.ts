@@ -199,8 +199,11 @@ export default class JournalViewPlugin extends Plugin {
 
 	async openStatistics(): Promise<void> {
 		const workspace = this.app.workspace;
-		const leaf = workspace.getLeavesOfType(VIEW_TYPE_STATISTICS)[0] ?? workspace.getLeaf(true);
-		await leaf.setViewState({ type: VIEW_TYPE_STATISTICS, active: true });
+		let leaf = workspace.getLeavesOfType(VIEW_TYPE_STATISTICS)[0];
+		if (!leaf) {
+			leaf = workspace.getLeaf(true);
+			await leaf.setViewState({ type: VIEW_TYPE_STATISTICS, active: true });
+		}
 		await workspace.revealLeaf(leaf);
 	}
 
