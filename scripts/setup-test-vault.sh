@@ -240,6 +240,31 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 5. **A template that cannot be read.** Point `daily-notes.json` at a missing file:
    the day stays empty, a warning is logged, and `dev:errors` stays clean.
 
+## Frontmatter preservation checks
+
+Keep a daily note open in a regular Markdown tab and in Journal View. Test both
+a single property (`color: red`) and a YAML list such as:
+
+```yaml
+---
+coordinates:
+  - "92.971035"
+  - "-185.510906"
+icon: map-pin
+color: red
+---
+```
+
+- Focus the day's journal editor without typing, switch to the regular note
+  tab, and close that tab. Check the file on disk: its frontmatter and body
+  should be unchanged.
+- Repeat with a body edit in Journal View, and then with an edit in the regular
+  note tab. Both edits should save while preserving the frontmatter.
+- Repeat the preservation checks with Word Count disabled and with the
+  plain-text editor.
+- With the rich editor and Word Count enabled, check that the count still
+  follows focus, typing, and selections in the journal.
+
 ## Statistics checks
 
 Open the journal's **More options** menu and choose **Statistics**, or run:

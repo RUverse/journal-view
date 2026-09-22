@@ -260,22 +260,15 @@ function notifyFileOpen(workspace: WorkspaceEditorHost, file: TFile | null): voi
 }
 
 /**
- * Publishes the focused editor's in-memory text to Word Count. Existing notes
- * use the same workspace event as a native Markdown view. A day without a file
- * cannot: `getActiveFile()` falls back to the last real file, so Word Count
- * rejects a null preview and retains that file's count. Calling its guarded
- * preview handler directly is the only way to represent the unsaved editor
- * without broadcasting an empty preview for an unrelated file.
+ * Publishes the focused editor's in-memory text directly to Word Count. Journal
+ * editors contain only the body: broadcasting it through `quick-preview` makes
+ * other open Markdown views replace their complete content, losing frontmatter
+ * when those views save. Keep this partial content local to the count handler.
  */
 function publishWorkspaceContent(app: App, owner: ActiveEditorOwner, content: string): void {
 	try {
 		const workspace = app.workspace as unknown as WorkspaceEditorHost;
 		if (workspace.activeEditor !== owner) return;
-		if (owner.file) {
-			workspace.trigger("quick-preview", owner.file, content);
-			return;
-		}
-
 		const internalPlugins = app.internalPlugins as unknown as InternalPluginHost | undefined;
 		const plugin = internalPlugins?.getPluginById("word-count");
 		const instance = plugin?.instance;
@@ -283,6 +276,7 @@ function publishWorkspaceContent(app: App, owner: ActiveEditorOwner, content: st
 		plugin.statusBarEl?.toggle?.(true);
 		// The handler strips frontmatter and Markdown syntax before counting. Its
 		// file argument is only an identity check against the current active file.
+		// For a day without a file, getActiveFile() can still return the last file.
 		instance.onQuickPreview(workspace.getActiveFile(), content);
 	} catch (error) {
 		console.warn("Journal View: could not publish the active editor content", error);
