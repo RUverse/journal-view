@@ -76,9 +76,9 @@ export class StatisticsView extends ItemView {
 		const scroller = card.createDiv({ cls: "journal-statistics-scroll" });
 		this.grid = scroller.createDiv({ cls: "journal-statistics-grid", attr: { role: "group", "aria-label": "Daily note word counts" } });
 		const legend = card.createDiv({ cls: "journal-statistics-legend" });
-		for (const [level, label] of ["No note", "0 words", "1–149", "150–399", "400–999", "1,000+"].entries()) {
+		for (const [level, label] of ["No note / 0 words", "1–149", "150–399", "400–999", "1,000+"].entries()) {
 			const item = legend.createSpan();
-			item.createSpan({ cls: `journal-statistics-swatch ${level === 0 ? "is-missing" : `level-${level - 1}`}`, attr: { "aria-hidden": "true" } });
+			item.createSpan({ cls: `journal-statistics-swatch level-${level}`, attr: { "aria-hidden": "true" } });
 			item.createSpan({ text: label });
 		}
 		this.status = card.createDiv({ cls: "journal-statistics-status", attr: { role: "status" } });
