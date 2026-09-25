@@ -14,6 +14,8 @@ export interface JournalEditorOptions {
 	placeholder: string;
 	/** The note being edited, when it already exists. Used for link resolution. */
 	file: TFile | null;
+	/** Rebuilds the complete note, frontmatter included, around the editor's body. */
+	noteContent: (body: string) => string;
 	onChange: () => void;
 	/** Called after the editor has completed its first real layout pass. */
 	onReady: () => void;
@@ -260,23 +262,41 @@ function notifyFileOpen(workspace: WorkspaceEditorHost, file: TFile | null): voi
 }
 
 /**
- * Publishes the focused editor's in-memory text directly to Word Count. Journal
- * editors contain only the body: broadcasting it through `quick-preview` makes
- * other open Markdown views replace their complete content, losing frontmatter
- * when those views save. Keep this partial content local to the count handler.
+ * Publishes the focused editor's in-memory text. Edits to an existing note use
+ * the same workspace event as a native Markdown view, which other open views of
+ * the file adopt as their complete content: `read` must therefore return the
+ * whole note, frontmatter included, or those views lose it when they save.
+ *
+ * Focus and cursor moves change nothing another view needs, and broadcasting
+ * then would overwrite a view's unsaved edits, so they only refresh Word Count
+ * through its guarded preview handler. A day without a file always does:
+ * `getActiveFile()` falls back to the last real file, so Word Count rejects a
+ * null preview and retains that file's count.
  */
-function publishWorkspaceContent(app: App, owner: ActiveEditorOwner, content: string): void {
+function publishWorkspaceContent(
+	app: App,
+	owner: ActiveEditorOwner,
+	read: () => string | null,
+	changed: boolean,
+): void {
 	try {
 		const workspace = app.workspace as unknown as WorkspaceEditorHost;
 		if (workspace.activeEditor !== owner) return;
+		if (changed && owner.file) {
+			const content = read();
+			if (content !== null) workspace.trigger("quick-preview", owner.file, content);
+			return;
+		}
+
 		const internalPlugins = app.internalPlugins as unknown as InternalPluginHost | undefined;
 		const plugin = internalPlugins?.getPluginById("word-count");
 		const instance = plugin?.instance;
 		if (!plugin?.enabled || typeof instance?.onQuickPreview !== "function") return;
+		const content = read();
+		if (content === null) return;
 		plugin.statusBarEl?.toggle?.(true);
 		// The handler strips frontmatter and Markdown syntax before counting. Its
 		// file argument is only an identity check against the current active file.
-		// For a day without a file, getActiveFile() can still return the last file.
 		instance.onQuickPreview(workspace.getActiveFile(), content);
 	} catch (error) {
 		console.warn("Journal View: could not publish the active editor content", error);
@@ -374,7 +394,7 @@ class RichEditor implements JournalEditor {
 			// the selection is empty. A journal is not a file view, so republish
 			// this day's text after both edits and collapsed-cursor moves. Leave a
 			// real selection alone: Word Count intentionally reports its count.
-			if (changed || update.selectionSet) this.scheduleWorkspaceContent();
+			if (changed || update.selectionSet) this.scheduleWorkspaceContent(changed);
 			if (changed) this.options.onChange();
 		};
 
@@ -405,23 +425,27 @@ class RichEditor implements JournalEditor {
 	}
 
 	/**
-	 * Publishes now, then once more after the file-open read and focus events
-	 * normally settle. A real selection keeps Obsidian's selection count.
+	 * Publishes now, then refreshes the count once more after the file-open read
+	 * and focus events normally settle. A real selection keeps Obsidian's
+	 * selection count.
 	 */
-	private scheduleWorkspaceContent(): void {
+	private scheduleWorkspaceContent(changed = false): void {
 		this.cancelWorkspaceContent();
 		if (this.owner.getSelection()) return;
-		this.publishCurrentContent();
+		this.publishCurrentContent(changed);
 		this.workspaceContentTimer = window.setTimeout(() => {
 			this.workspaceContentTimer = 0;
-			if (!this.destroyed) this.publishCurrentContent();
+			if (!this.destroyed) this.publishCurrentContent(false);
 		}, WORKSPACE_CONTENT_DELAY);
 	}
 
 	/** A failed internal read must not masquerade as an empty note. */
-	private publishCurrentContent(): void {
-		const content = this.readValue();
-		if (content !== null) publishWorkspaceContent(this.options.app, this.owner, content);
+	private publishCurrentContent(changed: boolean): void {
+		const read = () => {
+			const body = this.readValue();
+			return body === null ? null : this.options.noteContent(body);
+		};
+		publishWorkspaceContent(this.options.app, this.owner, read, changed);
 	}
 
 	private cancelWorkspaceContent(): void {
