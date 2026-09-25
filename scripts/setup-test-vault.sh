@@ -240,6 +240,64 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 5. **A template that cannot be read.** Point `daily-notes.json` at a missing file:
    the day stays empty, a warning is logged, and `dev:errors` stays clean.
 
+## Frontmatter preservation checks
+
+Keep a daily note open in a regular Markdown tab and in Journal View. Test both
+a single property (`color: red`) and a YAML list such as:
+
+```yaml
+---
+coordinates:
+  - "92.971035"
+  - "-185.510906"
+icon: map-pin
+color: red
+---
+```
+
+- Focus the day's journal editor without typing, switch to the regular note
+  tab, and close that tab. Check the file on disk: its frontmatter and body
+  should be unchanged.
+- Repeat with a body edit in Journal View, and then with an edit in the regular
+  note tab. Both edits should save while preserving the frontmatter.
+- Repeat the preservation checks with Word Count disabled and with the
+  plain-text editor.
+- With the rich editor and Word Count enabled, check that the count still
+  follows focus, typing, and selections in the journal.
+
+## Statistics checks
+
+Open the journal's **More options** menu and choose **Statistics**, or run:
+
+```bash
+obsidian vault=test-vault command id=journal-view:statistics
+```
+
+- Check a normal year and a leap year: 365 and 366 tiles, including February 29.
+  Change years using both arrows and the number field, then use **This year**.
+- Create notes with 0, 1, 149, 150, 399, 400, 999, and 1000 body words. Verify
+  their labels and color levels, and that YAML properties do not add words.
+  An empty note must differ from a missing note, including in the legend.
+- Save an edit, create a note, rename it to another day, and delete it. Only the
+  affected note should need a new content read. Repeat with a folder rename and
+  with changes to the configured daily-note folder and date format.
+- With focus emulation enabled, focus a tile and use arrows, Home, and End.
+  Select a day and choose **Open in journal**. Check a date hidden by timeline
+  filters too; Statistics includes all configured daily notes.
+- Switch years repeatedly during loading and close the tab while it is reading.
+  Old results must not paint into the new year. Simulate a failed read and an
+  edit arriving during a read; failures must not appear as missing or empty notes.
+- Inspect light and dark themes and a narrow pane. Tiles should retain their
+  colors, the legend should wrap, and the grid should scroll horizontally.
+
+For performance checks, generate large fixtures only in this throwaway vault.
+Let Obsidian finish its own initial indexing before timing Statistics. Compare
+the first visit to a year with a cached revisit; count `vault.cachedRead` calls
+and record which paths they touch. A complete leap year should require at most
+366 initial reads, no unrelated note reads, and no reads on an unchanged cached
+revisit. Also measure year-switch latency with multi-megabyte daily notes and
+confirm that the cache stays bounded after visiting more than six full years.
+
 ## Resetting
 
 ```bash

@@ -1636,6 +1636,7 @@ export class DaySection {
 					value: body,
 					placeholder,
 					file: this.file,
+					noteContent: (editorText) => replaceNoteBody(this.latestContent, editorText),
 					onReady: () => {
 						if (this.destroyed || token !== this.modeToken) return;
 						this.releaseHeight();
