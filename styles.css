@@ -1350,13 +1350,9 @@ button.journal-appearance-settings-link:hover {
 	cursor: pointer;
 }
 
-.journal-statistics .is-missing {
-	--journal-tile-color: var(--background-secondary);
-}
-
+.journal-statistics .is-missing,
 .journal-statistics .level-0 {
 	--journal-tile-color: var(--background-secondary);
-	border-color: var(--text-faint);
 }
 
 /* Levels 1-3 blend the accent over the pane background. Alpha blending is
