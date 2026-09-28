@@ -6,6 +6,7 @@ import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
+import { projectNoteBody } from "./noteProjection";
 
 const REMOTE_YIELD_EVERY = 12;
 
@@ -259,7 +260,8 @@ export class JournalFind {
 					console.warn(`Journal View: could not search ${file.path}`, error);
 					continue;
 				}
-				const body = content.slice(getFrontMatterInfo(content).contentStart);
+				const noteBody = content.slice(getFrontMatterInfo(content).contentStart);
+				const body = projectNoteBody(noteBody, this.host.plugin.settings.hideDailyNoteH1).editorBody;
 				if (findLiteralRanges(body, query, this.caseSensitive).length) {
 					await this.host.loadFindDate(date);
 					if (token !== this.scanToken || !this.open || query !== this.input.value) return;
