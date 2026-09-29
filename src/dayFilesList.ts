@@ -45,13 +45,16 @@ function count(amount: number, what: string): string {
 	return `${amount} ${amount === 1 ? what : `${what}s`}`;
 }
 
-/** "3 files created · 2 edited", or just one half when the day only has that. */
+/**
+ * "3 files created · 2 last edited", or just one half when the day only has
+ * that. A file only keeps its latest edit, so an edit is always its last.
+ */
 function summarize(files: readonly DayFile[]): string {
 	const created = files.filter((item) => item.kind === "created").length;
 	const edited = files.length - created;
 	if (!edited) return `${count(created, "file")} created`;
-	if (!created) return `${count(edited, "file")} edited`;
-	return `${count(created, "file")} created · ${edited} edited`;
+	if (!created) return `${count(edited, "file")} last edited`;
+	return `${count(created, "file")} created · ${edited} last edited`;
 }
 
 /** What the list at the bottom of a day needs from it. */
@@ -181,7 +184,7 @@ export class DayFilesList {
 		return row;
 	}
 
-	/** The time a file was created or edited, marked "edited" on a day that lists both. */
+	/** The time a file was created or last edited, marked "last edited" on a day that lists both. */
 	private drawWhen(row: Row, item: DayFile, mixed: boolean): void {
 		const minute = item.timed ? Math.floor(item.time / 60_000) : null;
 		const edited = mixed && item.kind === "edited";
@@ -189,7 +192,7 @@ export class DayFilesList {
 		row.minute = minute;
 		row.edited = edited;
 		row.whenEl.empty();
-		if (edited) row.whenEl.createSpan({ cls: "journal-day-file-kind", text: "edited" });
+		if (edited) row.whenEl.createSpan({ cls: "journal-day-file-kind", text: "last edited" });
 		if (item.timed) row.whenEl.appendText(createMoment(item.time).format("LT"));
 	}
 

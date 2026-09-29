@@ -76,7 +76,7 @@ export class AppearanceModal extends Modal {
 
 		const filesSetting = new Setting(this.contentEl)
 			.setName("Files from each day")
-			.setDesc("List the files created or edited on each day at the bottom of the day.")
+			.setDesc("List the files created or last edited on each day at the bottom of the day.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.showDayFiles).onChange((value) => {
 					this.plugin.settings.showDayFiles = value;

@@ -343,7 +343,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					{
 						name: "Show files from each day",
 						desc:
-							"List the files created or edited on each day at the bottom of the day, folded into " +
+							"List the files created or last edited on each day at the bottom of the day, folded into " +
 							"one line until you open it. Days that only have files appear in the journal too, " +
 							"unless an include filter is active.",
 						control: { type: "toggle", key: "showDayFiles" },
