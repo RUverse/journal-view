@@ -18,4 +18,13 @@ declare module "obsidian" {
 			embedByExtension: Record<string, (ctx: unknown, file: unknown, subpath: string) => unknown>;
 		};
 	}
+
+	interface MetadataCache {
+		/** True for a path matched by Settings -> Files and links -> Excluded files. */
+		isUserIgnored?(path: string): boolean;
+	}
+
+	interface Vault {
+		getConfig?(key: string): unknown;
+	}
 }

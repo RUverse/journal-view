@@ -1,15 +1,19 @@
 import { App, TFile, setTooltip } from "obsidian";
-import type { WorkspaceLeaf } from "obsidian";
+import type { HoverParent, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
+import { DayFilesHost, DayFilesList } from "./dayFilesList";
 import { EntryHost, NoteEntry } from "./entry";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 
-/** The bits of the journal view a day needs to talk to. */
-export interface DayHost {
+/** The bits of the journal view a day needs to talk to. Its page previews hang off the view. */
+export interface DayHost extends HoverParent {
 	app: App;
 	leaf: WorkspaceLeaf;
 	plugin: JournalViewPlugin;
+	/** Whether the reader left this day's list of files open. */
+	isFilesOpen(day: DaySection): boolean;
+	setFilesOpen(day: DaySection, open: boolean): void;
 	/** Called when one of a day's files appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
 	/** True when this date passes the journal's current visibility rules. */
@@ -35,9 +39,10 @@ export interface DayHost {
  * properties, saving and find state - lives in a `NoteEntry`.
  *
  * A day always holds at least one entry. With no note yet, that entry has no
- * file and stands in for the note the reader can start writing.
+ * file and stands in for the note the reader can start writing. Below its
+ * notes, a day can list the other files from that date.
  */
-export class DaySection implements EntryHost {
+export class DaySection implements EntryHost, DayFilesHost {
 	readonly el: HTMLElement;
 	readonly key: string;
 	/** The notes shown under this date, in order. */
@@ -52,6 +57,8 @@ export class DaySection implements EntryHost {
 	private noteLabelEl: HTMLElement;
 	private actionsEl: HTMLElement;
 	private entriesEl: HTMLElement;
+	/** The files from this date, while the journal lists them. */
+	private files: DayFilesList | null;
 	private destroyed = false;
 	/** Set while entries are reconciled, which refreshes the day once at the end. */
 	private syncing = false;
@@ -99,6 +106,7 @@ export class DaySection implements EntryHost {
 		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 		this.entriesEl = this.cardEl.createDiv({ cls: "journal-day-entries" });
+		this.files = this.host.plugin.settings.showDayFiles ? new DayFilesList(this, this.cardEl) : null;
 
 		this.el.addEventListener("focusout", () => {
 			// Focus often moves between the editor and metadata controls inside the
@@ -110,10 +118,15 @@ export class DaySection implements EntryHost {
 		});
 
 		this.syncEntries();
+		this.refreshFiles();
 	}
 
 	get app(): App {
 		return this.host.app;
+	}
+
+	get hoverParent(): HoverParent {
+		return this.host;
 	}
 
 	get leaf(): WorkspaceLeaf {
@@ -382,6 +395,19 @@ export class DaySection implements EntryHost {
 	/** Repaints every entry's metadata strip from its latest content. */
 	refreshMetadata(): void {
 		for (const entry of this.entries) entry.refreshMetadata();
+	}
+
+	/** Lists the files from this date again, after they changed. */
+	refreshFiles(): void {
+		this.files?.update(this.host.plugin.dayFiles.filesFor(this.key));
+	}
+
+	isFilesOpen(): boolean {
+		return this.host.isFilesOpen(this);
+	}
+
+	setFilesOpen(open: boolean): void {
+		this.host.setFilesOpen(this, open);
 	}
 
 	/**

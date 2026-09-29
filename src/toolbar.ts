@@ -5,7 +5,7 @@ import { ItemView, Platform, setIcon, setTooltip } from "obsidian";
  * element empty for a name its Lucide version does not have, which would show
  * as an invisible button; each name is tried until one draws.
  */
-function applyIcon(el: HTMLElement, ...names: string[]): void {
+export function applyIcon(el: HTMLElement, ...names: string[]): void {
 	for (const name of names) {
 		setIcon(el, name);
 		if (el.querySelector("svg")) return;

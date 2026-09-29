@@ -61,6 +61,8 @@ Two traps, both of which look exactly like the feature being broken:
 - `src/view.ts` / `src/day.ts`: timeline virtualization and per-day UI
 - `src/entry.ts`: one note inside a day - editor or preview, properties, saving
 - `src/dailyNotes.ts` / `src/noteIndex.ts`: note resolution and indexing
+- `src/dayFiles.ts` / `src/dayFilesList.ts`: the other files from each day, and
+  the list of them at the bottom of a day
 - `src/editor.ts` / `src/saveQueue.ts`: editing and durable writes
 
 The view delegates to four collaborators, each holding the view through a small

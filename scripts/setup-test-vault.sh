@@ -13,7 +13,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 vault="$root/test-vault"
 
-mkdir -p "$vault/.obsidian/plugins" "$vault/Journal" "$vault/Templates"
+mkdir -p "$vault/.obsidian/plugins" "$vault/Journal" "$vault/Templates" "$vault/Reading" "$vault/Projects"
 
 # The build artifacts are links into the repository, so the vault always loads
 # whatever `npm run build` last produced - there is nothing to copy after a
@@ -146,6 +146,19 @@ tags:
 ## Notes
 MARKDOWN
 
+# Files that are not daily notes, for Files from each day. The article carries
+# the date it was written in a property, which falls on a day without a note.
+write Reading/Article.md <<'MARKDOWN'
+---
+created: 2026-08-01T09:30
+---
+An article saved on a day without a daily note.
+MARKDOWN
+
+write Projects/Board.canvas <<'JSON'
+{"nodes":[],"edges":[]}
+JSON
+
 write_managed README-TESTING.md <<'MARKDOWN'
 # Journal View test vault
 
@@ -257,6 +270,19 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 4. **A day that already has a note.** No template offered; content untouched.
 5. **A template that cannot be read.** Point `daily-notes.json` at a missing file:
    the day stays empty, a warning is logged, and `dev:errors` stays clean.
+
+## Files from each day checks
+
+`Reading/Article.md` and `Projects/Board.canvas` are ordinary files, not daily
+notes. Turn on **Files from each day** in the toolbar's Customization menu.
+
+1. **Today's list.** Both files sit under the day they were created, folded into
+   one line. Opening the list shows them; folding it leaves only the count.
+2. **A created date property.** Set **Created date property** to `created`. The
+   article moves to the day in its property, 1 August.
+3. **Live changes.** Create, rename and delete a file while its day is loaded.
+   A folded list only changes its count; the day's height stays the same.
+4. **Opening.** Select, Ctrl-select and right-click a file; Ctrl-hover previews it.
 
 ## Frontmatter preservation checks
 

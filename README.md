@@ -22,6 +22,8 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
   from any day.
 - **Focus the timeline.** Filter daily notes by tags or exact property values, with include and
   exclude rules that also carry through to calendar navigation and journal search.
+- **See what else each day held.** Optionally list the files you created or edited on each day at
+  the bottom of that day, as links that stay out of the way until you open them.
 - **Stay responsive across years of notes.** Journal View keeps the days around you ready to edit
   while efficiently handling the rest of your timeline.
 
@@ -44,6 +46,7 @@ Some Customization is only visible in the customization menu accessible from the
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |
 | Open journal on startup | Off | Opens or reveals Journal View after Obsidian restores the workspace |
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |
+| Show files from each day | Off | Lists the files created or edited on each day at the bottom of the day; see [Files from each day](#files-from-each-day) |
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
@@ -61,6 +64,31 @@ A day can hold more than one note in two ways, and Journal View shows all of the
 Notes are ordered by their time, then by name, with the plain-date note first. The first note sits
 directly under the day's header, which shows its time or the text after its date; each further note
 gets a divider with its own label and its own open and delete buttons.
+
+## Files from each day
+
+Turn on **Files from each day** in the customization menu, or **Show files from each day** in
+**Settings → Journal View**, to list the other files from each day at the bottom of that day. The
+list starts folded into one line, such as `3 files created · 2 edited`; select it to see the files.
+
+- Select a file to open it, or Ctrl/Cmd-select it to open it in a new tab.
+- Hold Ctrl/Cmd while hovering a file to preview it. **Page preview** settings list it as
+  *Journal files*, where the preview can be set to appear without the key.
+- Right-click a file for Obsidian's file menu, where you can move or delete it.
+
+Notes, canvases, and bases are listed. Daily notes, templates, and files matched by Obsidian's
+**Excluded files** setting are always left out.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Date | Created | Lists a file on the day it was created, on the day it was last edited, or on both |
+| Created date property | Empty | Reads a note's created date from this property, such as `created`, instead of the file's own date |
+| Include attachments | Off | Also lists images, PDFs, and other files |
+| Excluded folders | Empty | Leaves out the files in these folders, separated by commas |
+
+A file only keeps the date it was last edited, so **Last edited** moves it to the latest day it
+changed. File dates can also be reset when a vault is synced, copied, or checked out with git; a
+**Created date property** keeps notes on the day they were written.
 
 ## Filters
 

@@ -4,15 +4,45 @@ import { createMoment } from "./moment";
 
 export const DAY_KEY_FORMAT = "YYYY-MM-DD";
 
-/** Chronologically ordered set of daily-note keys used by walkers and navigation. */
-export interface OrderedDayIndex {
-	readonly version: number;
+/** Days in date order, which the walker and the calendar step through. */
+export interface DaySequence {
 	has(key: string): boolean;
-	readonly size: number;
 	range(): { first: string; last: string } | null;
+	/** The first day strictly after `key`. */
 	next(key: string): string | null;
+	/** The last day strictly before `key`. */
 	prev(key: string): string | null;
+}
+
+/** Chronologically ordered set of daily-note keys used by walkers and navigation. */
+export interface OrderedDayIndex extends DaySequence {
+	readonly version: number;
+	readonly size: number;
 	keysFrom(key: string, direction: -1 | 1): string[];
+}
+
+/** The first of the sorted `keys` strictly after `key`. */
+export function keyAfter(keys: readonly string[], key: string): string | null {
+	let low = 0;
+	let high = keys.length;
+	while (low < high) {
+		const mid = (low + high) >> 1;
+		if (keys[mid] <= key) low = mid + 1;
+		else high = mid;
+	}
+	return low < keys.length ? keys[low] : null;
+}
+
+/** The last of the sorted `keys` strictly before `key`. */
+export function keyBefore(keys: readonly string[], key: string): string | null {
+	let low = 0;
+	let high = keys.length;
+	while (low < high) {
+		const mid = (low + high) >> 1;
+		if (keys[mid] < key) low = mid + 1;
+		else high = mid;
+	}
+	return low > 0 ? keys[low - 1] : null;
 }
 
 /** Where a path sits in the journal: the day it belongs to, and when in that day. */
@@ -229,28 +259,12 @@ export class DailyNoteIndex implements OrderedDayIndex {
 
 	/** The first day with a note strictly after `key`. */
 	next(key: string): string | null {
-		const list = this.list();
-		let low = 0;
-		let high = list.length;
-		while (low < high) {
-			const mid = (low + high) >> 1;
-			if (list[mid] <= key) low = mid + 1;
-			else high = mid;
-		}
-		return low < list.length ? list[low] : null;
+		return keyAfter(this.list(), key);
 	}
 
 	/** The last day with a note strictly before `key`. */
 	prev(key: string): string | null {
-		const list = this.list();
-		let low = 0;
-		let high = list.length;
-		while (low < high) {
-			const mid = (low + high) >> 1;
-			if (list[mid] < key) low = mid + 1;
-			else high = mid;
-		}
-		return low > 0 ? list[low - 1] : null;
+		return keyBefore(this.list(), key);
 	}
 
 	/**

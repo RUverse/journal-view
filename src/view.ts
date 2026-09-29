@@ -1,4 +1,5 @@
 import { ItemView, Menu, Notice, Scope, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import type { HoverPopover } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { AnchorHost, START_GUTTER, ScrollAnchor } from "./anchor";
 import { AppearanceModal } from "./appearance";
@@ -61,6 +62,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	scrollEl!: HTMLElement;
 	daysEl!: HTMLElement;
 	sections: DaySection[] = [];
+	/** The page preview of a hovered file from a day's list. */
+	hoverPopover: HoverPopover | null = null;
 
 	private toolbar?: JournalToolbar;
 	private find?: JournalFind;
@@ -76,6 +79,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	/** Every path a loaded day shows or will create, to the day it belongs to. */
 	private byPath = new Map<string, DaySection>();
+	/** Days whose list of files the reader opened, kept while days are trimmed and rebuilt. */
+	private openFileLists = new Set<string>();
+	/** Days whose files changed since the last frame; null when every day's may have. */
+	private changedFileDays: Set<string> | null = new Set();
+	private fileDaysFrame = 0;
 	private today: Moment = createMoment().startOf("day");
 	private resizeObserver: ResizeObserver | null = null;
 	private scrollFrame = 0;
@@ -127,6 +135,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private configSignature = "";
 	private indexVersion = -1;
 	private filteredIndexVersion = -1;
+	private dayFilesVersion = -1;
 	private initialTarget?: { date: Moment; focusAtEnd: boolean; revealThroughFilters: boolean; path?: string };
 
 	constructor(
@@ -204,6 +213,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerDomEvent(window, "pointerup", () => (this.pointerHeld = false), { passive: true });
 		this.registerDomEvent(this.containerEl, "keydown", (event) => this.onKeydown(event), { capture: true });
 		this.registerVaultEvents();
+		this.register(this.plugin.dayFiles.onChanged((keys) => this.onDayFilesChanged(keys)));
 
 		const initialTarget = this.initialTarget;
 		this.initialTarget = undefined;
@@ -240,6 +250,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.scrollFrame = 0;
 		if (this.animFrame) window.cancelAnimationFrame(this.animFrame);
 		this.animFrame = 0;
+		if (this.fileDaysFrame) window.cancelAnimationFrame(this.fileDaysFrame);
+		this.fileDaysFrame = 0;
+		this.changedFileDays = new Set();
 		this.clearPendingFocusCenter();
 		window.clearTimeout(this.initialFocusTimer);
 		this.initialFocusTimer = 0;
@@ -274,8 +287,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.configSignature = JSON.stringify(this.plugin.daily.config());
 		this.plugin.index.ensureCurrent();
 		this.plugin.filteredIndex.ensureCurrent();
+		this.plugin.dayFiles.ensureCurrent();
 		this.indexVersion = this.plugin.index.version;
 		this.filteredIndexVersion = this.plugin.filteredIndex.version;
+		this.dayFilesVersion = this.plugin.dayFiles.version;
 		this.walker = new DayWalker(
 			this.today,
 			this.plugin.index,
@@ -342,6 +357,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.appliedMaxLoadedDays = maxLoadedDays;
 
 		this.ready = true;
+		// Files that changed while the days were being read.
+		this.scheduleRelist();
 		if (this.scrollEl.clientHeight > 0) {
 			// Only now is it known whether days can still arrive above the first
 			// one, which is what decides the spacer's resting height.
@@ -1320,12 +1337,60 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private syncWithIndex(): boolean {
 		const changed =
 			this.plugin.index.version !== this.indexVersion ||
-			this.plugin.filteredIndex.version !== this.filteredIndexVersion;
+			this.plugin.filteredIndex.version !== this.filteredIndexVersion ||
+			this.plugin.dayFiles.version !== this.dayFilesVersion;
 		if (!changed) return false;
 		this.indexVersion = this.plugin.index.version;
 		this.filteredIndexVersion = this.plugin.filteredIndex.version;
+		this.dayFilesVersion = this.plugin.dayFiles.version;
 		this.exhausted = { start: false, end: false };
 		return true;
+	}
+
+	/**
+	 * Files from some days came or went (every day's, for null). A sync can
+	 * bring in thousands of files one event at a time, so the days are listed
+	 * again once a frame rather than once a file.
+	 */
+	private onDayFilesChanged(keys: string[] | null): void {
+		if (keys === null) this.changedFileDays = null;
+		else for (const key of keys) this.changedFileDays?.add(key);
+		this.scheduleRelist();
+	}
+
+	/** Lists changed files at the next frame; a build in flight asks again once it is done. */
+	private scheduleRelist(): void {
+		if (this.fileDaysFrame || !this.ready || this.changedFileDays?.size === 0) return;
+		this.fileDaysFrame = window.requestAnimationFrame(() => {
+			this.fileDaysFrame = 0;
+			const changed = this.changedFileDays;
+			this.changedFileDays = new Set();
+			this.relistFiles(changed === null ? null : Array.from(changed));
+		});
+	}
+
+	/**
+	 * Lists the files again on the days already loaded among `keys` (all of
+	 * them, for null), and brings in a day that only now has something to
+	 * show, or hides one that no longer does.
+	 */
+	private relistFiles(keys: string[] | null): void {
+		if (!this.ready) return;
+		this.syncWithIndex();
+		const days = keys === null ? [...this.sections] : [];
+		for (const key of keys ?? []) {
+			const offset = this.walker.offsetFor(key);
+			const day = this.sectionAt(offset) ?? (this.walker.isVisible(offset) ? this.ensureSectionFor(offset) : undefined);
+			if (day) days.push(day);
+		}
+		let changed = false;
+		for (const day of days) {
+			day.refreshFiles();
+			changed = day.refreshVisibility() || changed;
+		}
+		if (!changed) return;
+		this.syncDateSeparators();
+		this.find?.sectionsChanged();
 	}
 
 	/**
@@ -1397,6 +1462,15 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.find?.sectionsChanged();
 	}
 
+	isFilesOpen(day: DaySection): boolean {
+		return this.openFileLists.has(day.key);
+	}
+
+	setFilesOpen(day: DaySection, open: boolean): void {
+		if (open) this.openFileLists.add(day.key);
+		else this.openFileLists.delete(day.key);
+	}
+
 	onDayFocusSettled(day: DaySection): void {
 		if (this.pendingFocusCenter !== day) return;
 		if (
@@ -1424,6 +1498,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.configSignature = signature;
 		this.plugin.index.ensureCurrent();
 		this.plugin.filteredIndex.ensureCurrent();
+		// Lists every loaded day's files again itself, when it has to scan.
+		this.plugin.dayFiles.ensureCurrent();
 		this.syncWithIndex();
 
 		for (const section of this.sections) {
@@ -1457,6 +1533,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			hideEmptyDays: settings.hideEmptyDays,
 			filterRules: settings.filterRules,
 			daySortDirection: settings.daySortDirection,
+			showDayFiles: settings.showDayFiles,
+			dayFilesDate: settings.dayFilesDate,
+			dayFilesProperty: settings.dayFilesProperty,
+			dayFilesAttachments: settings.dayFilesAttachments,
+			dayFilesExcluded: settings.dayFilesExcluded,
 		});
 	}
 
