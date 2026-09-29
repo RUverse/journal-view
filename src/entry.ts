@@ -1708,6 +1708,7 @@ export class NoteEntry {
 		// Measurement should normally have released the guard before the
 		// reader arrives; focus is the defensive fallback.
 		this.releaseHeight();
+		this.el.addClass("journal-entry-active");
 		this.host.onEntryFocus(this);
 		// Focus is the one signal every way in shares - a click the editor
 		// swallowed, a keyboard tab, or a jump to a date.
@@ -1733,6 +1734,7 @@ export class NoteEntry {
 	private onEditorBlur(): void {
 		this.focusSettleToken++;
 		this.focused = false;
+		this.el.removeClass("journal-entry-active");
 		this.host.onEntryFocus(this);
 		// Leaving an entry the reader only looked at costs them nothing.
 		if (this.withdrawTemplate()) return;

@@ -252,6 +252,8 @@ export class DaySection implements EntryHost {
 	 */
 	private layoutEntries(): void {
 		const lead = this.lead;
+		for (const entry of this.entries) entry.el.toggleClass("journal-entry-lead", entry === lead);
+		this.syncFocusClasses();
 		this.actionsEl.empty();
 		setTooltip(this.titleEl, lead.path, { placement: "right" });
 		lead.renderActions(this.actionsEl);
@@ -422,10 +424,17 @@ export class DaySection implements EntryHost {
 	}
 
 	onEntryFocus(_entry: NoteEntry): void {
-		this.el.toggleClass(
-			"journal-day-focused",
-			this.entries.some((entry) => entry.isEditorFocused),
-		);
+		this.syncFocusClasses();
+	}
+
+	/**
+	 * Marks the day while the reader writes in it, and separately while they
+	 * write in the note whose buttons sit in the day's header - a note's
+	 * buttons show for the note being written in, not for the day.
+	 */
+	private syncFocusClasses(): void {
+		this.el.toggleClass("journal-day-focused", this.entries.some((entry) => entry.isEditorFocused));
+		this.el.toggleClass("journal-day-lead-active", this.lead.isEditorFocused);
 	}
 
 	onEntryFocusChanged(_entry: NoteEntry): void {
