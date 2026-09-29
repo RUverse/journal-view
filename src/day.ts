@@ -134,6 +134,17 @@ export class DaySection implements EntryHost {
 		return this.entries.find((entry) => entry.file === file);
 	}
 
+	/**
+	 * Where `entry` sits in the scroller's content, when navigation aims at it
+	 * rather than at the day: null for the note directly under the header,
+	 * which the day as a whole already frames.
+	 */
+	boxFor(entry?: NoteEntry): { top: number; height: number } | null {
+		if (!entry || entry === this.lead || !this.entries.includes(entry)) return null;
+		// The card is the notes' positioned ancestor.
+		return { top: this.cardTop + entry.el.offsetTop, height: entry.el.offsetHeight };
+	}
+
 	/* ---------------------------------------------------------------- state */
 
 	get isToday(): boolean {
@@ -387,13 +398,16 @@ export class DaySection implements EntryHost {
 	}
 
 	/**
-	 * Puts the reader in the day's editor. `atEnd` carries on after the last
-	 * shown note, which is where writing continues; otherwise the first one
-	 * takes it. Returns false when the guarded editor mount failed.
+	 * Puts the reader in the day's editor: in `target` when navigation named a
+	 * note, otherwise after the last shown note for `atEnd`, which is where
+	 * writing continues, or in the first. Returns false when the guarded
+	 * editor mount failed.
 	 */
-	focusEditor(atEnd = false): boolean {
+	focusEditor(atEnd = false, target?: NoteEntry): boolean {
 		const shown = this.entries.filter((entry) => !entry.isHidden);
-		const entry = (atEnd ? shown[shown.length - 1] : shown[0]) ?? this.entries[0];
+		const entry =
+			(target && shown.includes(target) ? target : atEnd ? shown[shown.length - 1] : shown[0]) ??
+			this.entries[0];
 		return entry.focusEditor(atEnd);
 	}
 

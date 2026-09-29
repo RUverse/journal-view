@@ -82,6 +82,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private animFrame = 0;
 	/** Focused navigation whose editor/template layout has not settled yet. */
 	private pendingFocusCenter: DaySection | null = null;
+	/** The note inside that day the navigation aims at, rather than the day as a whole. */
+	private pendingFocusEntry: NoteEntry | undefined;
 	/** Time the focused editor/template/cursor layout became final. */
 	private pendingFocusCenterReadyAt = 0;
 	/** Time the current pre-paint hold began. */
@@ -94,6 +96,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private initialFocusTimer = 0;
 	/** Cursor placement requested while the pane still had no measurable height. */
 	private focusOnFirstResizeAtEnd: boolean | null = null;
+	/** The note that placement is for, when navigation named one. */
+	private focusOnFirstResizePath: string | undefined;
 	/** Command target kept visible only until its editor receives focus. */
 	private commandTargetOffset: number | null = null;
 	/** Invalidates delayed command navigation when a newer destination takes over. */
@@ -123,7 +127,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private configSignature = "";
 	private indexVersion = -1;
 	private filteredIndexVersion = -1;
-	private initialTarget?: { date: Moment; focusAtEnd: boolean; revealThroughFilters: boolean };
+	private initialTarget?: { date: Moment; focusAtEnd: boolean; revealThroughFilters: boolean; path?: string };
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -209,7 +213,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			new Notice("That day is hidden by the current journal filters. Showing today instead.");
 		}
 		await this.build(initialDate, !initialDate, initialTarget?.revealThroughFilters);
-		if (initialDate) this.focusOriginWhenReady(initialTarget?.focusAtEnd);
+		if (initialDate) this.focusOriginWhenReady(initialTarget?.focusAtEnd, initialTarget?.path);
 	}
 
 	async onClose(): Promise<void> {
@@ -240,6 +244,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		window.clearTimeout(this.initialFocusTimer);
 		this.initialFocusTimer = 0;
 		this.focusOnFirstResizeAtEnd = null;
+		this.focusOnFirstResizePath = undefined;
 		this.commandTargetOffset = null;
 		window.clearTimeout(this.settleTimer);
 		this.settleTimer = 0;
@@ -703,8 +708,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.centerOn(section, "instant");
 			if (this.focusOnFirstResizeAtEnd !== null) {
 				const atEnd = this.focusOnFirstResizeAtEnd;
+				const path = this.focusOnFirstResizePath;
 				this.focusOnFirstResizeAtEnd = null;
-				this.focusAfterCenter(section, atEnd);
+				this.focusOnFirstResizePath = undefined;
+				this.focusAfterCenter(section, atEnd, this.aimAt(section, path));
 			}
 			this.onScroll();
 			return;
@@ -827,31 +834,47 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		return this.sortStep() === -1 && section.offset === 0;
 	}
 
-	/** Where the scroller has to sit for `section` to be in its resting place. */
-	private restTarget(section: DaySection): number {
+	/**
+	 * Where the scroller has to sit for `section` to be in its resting place,
+	 * or for `entry` in it when navigation aims at one of its further notes.
+	 */
+	private restTarget(section: DaySection, entry?: NoteEntry): number {
+		const note = section.boxFor(entry);
 		// A day resting at the top is measured whole, headings included: they
 		// name the month the reader is arriving in, so they belong on screen.
-		const target = this.restsAtTop(section)
-			? section.dayTop - START_GUTTER
-			: section.cardTop - Math.max(0, (this.scrollEl.clientHeight - section.cardHeight) / 2);
+		const target = note
+			? note.top - Math.max(0, (this.scrollEl.clientHeight - note.height) / 2)
+			: this.restsAtTop(section)
+				? section.dayTop - START_GUTTER
+				: section.cardTop - Math.max(0, (this.scrollEl.clientHeight - section.cardHeight) / 2);
 		const limit = Math.max(0, this.scrollEl.scrollHeight - this.scrollEl.clientHeight);
 		return Math.min(Math.max(0, target), limit);
 	}
 
-	private centerBehavior(section: DaySection): "instant" | "smooth" {
-		const distance = Math.abs(this.restTarget(section) - this.scrollEl.scrollTop);
+	/** The height navigation to `section`, or to `entry` in it, tries to fit on screen. */
+	private aimedHeight(section: DaySection, entry?: NoteEntry): number {
+		return section.boxFor(entry)?.height ?? section.cardHeight;
+	}
+
+	private centerBehavior(section: DaySection, entry?: NoteEntry): "instant" | "smooth" {
+		const distance = Math.abs(this.restTarget(section, entry) - this.scrollEl.scrollTop);
 		return distance > this.scrollEl.clientHeight * SMOOTH_CENTER_VIEWPORTS ? "instant" : "smooth";
 	}
 
-	private centerSection(section: DaySection, focus: boolean, atEnd = false): void {
+	private centerSection(section: DaySection, focus: boolean, atEnd = false, entry?: NoteEntry): void {
 		this.clearPendingFocusCenter();
-		this.centerOn(section, this.centerBehavior(section), focus ? () => this.focusAfterCenter(section, atEnd) : undefined);
+		this.centerOn(
+			section,
+			this.centerBehavior(section, entry),
+			focus ? () => this.focusAfterCenter(section, atEnd, entry) : undefined,
+			entry,
+		);
 	}
 
-	private focusAfterCenter(section: DaySection, atEnd: boolean): void {
+	private focusAfterCenter(section: DaySection, atEnd: boolean, entry?: NoteEntry): void {
 		// Even an editor that retained focus can have stale offscreen measurements.
-		this.armPendingFocusCenter(section);
-		if (!section.focusEditor(atEnd)) {
+		this.armPendingFocusCenter(section, entry);
+		if (!section.focusEditor(atEnd, entry)) {
 			this.setCommandTarget(null);
 			this.clearPendingFocusCenter();
 			return;
@@ -862,9 +885,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.schedulePendingFocusCenter();
 	}
 
-	private armPendingFocusCenter(section: DaySection): void {
+	private armPendingFocusCenter(section: DaySection, entry?: NoteEntry): void {
 		this.clearPendingFocusCenter();
 		this.pendingFocusCenter = section;
+		this.pendingFocusEntry = entry;
 		this.pendingFocusCenterReadyAt = 0;
 		this.pendingFocusCenterStartedAt = performance.now();
 		this.endPendingFocusCenter = listenForReaderScrollIntent(this.scrollEl, () =>
@@ -874,6 +898,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private clearPendingFocusCenter(): void {
 		this.pendingFocusCenter = null;
+		this.pendingFocusEntry = undefined;
 		this.pendingFocusCenterReadyAt = 0;
 		this.pendingFocusCenterStartedAt = 0;
 		if (this.pendingFocusCenterFrame) window.cancelAnimationFrame(this.pendingFocusCenterFrame);
@@ -913,8 +938,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private correctPendingFocusCenter(): void {
 		const section = this.pendingFocusCenter;
-		if (!section?.el.isConnected || section.cardHeight > this.scrollEl.clientHeight) return;
-		const target = this.restTarget(section);
+		const entry = this.pendingFocusEntry;
+		if (!section?.el.isConnected || this.aimedHeight(section, entry) > this.scrollEl.clientHeight) return;
+		const target = this.restTarget(section, entry);
 		if (Math.abs(target - this.scrollEl.scrollTop) < 0.5) return;
 		const before = this.scrollEl.scrollTop;
 		this.scrollEl.scrollTop = target;
@@ -925,14 +951,19 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (this.pendingFocusCenterReadyAt) this.pendingFocusCenterReadyAt = performance.now();
 	}
 
-	private centerOn(section: DaySection | undefined, behavior: "instant" | "smooth", onArrive?: () => void): void {
+	private centerOn(
+		section: DaySection | undefined,
+		behavior: "instant" | "smooth",
+		onArrive?: () => void,
+		entry?: NoteEntry,
+	): void {
 		if (!section) return;
 		if (this.animFrame) {
 			window.cancelAnimationFrame(this.animFrame);
 			this.animFrame = 0;
 		}
 		if (behavior === "instant") {
-			this.scrollEl.scrollTop = this.restTarget(section);
+			this.scrollEl.scrollTop = this.restTarget(section, entry);
 			this.editors.declareScroll();
 			this.anchoring.pin();
 			onArrive?.();
@@ -948,7 +979,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const step = () => {
 			this.animFrame = 0;
 			if (!this.scrollEl || !section.el.isConnected) return;
-			const target = this.restTarget(section);
+			const target = this.restTarget(section, entry);
 			const remaining = target - this.scrollEl.scrollTop;
 			if (Math.abs(remaining) < 4 || performance.now() - started > 1500) {
 				this.scrollEl.scrollTop = target;
@@ -1037,14 +1068,21 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	/**
-	 * Moves the journal to a visible `date`. The same predicate is used by every
-	 * caller so direct navigation cannot temporarily reveal a filtered note.
+	 * Moves the journal to a visible `date`, and to the note at `path` in it
+	 * when there is one. The same predicate is used by every caller so direct
+	 * navigation cannot temporarily reveal a filtered note.
 	 */
-	goToDate(date: Moment, focus = true): void {
-		this.navigateToDate(date, focus, false, false);
+	goToDate(date: Moment, focus = true, path?: string): void {
+		this.navigateToDate(date, focus, false, false, path);
 	}
 
-	private navigateToDate(date: Moment, focus: boolean, atEnd: boolean, revealThroughFilters: boolean): void {
+	private navigateToDate(
+		date: Moment,
+		focus: boolean,
+		atEnd: boolean,
+		revealThroughFilters: boolean,
+		path?: string,
+	): void {
 		// A date can arrive from a picker that outlived the view it was opened
 		// from - the plugin reloading under it, say.
 		if (!this.scrollEl?.isConnected) return;
@@ -1070,7 +1108,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.setCommandTarget(revealThroughFilters ? offset : null);
 			void this.rebuild(day, false, revealThroughFilters).then(() => {
 				if (navigationToken !== this.commandNavigationToken) return;
-				if (focus) this.focusOriginWhenReady(atEnd);
+				if (focus) this.focusOriginWhenReady(atEnd, path);
 			});
 			return;
 		}
@@ -1080,7 +1118,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.setCommandTarget(revealThroughFilters ? offset : null);
 			// Focusing only once the animation has arrived: focus scrolls the
 			// editor into view, which would fight it. Same as `goToToday`.
-			this.centerSection(section, focus, atEnd);
+			this.centerSection(section, focus, atEnd, this.aimAt(section, path));
 			return;
 		}
 		if (timelineCurrent && revealThroughFilters) {
@@ -1098,7 +1136,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 						return;
 					}
 					this.setCommandTarget(offset);
-					this.centerSection(fresh, focus, atEnd);
+					this.centerSection(fresh, focus, atEnd, this.aimAt(fresh, path));
 				});
 				return;
 			}
@@ -1107,8 +1145,24 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		void this.rebuild(day, false, revealThroughFilters).then(() => {
 			if (navigationToken !== this.commandNavigationToken) return;
 			const section = this.sectionAt(this.origin);
-			if (focus && section) this.focusAfterCenter(section, atEnd);
+			if (!section) return;
+			const entry = this.aimAt(section, path);
+			if (focus) this.focusAfterCenter(section, atEnd, entry);
+			else if (entry) this.centerOn(section, "instant", undefined, entry);
 		});
+	}
+
+	/**
+	 * The note at `path` in `section`, which navigation aims at rather than the
+	 * day. A note the filters leave out of its day cannot be shown, so the day
+	 * is shown without it.
+	 */
+	private aimAt(section: DaySection, path?: string): NoteEntry | undefined {
+		if (!path) return undefined;
+		const entry = section.entries.find((candidate) => candidate.path === path);
+		if (!entry?.isHidden) return entry;
+		new Notice("That note is hidden by the current journal filters. Showing its day instead.");
+		return undefined;
 	}
 
 	/** Re-applies normal filtering as soon as focus itself can guard the command target. */
@@ -1128,10 +1182,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.find?.sectionsChanged();
 	}
 
-	private focusOriginWhenReady(atEnd = false): void {
+	private focusOriginWhenReady(atEnd = false, path?: string): void {
 		const section = this.sectionAt(this.origin);
-		if (this.centered && section) this.focusAfterCenter(section, atEnd);
-		else this.focusOnFirstResizeAtEnd = atEnd;
+		if (this.centered && section) {
+			this.focusAfterCenter(section, atEnd, this.aimAt(section, path));
+			return;
+		}
+		this.focusOnFirstResizeAtEnd = atEnd;
+		this.focusOnFirstResizePath = path;
 	}
 
 	private updateHeaderLabel(): void {
@@ -1341,7 +1399,11 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	onDayFocusSettled(day: DaySection): void {
 		if (this.pendingFocusCenter !== day) return;
-		if (!day.el.isConnected || !day.hasFocus || day.cardHeight > this.scrollEl.clientHeight) {
+		if (
+			!day.el.isConnected ||
+			!day.hasFocus ||
+			this.aimedHeight(day, this.pendingFocusEntry) > this.scrollEl.clientHeight
+		) {
 			this.clearPendingFocusCenter();
 			return;
 		}
