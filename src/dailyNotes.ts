@@ -12,7 +12,8 @@ export interface ResolvedDailyConfig {
 	wildcard: boolean;
 }
 
-type VaultDailyConfig = Omit<ResolvedDailyConfig, "wildcard">;
+/** Daily-note settings as the vault itself has them, before Journal View's own. */
+export type VaultDailyConfig = Omit<ResolvedDailyConfig, "wildcard">;
 
 const FALLBACK_FORMAT = "YYYY-MM-DD";
 /** Ends a date format to take in notes named with more after the date. */
