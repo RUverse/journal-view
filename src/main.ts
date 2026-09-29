@@ -14,7 +14,7 @@ import {
 	clampLoadedDays,
 	clampSaveDelay,
 } from "./settings";
-import type { DailyHeaderStyle, DaySortDirection } from "./settings";
+import type { DailyHeaderStyle, DaySortDirection, OpenNoteAction } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 import { JournalStatistics } from "./statistics";
 import { StatisticsView, VIEW_TYPE_STATISTICS } from "./statisticsView";
@@ -350,6 +350,7 @@ export default class JournalViewPlugin extends Plugin {
 			filterRules: filterRulesSetting(saved.filterRules),
 			showTags: booleanSetting(saved.showTags, DEFAULT_SETTINGS.showTags),
 			displayProperties: propertyNamesSetting(saved.displayProperties),
+			openNoteAction: openNoteActionSetting(saved.openNoteAction),
 			daySortDirection: daySortDirectionSetting(saved.daySortDirection),
 		};
 	}
@@ -415,4 +416,8 @@ function propertyNamesSetting(value: unknown): string[] {
 
 function daySortDirectionSetting(value: unknown): DaySortDirection {
 	return value === "descending" ? "descending" : DEFAULT_SETTINGS.daySortDirection;
+}
+
+function openNoteActionSetting(value: unknown): OpenNoteAction {
+	return value === "hidden" || value === "heading" ? value : DEFAULT_SETTINGS.openNoteAction;
 }
