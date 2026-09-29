@@ -1285,6 +1285,17 @@ button.journal-picker-day.is-current.has-note::after {
 	opacity: 0.8;
 }
 
+/* A day that only has files gets a hollow dot. */
+button.journal-picker-day.has-files::after {
+	background-color: transparent;
+	box-shadow: inset 0 0 0 1px currentColor;
+	opacity: 0.6;
+}
+
+button.journal-picker-day.is-current.has-files::after {
+	opacity: 0.8;
+}
+
 button.journal-picker-day:focus-visible {
 	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 }

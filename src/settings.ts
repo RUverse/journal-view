@@ -329,8 +329,9 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					{
 						name: "Only show days that have a note",
 						desc:
-							"Days with no file are skipped entirely, so the journal jumps from one note to the next. " +
-							"Today is always shown. When off, every day appears, faded until you type in it.",
+							"Days with no note are skipped entirely, so the journal jumps from one note to the next. " +
+							"Today is always shown, and so are days with files while files from each day are shown. " +
+							"When off, every day appears, faded until you type in it.",
 						control: { type: "toggle", key: "hideEmptyDays" },
 					},
 				],
@@ -343,7 +344,8 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						name: "Show files from each day",
 						desc:
 							"List the files created or edited on each day at the bottom of the day, folded into " +
-							"one line until you open it.",
+							"one line until you open it. Days that only have files appear in the journal too, " +
+							"unless an include filter is active.",
 						control: { type: "toggle", key: "showDayFiles" },
 					},
 					{

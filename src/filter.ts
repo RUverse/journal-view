@@ -18,6 +18,11 @@ export function isFilterActive(settings: JournalViewSettings): boolean {
 	return settings.filterRules.length > 0;
 }
 
+/** True when a rule requires something of every note, which a day without one cannot have. */
+export function hasIncludeFilter(settings: JournalViewSettings): boolean {
+	return settings.filterRules.some((rule) => rule.mode === "include");
+}
+
 function isFilterMode(value: unknown): value is JournalFilterMode {
 	return value === "include" || value === "exclude";
 }

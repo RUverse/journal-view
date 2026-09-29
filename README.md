@@ -90,6 +90,11 @@ A file only keeps the date it was last edited, so **Last edited** moves it to th
 changed. File dates can also be reset when a vault is synced, copied, or checked out with git; a
 **Created date property** keeps notes on the day they were written.
 
+Days that have files but no daily note appear in the journal too, even with **Only show days that
+have a note** on. **Go to date** marks them with a hollow dot. They are hidden while an include
+filter is active, since a day without a note cannot match it, and a day whose note is hidden by
+the filters stays hidden whatever files it has.
+
 ## Filters
 
 Select the funnel button in the journal toolbar to open the filters. **Show only days with notes** is

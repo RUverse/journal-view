@@ -2,8 +2,9 @@ import { MarkdownView, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
 import { DayFileIndex } from "./dayFiles";
 import { FILES_HOVER_SOURCE } from "./dayFilesList";
+import { ShownDays } from "./dayWalk";
 import { WorkspaceEditorBridge } from "./editor";
-import { FilteredDailyNoteIndex, filterRulesSetting } from "./filter";
+import { FilteredDailyNoteIndex, filterRulesSetting, hasIncludeFilter } from "./filter";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
@@ -38,6 +39,8 @@ export default class JournalViewPlugin extends Plugin {
 	filteredIndex!: FilteredDailyNoteIndex;
 	/** The files from each day, while the journal lists them. */
 	dayFiles!: DayFileIndex;
+	/** The days the journal shows while empty days are hidden. */
+	shownDays!: ShownDays;
 	statistics!: JournalStatistics;
 	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
@@ -92,6 +95,11 @@ export default class JournalViewPlugin extends Plugin {
 		this.index = new DailyNoteIndex(this.app, this.daily);
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
 		this.dayFiles = new DayFileIndex(this.app, this.index, this.daily, () => this.settings);
+		// No include filter can match a day without a note, so days that only
+		// have files go while one is active.
+		this.shownDays = new ShownDays(this.index, this.filteredIndex, () =>
+			this.settings.showDayFiles && !hasIncludeFilter(this.settings) ? this.dayFiles : null,
+		);
 		// onLayoutReady queues callbacks without returning an EventRef, so they
 		// need an explicit guard when the plugin unloads before layout restoration.
 		let layoutReadyCallbacksEnabled = true;

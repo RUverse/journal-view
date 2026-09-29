@@ -279,10 +279,12 @@ notes. Turn on **Files from each day** in the toolbar's Customization menu.
 1. **Today's list.** Both files sit under the day they were created, folded into
    one line. Opening the list shows them; folding it leaves only the count.
 2. **A created date property.** Set **Created date property** to `created`. The
-   article moves to the day in its property, 1 August.
-3. **Live changes.** Create, rename and delete a file while its day is loaded.
+   article moves to 1 August, which has no note, so that day now appears in the
+   journal and **Go to date** marks it with a hollow dot.
+3. **Include filter.** Add an include filter: 1 August goes away again.
+4. **Live changes.** Create, rename and delete a file while its day is loaded.
    A folded list only changes its count; the day's height stays the same.
-4. **Opening.** Select, Ctrl-select and right-click a file; Ctrl-hover previews it.
+5. **Opening.** Select, Ctrl-select and right-click a file; Ctrl-hover previews it.
 
 ## Frontmatter preservation checks
 
