@@ -17,6 +17,11 @@ export interface Moment {
 	daysInMonth(): number;
 	date(): number;
 	date(day: number): Moment;
+	hour(): number;
+	minute(): number;
+	second(): number;
+	set(values: { hour?: number; minute?: number; second?: number; millisecond?: number }): Moment;
+	valueOf(): number;
 }
 
 /**

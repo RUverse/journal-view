@@ -367,6 +367,18 @@ button.journal-find-button.is-active {
 	flex: 0 0 auto;
 }
 
+/* The time or name of the first note, when its file name says more than the date. */
+.journal-day-note-label {
+	flex: 0 0 auto;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+
+.journal-day-note-label[hidden] {
+	display: none;
+}
+
 .journal-day-actions {
 	display: flex;
 	align-items: center;
@@ -392,6 +404,7 @@ button.journal-find-button.is-active {
 	}
 
 	.journal-day-header:hover button.journal-day-delete,
+	.journal-entry-heading:hover button.journal-day-delete,
 	button.journal-day-delete:focus {
 		opacity: 1;
 		pointer-events: auto;
@@ -410,6 +423,61 @@ button.journal-day-create {
 
 button.journal-day-create:hover {
 	color: var(--text-normal);
+}
+
+/* -------------------------------------------------------------- notes --- */
+
+/* A day can hold several notes. The first sits directly under the day header;
+   each further one gets a quiet divider that names it and carries its buttons. */
+.journal-day-entries > .journal-entry + .journal-entry {
+	margin-top: var(--size-4-3);
+}
+
+.journal-entry-hidden {
+	display: none;
+}
+
+.journal-entry-heading {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-2-3);
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	line-height: var(--line-height-tight);
+}
+
+.journal-entry-heading[hidden] {
+	display: none;
+}
+
+.journal-entry-label {
+	flex: 0 1 auto;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.journal-entry-rule {
+	flex: 1 1 auto;
+	height: 1px;
+	background-color: var(--background-modifier-border);
+}
+
+.journal-entry-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	flex: 0 0 auto;
+	opacity: 0;
+	transition: opacity 120ms ease-in-out;
+}
+
+.journal-entry:hover .journal-entry-actions,
+.journal-day-focused .journal-entry-actions,
+.journal-entry-actions:focus-within {
+	opacity: 1;
 }
 
 /* ----------------------------------------------------------- metadata --- */
@@ -725,9 +793,13 @@ button.journal-day-metadata-value-button:focus-visible,
 
 /* ...and more room around its text than the days around it. The bottom stands
    in for the header stacked above the text, so the two gaps read as even; it
-   is short of that sum because the card's own padding sits under the body. */
-.journal-day-today .journal-day-body {
+   is short of that sum because the card's own padding sits under the body.
+   With several notes, the room goes above the first and below the last. */
+.journal-day-today .journal-entry:first-child .journal-day-body {
 	--journal-body-pad-top: var(--size-4-8);
+}
+
+.journal-day-today .journal-entry:last-child .journal-day-body {
 	--journal-body-pad-bottom: var(--size-4-12);
 }
 

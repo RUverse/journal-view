@@ -47,6 +47,14 @@ Some Customization is only visible in the customization menu accessible from the
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
 
+## Several notes a day
+
+When your daily-note date format records a time as well as the date, for example
+`YYYY-MM-DD HHmm`, a day can hold several notes. Journal View shows all of them under that day,
+ordered by the time in their file names. The first note sits directly under the day's header, which
+shows its time; each further note gets a divider with its time and its own open and delete buttons.
+Writing in an empty day creates a note named after the current time.
+
 ## Filters
 
 Select the funnel button in the journal toolbar to open the filters. **Show only days with notes** is
@@ -59,7 +67,8 @@ tags, so `#project` matches `#project/client`. Property filters compare exact st
 boolean values, and a list property matches when one of its items equals the configured value.
 
 Every include filter must match. A note matching any exclude filter is hidden, even if it satisfies
-all includes. The funnel uses the accent color whenever a tag or property filter is active; the
+all includes. On a day with several notes, the day appears when any of them matches, and the notes
+that do not match are hidden within it. The funnel uses the accent color whenever a tag or property filter is active; the
 note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, and **Find in
 journal** searches only the notes currently included.
 
@@ -71,7 +80,7 @@ the current year as a mosaic of daily notes. Use the arrows or enter a year to
 explore another year; **This year** returns to the current one.
 
 Each square represents one day. Missing notes are empty, and existing notes with
-zero words have an outline. The four color levels represent **1–149**, **150–399**,
+zero words have an outline. A day with several notes counts all of them together. The four color levels represent **1–149**, **150–399**,
 **400–999**, and **1,000+** words. Hover or select a day to see its date and count,
 then choose **Open in journal** to visit an existing entry. Arrow keys move between
 days; Home and End move to the first and last day of the year. Narrow panes scroll

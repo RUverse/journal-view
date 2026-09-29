@@ -1,4 +1,5 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import type { JournalViewSettings } from "./settings";
 
@@ -12,6 +13,16 @@ const FALLBACK_FORMAT = "YYYY-MM-DD";
 
 function trimSlashes(value: string): string {
 	return value.replace(/^\/+|\/+$/g, "").trim();
+}
+
+/**
+ * True when file names written with `format` record a time of day as well as
+ * the date, e.g. `YYYY-MM-DD HHmm`. Such a vault can hold several notes for one
+ * day. Bracketed text is literal, and the long locale formats include a time.
+ */
+export function formatRecordsTime(format: string): boolean {
+	const tokens = format.replace(/\[[^\]]*\]/g, "");
+	return /[HhkmsSAaXx]|LT|LLL|lll/.test(tokens);
 }
 
 /**
@@ -71,6 +82,23 @@ export class DailyNoteResolver {
 		return empty;
 	}
 
+	/** True when the configured file names record a time of day (see `formatRecordsTime`). */
+	recordsTime(): boolean {
+		return formatRecordsTime(this.config().format);
+	}
+
+	/**
+	 * The moment a note created now for `date` is named after: the date itself,
+	 * or - when file names record a time - the date at the current time of day,
+	 * so each new note for that day gets a file of its own.
+	 */
+	creationMoment(date: Moment): Moment {
+		const day = date.clone().startOf("day");
+		if (!this.recordsTime()) return day;
+		const now = createMoment();
+		return day.set({ hour: now.hour(), minute: now.minute(), second: now.second(), millisecond: 0 });
+	}
+
 	/** File name (without extension) a note for `date` would have. */
 	basename(date: Moment): string {
 		const { format } = this.config();
@@ -85,15 +113,11 @@ export class DailyNoteResolver {
 		return normalizePath(`${folder ? `${folder}/` : ""}${name}.md`);
 	}
 
-	fileFor(date: Moment): TFile | null {
-		const file = this.app.vault.getAbstractFileByPath(this.pathFor(date));
-		return file instanceof TFile ? file : null;
-	}
-
 	/**
-	 * Creates the note for `date` from the configured template. Callers that
-	 * have body text of their own write it over the result, which keeps the
-	 * template's frontmatter without duplicating it.
+	 * Creates the note named after `date` from the configured template - pass a
+	 * `creationMoment` so formats that record a time get the current one.
+	 * Callers that have body text of their own write it over the result, which
+	 * keeps the template's frontmatter without duplicating it.
 	 */
 	async create(date: Moment): Promise<TFile> {
 		const path = this.pathFor(date);

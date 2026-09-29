@@ -1,4 +1,4 @@
-import { App, getFrontMatterInfo, setIcon, setTooltip } from "obsidian";
+import { App, TFile, getFrontMatterInfo, setIcon, setTooltip } from "obsidian";
 import type JournalViewPlugin from "./main";
 import type { DaySection } from "./day";
 import type { NoteEntry } from "./entry";
@@ -163,7 +163,7 @@ export class JournalFind {
 
 		for (const [sectionIndex, section] of this.host.sections.entries()) {
 			for (const entry of section.entries) {
-				if (section.isHidden) {
+				if (section.isHidden || entry.isHidden) {
 					entry.setFindState(query, this.caseSensitive, [], null);
 					continue;
 				}
@@ -256,17 +256,7 @@ export class JournalFind {
 				if (!date.isValid()) continue;
 				const offset = date.diff(today, "days");
 				if (!isOffsetReachable(offset, this.host.plugin.settings.hideEmptyDays, true)) continue;
-				const file = this.host.plugin.daily.fileFor(date);
-				if (!file) continue;
-				let content: string;
-				try {
-					content = await this.host.app.vault.cachedRead(file);
-				} catch (error) {
-					console.warn(`Journal View: could not search ${file.path}`, error);
-					continue;
-				}
-				const body = content.slice(getFrontMatterInfo(content).contentStart);
-				if (findLiteralRanges(body, query, this.caseSensitive).length) {
+				if (await this.dayContains(key, query)) {
 					await this.host.loadFindDate(date);
 					if (token !== this.scanToken || !this.open || query !== this.input.value) return;
 					this.refresh(false, key, direction);
@@ -288,6 +278,26 @@ export class JournalFind {
 				this.focusInput();
 			}
 		}
+	}
+
+	/** True when one of the day's notes that pass the filters contains `query`. */
+	private async dayContains(key: string, query: string): Promise<boolean> {
+		const { app, plugin } = this.host;
+		for (const path of plugin.index.pathsFor(key)) {
+			if (!plugin.filteredIndex.matchesPath(path)) continue;
+			const file = app.vault.getAbstractFileByPath(path);
+			if (!(file instanceof TFile)) continue;
+			let content: string;
+			try {
+				content = await app.vault.cachedRead(file);
+			} catch (error) {
+				console.warn(`Journal View: could not search ${file.path}`, error);
+				continue;
+			}
+			const body = content.slice(getFrontMatterInfo(content).contentStart);
+			if (findLiteralRanges(body, query, this.caseSensitive).length) return true;
+		}
+		return false;
 	}
 
 	private nextFrame(): Promise<void> {

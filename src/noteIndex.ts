@@ -15,14 +15,39 @@ export interface OrderedDayIndex {
 	keysFrom(key: string, direction: -1 | 1): string[];
 }
 
+/** Where a path sits in the journal: the day it belongs to, and when in that day. */
+export interface DailyNoteLocation {
+	key: string;
+	/** Parsed from the file name; the start of the day unless the format records a time. */
+	time: number;
+}
+
+interface IndexedNote extends DailyNoteLocation {
+	path: string;
+}
+
+const noteNames = new Intl.Collator(undefined, { numeric: true });
+
+/**
+ * The order notes are shown in within a day: by the time their file name
+ * records, then by name. A name that is a prefix of another sorts first, so
+ * `2026-08-16` comes before `2026-08-16 evening`.
+ */
+function compareNotes(left: IndexedNote, right: IndexedNote): number {
+	return left.time - right.time || noteNames.compare(left.path.slice(0, -3), right.path.slice(0, -3));
+}
+
 /**
  * Knows which days actually have a note, so the view can jump straight from one
- * existing day to the next instead of walking the calendar one day at a time.
+ * existing day to the next instead of walking the calendar one day at a time -
+ * and which notes each of those days holds, since a date format that records
+ * a time of day can give one day several.
  *
  * Keys are `YYYY-MM-DD`, which sorts chronologically as plain strings.
  */
 export class DailyNoteIndex implements OrderedDayIndex {
-	private keys = new Set<string>();
+	/** Every indexed note, grouped by day and kept in display order. */
+	private days = new Map<string, IndexedNote[]>();
 	private sorted: string[] = [];
 	private sortedDirty = true;
 	private signature = "";
@@ -37,10 +62,10 @@ export class DailyNoteIndex implements OrderedDayIndex {
 
 	rebuild(): void {
 		const config = this.resolver.config();
-		this.keys.clear();
+		this.days.clear();
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			const key = this.keyForPath(file.path, config);
-			if (key) this.keys.add(key);
+			const location = this.locate(file.path, config);
+			if (location) this.add({ path: file.path, ...location });
 		}
 		this.signature = JSON.stringify(config);
 		this.sortedDirty = true;
@@ -59,6 +84,11 @@ export class DailyNoteIndex implements OrderedDayIndex {
 
 	/** The day a path represents, or null if it is not a daily note. */
 	keyForPath(path: string, config?: ResolvedDailyConfig): string | null {
+		return this.locate(path, config)?.key ?? null;
+	}
+
+	/** The day and time a path represents, or null if it is not a daily note. */
+	locate(path: string, config?: ResolvedDailyConfig): DailyNoteLocation | null {
 		if (!path.endsWith(".md")) return null;
 		const { folder, format } = config ?? this.resolver.config();
 
@@ -69,35 +99,45 @@ export class DailyNoteIndex implements OrderedDayIndex {
 		}
 
 		const parsed = createMoment(relative, format, true);
-		return parsed.isValid() ? parsed.format(DAY_KEY_FORMAT) : null;
+		return parsed.isValid() ? { key: parsed.format(DAY_KEY_FORMAT), time: parsed.valueOf() } : null;
+	}
+
+	/** The notes indexed for a day, in the order they are shown. */
+	pathsFor(key: string): string[] {
+		return this.days.get(key)?.map((note) => note.path) ?? [];
 	}
 
 	handleCreate(file: TFile): boolean {
-		const key = this.keyForPath(file.path);
-		if (!key || this.keys.has(key)) return false;
-		this.keys.add(key);
-		this.sortedDirty = true;
+		const location = this.locate(file.path);
+		if (!location || this.days.get(location.key)?.some((note) => note.path === file.path)) return false;
+		this.add({ path: file.path, ...location });
 		this.version++;
 		return true;
 	}
 
 	handleDelete(path: string): boolean {
 		const key = this.keyForPath(path);
-		if (!key || !this.keys.has(key)) return false;
+		const notes = key ? this.days.get(key) : undefined;
+		const at = notes?.findIndex((note) => note.path === path) ?? -1;
+		if (!key || !notes || at < 0) return false;
 		// The note may have been recreated elsewhere under the same date.
 		if (this.app.vault.getAbstractFileByPath(path) instanceof TFile) return false;
-		this.keys.delete(key);
-		this.sortedDirty = true;
+		notes.splice(at, 1);
+		if (!notes.length) {
+			this.days.delete(key);
+			this.sortedDirty = true;
+		}
 		this.version++;
 		return true;
 	}
 
 	has(key: string): boolean {
-		return this.keys.has(key);
+		return this.days.has(key);
 	}
 
+	/** The number of days with at least one note. */
 	get size(): number {
-		return this.keys.size;
+		return this.days.size;
 	}
 
 	/** The first and last indexed day, or null when the vault has no daily notes. */
@@ -150,9 +190,21 @@ export class DailyNoteIndex implements OrderedDayIndex {
 		];
 	}
 
+	private add(note: IndexedNote): void {
+		const notes = this.days.get(note.key);
+		if (!notes) {
+			this.days.set(note.key, [note]);
+			this.sortedDirty = true;
+			return;
+		}
+		let at = notes.findIndex((other) => compareNotes(note, other) < 0);
+		if (at < 0) at = notes.length;
+		notes.splice(at, 0, note);
+	}
+
 	private list(): string[] {
 		if (this.sortedDirty) {
-			this.sorted = Array.from(this.keys).sort();
+			this.sorted = Array.from(this.days.keys()).sort();
 			this.sortedDirty = false;
 		}
 		return this.sorted;
