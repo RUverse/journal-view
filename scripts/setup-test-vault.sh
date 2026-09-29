@@ -15,10 +15,26 @@ vault="$root/test-vault"
 
 mkdir -p "$vault/.obsidian/plugins" "$vault/Journal" "$vault/Templates"
 
-# The plugin folder is a link to the repository, so the vault always loads
+# The build artifacts are links into the repository, so the vault always loads
 # whatever `npm run build` last produced - there is nothing to copy after a
-# rebuild.
-ln -sfn ../../.. "$vault/.obsidian/plugins/journal-view"
+# rebuild. The folder itself is real, so the vault's settings (data.json) stay
+# inside the vault instead of landing in the repository root, where a copy of
+# the plugin folder would carry them into another vault.
+plugin="$vault/.obsidian/plugins/journal-view"
+if [ -L "$plugin" ]; then
+	# Older vaults linked the whole folder to the repository root; replace the
+	# link itself (never what it points to), keeping the settings written there.
+	rm "$plugin"
+	mkdir "$plugin"
+	if [ -f "$root/data.json" ]; then
+		mv "$root/data.json" "$plugin/data.json"
+		echo "  moved   data.json from the repository root into the test vault"
+	fi
+fi
+mkdir -p "$plugin"
+for artifact in main.js manifest.json styles.css; do
+	ln -sfn "../../../../$artifact" "$plugin/$artifact"
+done
 
 write() { # write <relative path> - from stdin, only when the file is missing
 	local path="$vault/$1"
@@ -137,8 +153,10 @@ Throwaway vault for exercising the plugin by hand. Gitignored, so anything writt
 here stays local. Rebuild it any time with `npm run test-vault` from the repository
 root; files that already exist are kept.
 
-`.obsidian/plugins/journal-view` links to the repository root, so the vault loads
-whatever `npm run build` last produced.
+The plugin's `main.js`, `manifest.json` and `styles.css` in
+`.obsidian/plugins/journal-view` link to the repository root, so the vault loads
+whatever `npm run build` last produced. Its settings (`data.json`) stay in that
+folder, inside the vault, so test settings never travel with the plugin files.
 
 Daily notes resolve to folder `Journal`, format `YYYY-MM-DD`, template
 `Templates/Daily`. Journal View's own overrides are left empty, so those vault
@@ -198,7 +216,7 @@ to type into whatever holds focus.
 Desktop mobile emulation still runs Chromium, so use a physical iPhone or iPad
 for WebKit, touch and momentum-scrolling issues. This command builds the plugin,
 copies this test vault into Obsidian's iCloud container as `Journal View Test`,
-installs real plugin files instead of the repository symlink, and adds Journal
+installs real plugin files instead of the repository symlinks, and adds Journal
 View to the vault's enabled community plugins:
 
 ```bash

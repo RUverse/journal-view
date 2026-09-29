@@ -33,7 +33,7 @@ Obsidian's own runtime. Verify changes in the throwaway vault instead of a real
 one, and say what you actually exercised rather than what should follow.
 
 ```bash
-npm run test-vault   # builds/repairs test-vault/, gitignored, plugin symlinked in
+npm run test-vault   # builds/repairs test-vault/, gitignored, build files symlinked in
 ```
 
 Add it in Obsidian once (vault switcher -> Manage vaults -> Open folder as vault),
