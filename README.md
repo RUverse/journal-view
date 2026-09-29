@@ -34,7 +34,7 @@ Some Customization is only visible in the customization menu accessible from the
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View |
+| Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View; end the format with `*` to include notes with more after the date |
 | Day order | Oldest to newest | Reverses the complete timeline when set to newest to oldest |
 | Daily header format | `dddd, D MMMM` | Controls how each daily header displays its date |
 | Daily header style | Subtle | Shows each date subtly, as an H1, or hides the date display |
@@ -46,6 +46,20 @@ Some Customization is only visible in the customization menu accessible from the
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
+
+## Several notes a day
+
+A day can hold more than one note in two ways, and Journal View shows all of them under that day:
+
+- **Text after the date.** End the date format with `*`, for example `YYYY-MM-DD*`, to also include
+  notes whose names go on after the date, such as `2026-08-16 Birthday`. The text has to be set off
+  from the date by a space or punctuation. New notes are still named with the plain date.
+- **A time in the name.** A format that records a time, for example `YYYY-MM-DD HHmm`, keeps a
+  separate note for each moment. Writing in an empty day creates a note named after the current time.
+
+Notes are ordered by their time, then by name, with the plain-date note first. The first note sits
+directly under the day's header, which shows its time or the text after its date; each further note
+gets a divider with its own label and its own open and delete buttons.
 
 ## Filters
 
@@ -59,7 +73,8 @@ tags, so `#project` matches `#project/client`. Property filters compare exact st
 boolean values, and a list property matches when one of its items equals the configured value.
 
 Every include filter must match. A note matching any exclude filter is hidden, even if it satisfies
-all includes. The funnel uses the accent color whenever a tag or property filter is active; the
+all includes. On a day with several notes, the day appears when any of them matches, and the notes
+that do not match are hidden within it. The funnel uses the accent color whenever a tag or property filter is active; the
 note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, and **Find in
 journal** searches only the notes currently included.
 
@@ -71,7 +86,7 @@ the current year as a mosaic of daily notes. Use the arrows or enter a year to
 explore another year; **This year** returns to the current one.
 
 Each square represents one day. Missing notes are empty, and existing notes with
-zero words have an outline. The four color levels represent **1–149**, **150–399**,
+zero words have an outline. A day with several notes counts all of them together. The four color levels represent **1–149**, **150–399**,
 **400–999**, and **1,000+** words. Hover or select a day to see its date and count,
 then choose **Open in journal** to visit an existing entry. Arrow keys move between
 days; Home and End move to the first and last day of the year. Narrow panes scroll

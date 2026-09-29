@@ -295,6 +295,10 @@ function sameFindRanges(left: FindRange[], right: FindRange[]): boolean {
 export class NoteEntry {
 	readonly el: HTMLElement;
 
+	/** Divider naming a note that is not the first shown under its day. */
+	private headingEl: HTMLElement;
+	private labelEl: HTMLElement;
+	private actionsEl: HTMLElement;
 	private metadataEl: HTMLElement;
 	private bodyEl: HTMLElement;
 
@@ -317,6 +321,13 @@ export class NoteEntry {
 	private endReveal: (() => void) | null = null;
 
 	private lastKnownContent = "";
+	/**
+	 * False until the entry has read its note. An editor opened before then
+	 * would start from an empty body, and saving it would replace the note.
+	 */
+	private loaded = false;
+	/** The note was deleted under unsaved edits; saving writes it back at `path`. */
+	private recovering = false;
 	/** Newest complete file content, including external frontmatter held off from a dirty editor. */
 	private latestContent = "";
 	private propertyEdit: PropertyEditState | null = null;
@@ -357,6 +368,11 @@ export class NoteEntry {
 		this.file = file;
 		this.path = path;
 		this.el = createDiv({ cls: "journal-entry" });
+		this.headingEl = this.el.createDiv({ cls: "journal-entry-heading" });
+		this.headingEl.hidden = true;
+		this.labelEl = this.headingEl.createSpan({ cls: "journal-entry-label" });
+		this.headingEl.createSpan({ cls: "journal-entry-rule" });
+		this.actionsEl = this.headingEl.createDiv({ cls: "journal-entry-actions" });
 		this.metadataEl = this.el.createDiv({ cls: "journal-day-metadata" });
 		this.metadataEl.hidden = true;
 		this.bodyEl = this.el.createDiv({ cls: "journal-day-body" });
@@ -423,7 +439,8 @@ export class NoteEntry {
 	 */
 	private async offerTemplate(): Promise<void> {
 		if (this.file || !this.editor || this.editor.getValue().length > 0) return;
-		const body = editorBody(await this.host.plugin.daily.templateContent(this.date));
+		const daily = this.host.plugin.daily;
+		const body = editorBody(await daily.templateContent(daily.creationMoment(this.date)));
 		// Reading the template yields, so everything above is re-checked: the
 		// reader may have typed, left, or the note may have appeared, in
 		// between. An offer landing after they left would have nothing to
@@ -470,6 +487,11 @@ export class NoteEntry {
 		return this.editor !== null;
 	}
 
+	/** True once the entry has read its note, and can be edited. */
+	get isLoaded(): boolean {
+		return this.loaded;
+	}
+
 	/** False for an entry the layout is ignoring, e.g. inside a hidden day. */
 	get isLaidOut(): boolean {
 		return this.el.offsetParent !== null;
@@ -478,6 +500,29 @@ export class NoteEntry {
 	/** True while the reader's cursor is in this entry's editor. */
 	get isEditorFocused(): boolean {
 		return this.focused;
+	}
+
+	/** True when the journal's filters leave this note out of its day. */
+	get isHidden(): boolean {
+		return this.el.hasClass("journal-entry-hidden");
+	}
+
+	setHidden(hidden: boolean): void {
+		this.el.toggleClass("journal-entry-hidden", hidden);
+	}
+
+	/**
+	 * Gives the entry a divider of its own, carrying `label` and the buttons
+	 * that act on the note, or takes it away (null) for the note that sits
+	 * directly under the day's header.
+	 */
+	setHeading(label: string | null): void {
+		this.headingEl.hidden = label === null;
+		this.actionsEl.empty();
+		if (label === null) return;
+		this.labelEl.setText(label);
+		setTooltip(this.labelEl, this.path, { placement: "top" });
+		this.renderActions(this.actionsEl);
 	}
 
 	private get date(): Moment {
@@ -543,7 +588,7 @@ export class NoteEntry {
 
 		try {
 			const { displayProperties, showTags } = this.host.plugin.settings;
-			if (!this.file || (!displayProperties.length && !showTags)) {
+			if (!this.file || !this.loaded || (!displayProperties.length && !showTags)) {
 				this.propertyEdit = null;
 				this.propertyListEdit = null;
 				this.tagEdit = null;
@@ -1300,27 +1345,65 @@ export class NoteEntry {
 		}
 	}
 
-	/**
-	 * Recomputes the expected path, e.g. after the date format changed.
-	 * Returns true when the entry now stands for a different note.
-	 */
-	revalidate(): boolean {
-		const path = this.host.plugin.daily.pathFor(this.date);
-		const file = this.host.plugin.daily.fileFor(this.date);
-		const changed = path !== this.path || file !== this.file;
-		this.path = path;
-		this.file = file;
-		if (changed) this.editor?.setFile(file);
-		return changed;
-	}
-
 	setFile(file: TFile | null): void {
 		if (this.file === file) return;
-		const previousPath = this.file?.path ?? null;
+		const previousPath = this.file?.path ?? this.path;
 		this.file = file;
 		this.path = file?.path ?? this.host.plugin.daily.pathFor(this.date);
+		this.recovering = false;
 		this.editor?.setFile(file);
 		this.host.onEntryFileChanged(this, previousPath);
+	}
+
+	/**
+	 * The note was deleted while the entry held unsaved edits. The entry keeps
+	 * them, and its path, so the next save writes the note back where it was.
+	 */
+	detachFile(): void {
+		if (!this.file) return;
+		this.file = null;
+		this.recovering = true;
+		this.editor?.setFile(null);
+		this.host.onEntryFileChanged(this, this.path);
+	}
+
+	/**
+	 * Picks up a rename of the entry's file. Obsidian renames a note in place,
+	 * so the file is the same object and any pending save follows it.
+	 */
+	syncPath(): void {
+		if (!this.file || this.file.path === this.path) return;
+		const previousPath = this.path;
+		this.path = this.file.path;
+		this.host.onEntryFileChanged(this, previousPath);
+	}
+
+	/** Makes an entry without a file the stand-in for the day's next note, at `path`. */
+	standIn(path: string): void {
+		if (this.file) return;
+		this.recovering = false;
+		this.setPendingPath(path);
+	}
+
+	private setPendingPath(path: string): void {
+		if (this.file || this.path === path) return;
+		const previousPath = this.path;
+		this.path = path;
+		this.host.onEntryFileChanged(this, previousPath);
+	}
+
+	/**
+	 * Creates the note this entry stands in for, or writes a deleted one back.
+	 * The chosen path is claimed before the file exists, so the vault event
+	 * announcing it finds this entry rather than adding a second one.
+	 */
+	private async createNote(): Promise<TFile> {
+		const daily = this.host.plugin.daily;
+		const at = daily.creationMoment(this.date);
+		const preferred = this.recovering ? this.path : daily.pathFor(at);
+		const file = await daily.create(at, preferred, (path) => this.setPendingPath(path));
+		this.setFile(file);
+		return file;
 	}
 
 	/* -------------------------------------------------------------- preview */
@@ -1406,6 +1489,7 @@ export class NoteEntry {
 	async prepare(): Promise<void> {
 		const content = await this.readContent();
 		if (this.destroyed) return;
+		this.loaded = true;
 		this.lastKnownContent = content;
 		this.refreshMetadata(content);
 		await this.renderPreview(content);
@@ -1525,7 +1609,7 @@ export class NoteEntry {
 	 * behind for the reader to release with their first click.
 	 */
 	mountEditor(): void {
-		if (this.destroyed || this.editor) return;
+		if (this.destroyed || this.editor || !this.loaded) return;
 		this.modeToken++;
 		this.pendingTemplate = null;
 		this.heldHeight = this.bodyEl.offsetHeight;
@@ -1624,6 +1708,7 @@ export class NoteEntry {
 		// Measurement should normally have released the guard before the
 		// reader arrives; focus is the defensive fallback.
 		this.releaseHeight();
+		this.el.addClass("journal-entry-active");
 		this.host.onEntryFocus(this);
 		// Focus is the one signal every way in shares - a click the editor
 		// swallowed, a keyboard tab, or a jump to a date.
@@ -1649,6 +1734,7 @@ export class NoteEntry {
 	private onEditorBlur(): void {
 		this.focusSettleToken++;
 		this.focused = false;
+		this.el.removeClass("journal-entry-active");
 		this.host.onEntryFocus(this);
 		// Leaving an entry the reader only looked at costs them nothing.
 		if (this.withdrawTemplate()) return;
@@ -1776,6 +1862,8 @@ export class NoteEntry {
 	async reload(knownContent?: string): Promise<void> {
 		const content = knownContent ?? (await this.readContent());
 		if (this.destroyed) return;
+		// Known from here on, whichever way it is applied below.
+		this.loaded = true;
 		this.refreshMetadata(content);
 		if (this.editor) {
 			this.applyExternalContent(content);
@@ -1826,8 +1914,7 @@ export class NoteEntry {
 				// Created from the template, then written over below: the reader
 				// is already typing into the template's body, and going through
 				// it here is what carries its frontmatter onto the new note.
-				file = await this.host.plugin.daily.create(this.date);
-				this.setFile(file);
+				file = await this.createNote();
 			}
 			// The callback receives the latest vault content, so frontmatter changes
 			// made by Properties, Sync, or another view are not overwritten.
@@ -1846,8 +1933,7 @@ export class NoteEntry {
 	private async createNow(): Promise<void> {
 		if (this.file) return;
 		try {
-			const file = await this.host.plugin.daily.create(this.date);
-			this.setFile(file);
+			await this.createNote();
 			await this.reload();
 			this.focusEditor();
 		} catch (error) {
@@ -1860,8 +1946,7 @@ export class NoteEntry {
 		let file = this.file;
 		if (!file) {
 			try {
-				file = await this.host.plugin.daily.create(this.date);
-				this.setFile(file);
+				file = await this.createNote();
 			} catch (error) {
 				console.error(`Journal View: could not create ${this.path}`, error);
 				return;

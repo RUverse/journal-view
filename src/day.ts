@@ -2,6 +2,7 @@ import { App, TFile, setTooltip } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { EntryHost, NoteEntry } from "./entry";
+import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 
 /** The bits of the journal view a day needs to talk to. */
@@ -9,10 +10,12 @@ export interface DayHost {
 	app: App;
 	leaf: WorkspaceLeaf;
 	plugin: JournalViewPlugin;
-	/** Called when a day's underlying file appears, disappears or is renamed. */
+	/** Called when one of a day's files appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
 	/** True when this date passes the journal's current visibility rules. */
 	isVisibleDay(day: DaySection): boolean;
+	/** True when this note passes the journal's filters on its own. */
+	isVisibleEntry(day: DaySection, entry: NoteEntry): boolean;
 	/** True while `el` is out of sight, where a body inside it can be swapped unseen. */
 	isOffScreen(el: HTMLElement): boolean;
 	/** Re-indexes find results after one of this day's visible bodies changes. */
@@ -30,20 +33,28 @@ export interface DayHost {
  * under it. The day is the unit the view loads, trims and anchors the scroll
  * position to; everything that belongs to a note - its editor or preview, its
  * properties, saving and find state - lives in a `NoteEntry`.
+ *
+ * A day always holds at least one entry. With no note yet, that entry has no
+ * file and stands in for the note the reader can start writing.
  */
 export class DaySection implements EntryHost {
 	readonly el: HTMLElement;
 	readonly key: string;
 	/** The notes shown under this date, in order. */
-	readonly entries: NoteEntry[];
+	readonly entries: NoteEntry[] = [];
 
 	private yearEl: HTMLElement;
 	private monthEl: HTMLElement;
 	private cardEl: HTMLElement;
 	private headerEl: HTMLElement;
 	private titleEl: HTMLElement;
+	/** Names the first note when the file name says more than the date, e.g. its time. */
+	private noteLabelEl: HTMLElement;
 	private actionsEl: HTMLElement;
+	private entriesEl: HTMLElement;
 	private destroyed = false;
+	/** Set while entries are reconciled, which refreshes the day once at the end. */
+	private syncing = false;
 
 	constructor(
 		private host: DayHost,
@@ -77,28 +88,28 @@ export class DaySection implements EntryHost {
 				cls: "journal-day-date",
 				text: this.formatHeader(),
 			});
-			const relative = this.relativeLabel();
-			if (relative) this.titleEl.createSpan({ cls: "journal-day-badge", text: relative });
 		} else {
 			this.titleEl.hidden = true;
 		}
+		this.noteLabelEl = this.titleEl.createSpan({ cls: "journal-day-note-label" });
+		this.noteLabelEl.hidden = true;
+		const relative = this.relativeLabel();
+		if (relative && headerStyle !== "hidden") {
+			this.titleEl.createSpan({ cls: "journal-day-badge", text: relative });
+		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
-
-		const daily = host.plugin.daily;
-		const entry = new NoteEntry(this, daily.fileFor(date), daily.pathFor(date));
-		this.entries = [entry];
-		this.cardEl.appendChild(entry.el);
+		this.entriesEl = this.cardEl.createDiv({ cls: "journal-day-entries" });
 
 		this.el.addEventListener("focusout", () => {
 			// Focus often moves between the editor and metadata controls inside the
 			// same day. Wait for that move to settle before releasing the temporary
 			// focused-day visibility guard.
 			window.setTimeout(() => {
-				if (!this.destroyed && !this.hasFocus) this.host.onDayFocusChanged(this);
+				if (!this.destroyed && !this.hasFocus) this.onFocusLeft();
 			}, 0);
 		});
 
-		this.refreshState();
+		this.syncEntries();
 	}
 
 	get app(): App {
@@ -113,18 +124,14 @@ export class DaySection implements EntryHost {
 		return this.host.plugin;
 	}
 
-	/** The entry the header's buttons act on. */
+	/** The entry directly under the header, which the header's buttons act on. */
 	private get lead(): NoteEntry {
-		return this.entries[0];
+		return this.entries.find((entry) => !entry.isHidden) ?? this.entries[0];
 	}
 
-	/** Where the day's note lives, or will once it is written. */
-	get path(): string {
-		return this.lead.path;
-	}
-
-	get file(): TFile | null {
-		return this.lead.file;
+	/** The entry showing `file`, if this day has one. */
+	entryFor(file: TFile): NoteEntry | undefined {
+		return this.entries.find((entry) => entry.file === file);
 	}
 
 	/* ---------------------------------------------------------------- state */
@@ -189,39 +196,181 @@ export class DaySection implements EntryHost {
 		return this.offset === 0 ? "Today" : null;
 	}
 
+	/**
+	 * What names a note beyond its date: the time its file name records, when
+	 * the date format has one, and any text after the date that a format
+	 * ending in `*` takes in. A note that is not the first shown in its day
+	 * always needs a name, so it falls back to the file's own.
+	 */
+	private labelFor(entry: NoteEntry, required: boolean): string | null {
+		const { daily, index } = this.host.plugin;
+		const location = entry.file ? index.locate(entry.file.path) : null;
+		const parts: string[] = [];
+		if (location && daily.recordsTime()) parts.push(createMoment(location.time).format("LT"));
+		if (location?.suffix) parts.push(location.suffix);
+		if (parts.length) return parts.join(" · ");
+		if (!required) return null;
+		if (!entry.file) return "New note";
+		return entry.file.basename;
+	}
+
 	/** Re-applies the classes and header buttons that depend on the day's notes. */
 	refreshState(): void {
 		this.el.toggleClass("journal-day-today", this.isToday);
 		this.el.toggleClass("journal-day-empty", !this.exists);
 		this.el.toggleClass("journal-day-future", this.offset > 0);
-		this.refreshVisibility();
-
-		this.actionsEl.empty();
-		setTooltip(this.titleEl, this.path, { placement: "right" });
-		this.lead.renderActions(this.actionsEl);
 		for (const entry of this.entries) entry.refreshState();
+		this.refreshVisibility(true);
 	}
 
-	/** Re-applies only the state that can change when focus leaves a filtered day. */
-	refreshVisibility(): void {
-		this.el.toggleClass("journal-day-hidden", !this.host.isVisibleDay(this));
+	/**
+	 * Re-applies the journal's rules to the day and to each note in it, and
+	 * reports whether anything changed. A day that is shown although none of
+	 * its notes pass - Today, or a date reached by command - shows them all
+	 * rather than an empty card.
+	 */
+	refreshVisibility(relayout = false): boolean {
+		const dayHidden = !this.host.isVisibleDay(this);
+		let changed = dayHidden !== this.isHidden;
+		this.el.toggleClass("journal-day-hidden", dayHidden);
+		const passing = this.entries.filter((entry) => this.host.isVisibleEntry(this, entry));
+		const shown = new Set(passing.length ? passing : this.entries);
+		for (const entry of this.entries) {
+			const hidden = !shown.has(entry);
+			if (entry.isHidden === hidden) continue;
+			entry.setHidden(hidden);
+			changed = true;
+			relayout = true;
+		}
+		if (relayout) this.layoutEntries();
+		return changed;
+	}
+
+	/**
+	 * Puts the first shown note directly under the day's header, which carries
+	 * its buttons, and gives every further note a divider of its own.
+	 */
+	private layoutEntries(): void {
+		const lead = this.lead;
+		for (const entry of this.entries) entry.el.toggleClass("journal-entry-lead", entry === lead);
+		this.syncFocusClasses();
+		this.actionsEl.empty();
+		setTooltip(this.titleEl, lead.path, { placement: "right" });
+		lead.renderActions(this.actionsEl);
+		const label = this.labelFor(lead, false);
+		this.noteLabelEl.setText(label ?? "");
+		this.noteLabelEl.hidden = label === null;
+		for (const entry of this.entries) {
+			entry.setHeading(entry === lead ? null : this.labelFor(entry, true));
+		}
+	}
+
+	/**
+	 * Brings the entries in line with the notes indexed for this date. Entries
+	 * of notes that are still here are kept - and with them any editor, focus
+	 * or unsaved text. Returns the entries whose content has to be read.
+	 */
+	syncEntries(): NoteEntry[] {
+		const { app, plugin } = this.host;
+		const files = plugin.index
+			.pathsFor(this.key)
+			.map((path) => app.vault.getAbstractFileByPath(path))
+			.filter((file): file is TFile => file instanceof TFile);
+		const unclaimed = new Set(this.entries);
+		const next: NoteEntry[] = [];
+		const stale: NoteEntry[] = [];
+		this.syncing = true;
+		try {
+			for (const file of files) {
+				const entry =
+					this.entries.find((candidate) => unclaimed.has(candidate) && candidate.file === file) ??
+					// An entry creating its note claims the path first.
+					this.entries.find(
+						(candidate) => unclaimed.has(candidate) && !candidate.file && candidate.path === file.path,
+					);
+				if (!entry) {
+					const added = new NoteEntry(this, file, file.path);
+					next.push(added);
+					stale.push(added);
+					continue;
+				}
+				unclaimed.delete(entry);
+				if (entry.file === file) entry.syncPath();
+				else {
+					entry.setFile(file);
+					stale.push(entry);
+				}
+				next.push(entry);
+			}
+
+			for (const entry of unclaimed) {
+				const file = entry.file;
+				if (file && app.vault.getAbstractFileByPath(file.path) === file) {
+					// Renamed to another day, or out of the journal. Pending edits
+					// are handed to the save queue, which follows the file.
+					entry.destroy();
+				} else if (file && entry.isDirty) {
+					// Deleted under unsaved edits, which are kept and written
+					// back as the note on the next save.
+					entry.detachFile();
+					next.push(entry);
+				} else if (file) {
+					// Deleted. The entry goes, unless the day now needs one to
+					// stand in for its missing note.
+					if (next.length) {
+						entry.destroy();
+						continue;
+					}
+					entry.setFile(null);
+					next.push(entry);
+					stale.push(entry);
+				} else if (entry.isDirty || entry.hasFocus || !next.length) {
+					// Not written yet. Kept while the reader is in it or has typed
+					// in it, and as the stand-in for a day without notes.
+					if (!entry.isDirty) entry.standIn(plugin.daily.pathFor(this.date));
+					next.push(entry);
+				} else {
+					entry.destroy();
+				}
+			}
+
+			if (!next.length) {
+				const placeholder = new NoteEntry(this, null, plugin.daily.pathFor(this.date));
+				next.push(placeholder);
+				stale.push(placeholder);
+			}
+		} finally {
+			this.syncing = false;
+		}
+
+		this.entries.splice(0, this.entries.length, ...next);
+		this.placeEntries();
+		this.refreshState();
+		return stale.filter((entry) => this.entries.includes(entry));
+	}
+
+	/**
+	 * Arranges the entry elements in entry order. Moving an element takes focus
+	 * out of it, so an entry the reader is in stays put and the others are
+	 * arranged around it.
+	 */
+	private placeEntries(): void {
+		const elements = this.entries.map((entry) => entry.el);
+		const current = Array.from(this.entriesEl.children);
+		if (current.length === elements.length && current.every((el, index) => el === elements[index])) return;
+		const pivot = this.entries.find((entry) => entry.hasFocus)?.el;
+		if (!pivot || pivot.parentElement !== this.entriesEl) {
+			this.entriesEl.append(...elements);
+			return;
+		}
+		const at = elements.indexOf(pivot);
+		pivot.before(...elements.slice(0, at));
+		pivot.after(...elements.slice(at + 1));
 	}
 
 	/** Repaints every entry's metadata strip from its latest content. */
 	refreshMetadata(): void {
 		for (const entry of this.entries) entry.refreshMetadata();
-	}
-
-	/** Recomputes the expected path, e.g. after the date format changed. */
-	revalidate(): void {
-		const entry = this.lead;
-		if (!entry.revalidate()) return;
-		this.refreshState();
-		void entry.reload();
-	}
-
-	setFile(file: TFile | null): void {
-		this.lead.setFile(file);
 	}
 
 	/**
@@ -232,18 +381,19 @@ export class DaySection implements EntryHost {
 		await Promise.all(this.entries.map((entry) => entry.prepare()));
 	}
 
-	/** Brings the day's note up to date with its current content on disk. */
-	async reload(knownContent?: string): Promise<void> {
-		await this.lead.reload(knownContent);
+	/** Brings every note in the day up to date with its content on disk. */
+	async reload(): Promise<void> {
+		await Promise.all(this.entries.map((entry) => entry.reload()));
 	}
 
 	/**
 	 * Puts the reader in the day's editor. `atEnd` carries on after the last
-	 * entry, which is where writing continues; otherwise the first one takes it.
-	 * Returns false when the guarded editor mount failed.
+	 * shown note, which is where writing continues; otherwise the first one
+	 * takes it. Returns false when the guarded editor mount failed.
 	 */
 	focusEditor(atEnd = false): boolean {
-		const entry = atEnd ? this.entries[this.entries.length - 1] : this.entries[0];
+		const shown = this.entries.filter((entry) => !entry.isHidden);
+		const entry = (atEnd ? shown[shown.length - 1] : shown[0]) ?? this.entries[0];
 		return entry.focusEditor(atEnd);
 	}
 
@@ -264,6 +414,7 @@ export class DaySection implements EntryHost {
 	}
 
 	onEntryFileChanged(_entry: NoteEntry, previousPath: string | null): void {
+		if (this.syncing) return;
 		this.refreshState();
 		this.host.onDayFileChanged(this, previousPath);
 	}
@@ -273,13 +424,40 @@ export class DaySection implements EntryHost {
 	}
 
 	onEntryFocus(_entry: NoteEntry): void {
-		this.el.toggleClass(
-			"journal-day-focused",
-			this.entries.some((entry) => entry.isEditorFocused),
-		);
+		this.syncFocusClasses();
+	}
+
+	/**
+	 * Marks the day while the reader writes in it, and separately while they
+	 * write in the note whose buttons sit in the day's header - a note's
+	 * buttons show for the note being written in, not for the day.
+	 */
+	private syncFocusClasses(): void {
+		this.el.toggleClass("journal-day-focused", this.entries.some((entry) => entry.isEditorFocused));
+		this.el.toggleClass("journal-day-lead-active", this.lead.isEditorFocused);
 	}
 
 	onEntryFocusChanged(_entry: NoteEntry): void {
+		this.onFocusLeft();
+	}
+
+	/**
+	 * Focus left an entry, or the day. An empty entry kept only because the
+	 * reader was in it has served its purpose once they leave without writing,
+	 * if the day has notes of its own.
+	 */
+	private onFocusLeft(): void {
+		const unused = this.entries.filter(
+			(entry) => !entry.file && !entry.isDirty && !entry.hasFocus && this.entries.some((other) => other.file),
+		);
+		for (const entry of unused) {
+			this.entries.splice(this.entries.indexOf(entry), 1);
+			entry.destroy();
+		}
+		if (unused.length) {
+			this.refreshState();
+			for (const entry of unused) this.host.onDayFileChanged(this, entry.path);
+		}
 		this.host.onDayFocusChanged(this);
 	}
 

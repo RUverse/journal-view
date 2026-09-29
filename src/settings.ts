@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting, requireApiVersion } from "obsidian";
-import type { SettingDefinitionItem, ToggleComponent } from "obsidian";
+import type { SettingDefinition, SettingDefinitionItem, ToggleComponent } from "obsidian";
+import type { VaultDailyConfig } from "./dailyNotes";
 import type JournalViewPlugin from "./main";
 
 export const MIN_SAVE_DELAY = 200;
@@ -85,7 +86,8 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 };
 
 type SettingKey = keyof JournalViewSettings;
-type TextSettingKey = "dateFormat" | "folder" | "templatePath" | "headerFormat";
+type TextSettingKey = "headerFormat";
+type InheritedSettingKey = "dateFormat" | "folder" | "templatePath";
 type ToggleSettingKey =
 	| "richEditor"
 	| "focusTodayOnOpen"
@@ -102,10 +104,24 @@ interface JournalSettingBase {
 
 interface JournalInfoSetting extends JournalSettingBase {
 	control?: never;
+	/** Works the text out as the row is drawn, so it never shows a stale value. */
+	describe?: () => string;
 }
 
 interface JournalTextSetting extends JournalSettingBase {
 	control: { type: "text"; key: TextSettingKey; placeholder: string };
+}
+
+/** A field that follows the vault's daily-note settings while it is left empty. */
+interface JournalInheritedSetting extends JournalSettingBase {
+	control: {
+		type: "inherited";
+		key: InheritedSettingKey;
+		/** The vault's value the field follows while empty. */
+		inherited: (vault: VaultDailyConfig) => string;
+		/** Placeholder when the vault has no value either. */
+		emptyLabel: string;
+	};
 }
 
 interface JournalToggleSetting extends JournalSettingBase {
@@ -141,6 +157,7 @@ interface JournalDropdownSetting extends JournalSettingBase {
 type JournalSetting =
 	| JournalInfoSetting
 	| JournalTextSetting
+	| JournalInheritedSetting
 	| JournalToggleSetting
 	| JournalSliderSetting
 	| JournalDropdownSetting;
@@ -162,13 +179,37 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		super(app, plugin);
 	}
 
-	/** Declarative settings used for settings search in Obsidian 1.13+. */
+	/**
+	 * Declarative settings used in Obsidian 1.13+. Obsidian keeps these for as
+	 * long as the plugin is loaded, so rows showing the vault's daily-note
+	 * settings draw themselves, working those values out each time.
+	 */
 	getSettingDefinitions(): SettingDefinitionItem<SettingKey>[] {
-		return this.definitions();
+		return this.definitions().map((group) => ({
+			...group,
+			items: group.items.map((item) => this.toDefinition(item)),
+		}));
+	}
+
+	private toDefinition(item: JournalSetting): SettingDefinition<SettingKey> {
+		const { name, desc } = item;
+		if (isInheritedSetting(item)) {
+			const control = item.control;
+			return { name, desc, render: (setting) => this.renderInherited(setting.setName(name).setDesc(desc), control) };
+		}
+		const describe = !item.control ? item.describe : undefined;
+		if (describe) {
+			return {
+				name,
+				desc,
+				searchable: item.searchable,
+				render: (setting) => void setting.setName(name).setDesc(describe()),
+			};
+		}
+		return item;
 	}
 
 	private definitions(): JournalSettingGroup[] {
-		const resolved = this.plugin.daily.config();
 		return [
 			{
 				type: "group",
@@ -176,26 +217,42 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: "Current configuration",
-						desc:
-							`Leave the fields below empty to follow your vault's daily-note settings. ` +
-							`Currently resolving to: format "${resolved.format}", folder "${resolved.folder || "/"}"` +
-							(resolved.template ? `, template "${resolved.template}".` : "."),
+						desc: "Leave the fields below empty to follow your vault's daily-note settings.",
+						describe: () => this.describeConfiguration(),
 						searchable: false,
 					},
 					{
 						name: "Date format",
-						desc: "Moment.js format used for the file name of each day.",
-						control: { type: "text", key: "dateFormat", placeholder: resolved.format },
+						desc:
+							"Moment.js format used for the file name of each day. End it with * to also show " +
+							"notes named with more after the date, such as 2026-08-16 Birthday. Include a time, " +
+							"such as YYYY-MM-DD HHmm, to keep several notes a day.",
+						control: {
+							type: "inherited",
+							key: "dateFormat",
+							inherited: (vault) => vault.format,
+							emptyLabel: "YYYY-MM-DD",
+						},
 					},
 					{
 						name: "Folder",
 						desc: "Folder that holds the daily notes.",
-						control: { type: "text", key: "folder", placeholder: resolved.folder || "vault root" },
+						control: {
+							type: "inherited",
+							key: "folder",
+							inherited: (vault) => vault.folder,
+							emptyLabel: "vault root",
+						},
 					},
 					{
 						name: "Template",
 						desc: "Applied to every note this view creates, including when you write in an empty day.",
-						control: { type: "text", key: "templatePath", placeholder: resolved.template || "none" },
+						control: {
+							type: "inherited",
+							key: "templatePath",
+							inherited: (vault) => vault.template,
+							emptyLabel: "none",
+						},
 					},
 				],
 			},
@@ -378,11 +435,54 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		}
 	}
 
+	private describeConfiguration(): string {
+		const resolved = this.plugin.daily.config();
+		return (
+			`Leave the fields below empty to follow your vault's daily-note settings. ` +
+			`Currently resolving to: format "${this.plugin.daily.displayFormat(resolved)}", ` +
+			`folder "${resolved.folder || "/"}"` +
+			(resolved.template ? `, template "${resolved.template}".` : ".")
+		);
+	}
+
+	/**
+	 * A field that follows the vault's daily-note settings while it is empty.
+	 * Its placeholder shows the value it follows. Clicking into the empty field
+	 * fills that value in, ready to adjust; leaving it unchanged empties it
+	 * again, so it goes on following the vault rather than copying it.
+	 */
+	private renderInherited(setting: Setting, control: JournalInheritedSetting["control"]): void {
+		const inherited = control.inherited(this.plugin.daily.inherited());
+		setting.addText((text) => {
+			const input = text.inputEl;
+			let offered: string | null = null;
+			text
+				.setPlaceholder(inherited || control.emptyLabel)
+				.setValue(this.plugin.settings[control.key])
+				.onChange((value) => this.setControlValue(control.key, value));
+			input.addEventListener("focus", () => {
+				if (input.value || !inherited) return;
+				offered = inherited;
+				input.value = inherited;
+				input.setSelectionRange(inherited.length, inherited.length);
+			});
+			input.addEventListener("blur", () => {
+				const unchanged = offered !== null && input.value.trim() === offered;
+				offered = null;
+				if (!unchanged) return;
+				input.value = "";
+				// Edits that came back round to the vault's value would otherwise
+				// leave it saved as an override that no longer follows the vault.
+				if (this.plugin.settings[control.key]) void this.setControlValue(control.key, "");
+			});
+		});
+	}
+
 	private renderSetting(definition: JournalSetting): void {
 		if (!definition.control) {
 			this.containerEl.createEl("p", {
 				cls: "setting-item-description journal-settings-note",
-				text: definition.desc,
+				text: definition.describe?.() ?? definition.desc,
 			});
 			return;
 		}
@@ -390,6 +490,9 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		const setting = new Setting(this.containerEl).setName(definition.name).setDesc(definition.desc);
 		const control = definition.control;
 		switch (control.type) {
+			case "inherited":
+				this.renderInherited(setting, control);
+				break;
 			case "text":
 				setting.addText((text) =>
 					text
@@ -429,6 +532,10 @@ export class JournalViewSettingTab extends PluginSettingTab {
 	syncFilterControls(): void {
 		this.hideEmptyToggle?.setValue(this.plugin.settings.hideEmptyDays);
 	}
+}
+
+function isInheritedSetting(item: JournalSetting): item is JournalInheritedSetting {
+	return item.control?.type === "inherited";
 }
 
 function isSettingKey(key: string): key is keyof JournalViewSettings {

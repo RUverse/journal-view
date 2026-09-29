@@ -204,6 +204,11 @@ export class FilteredDailyNoteIndex implements OrderedDayIndex {
 		return this.keys.has(key);
 	}
 
+	/** True when this daily note passes the rules; a day is included when any of its notes does. */
+	matchesPath(path: string): boolean {
+		return this.matchingPaths.has(path);
+	}
+
 	get size(): number {
 		return this.keys.size;
 	}

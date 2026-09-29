@@ -349,8 +349,9 @@ button.journal-find-button.is-active {
 	pointer-events: none;
 }
 
-.journal-day:hover .journal-day-header-hidden .journal-day-actions,
-.journal-day-focused .journal-day-header-hidden .journal-day-actions,
+.journal-day-header-hidden:hover .journal-day-actions,
+.journal-day-card:has(.journal-entry-lead:hover) .journal-day-header-hidden .journal-day-actions,
+.journal-day-lead-active .journal-day-header-hidden .journal-day-actions,
 .journal-day-header-hidden .journal-day-actions:focus-within {
 	pointer-events: auto;
 }
@@ -367,6 +368,18 @@ button.journal-find-button.is-active {
 	flex: 0 0 auto;
 }
 
+/* The time or name of the first note, when its file name says more than the date. */
+.journal-day-note-label {
+	flex: 0 0 auto;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+
+.journal-day-note-label[hidden] {
+	display: none;
+}
+
 .journal-day-actions {
 	display: flex;
 	align-items: center;
@@ -376,8 +389,11 @@ button.journal-find-button.is-active {
 	flex: 0 0 auto;
 }
 
-.journal-day:hover .journal-day-actions,
-.journal-day-focused .journal-day-actions,
+/* The header's buttons belong to the note directly beneath it, so they show
+   for that note - hovered or written in - rather than for the whole day. */
+.journal-day-header:hover .journal-day-actions,
+.journal-day-card:has(.journal-entry-lead:hover) .journal-day-actions,
+.journal-day-lead-active .journal-day-actions,
 .journal-day-actions:focus-within {
 	opacity: 1;
 }
@@ -385,7 +401,7 @@ button.journal-find-button.is-active {
 /* With a hover-capable pointer, keep the destructive action tied to the header
    rather than the much larger day hover target. Focus always reveals it. */
 @media (hover: hover) {
-	button.journal-day-delete {
+	.journal-day-actions button.journal-day-delete {
 		opacity: 0;
 		pointer-events: none;
 		transition: opacity 120ms ease-in-out;
@@ -410,6 +426,93 @@ button.journal-day-create {
 
 button.journal-day-create:hover {
 	color: var(--text-normal);
+}
+
+/* -------------------------------------------------------------- notes --- */
+
+/* A day can hold several notes. The first sits directly under the day header;
+   each further one gets a quiet divider that names it and carries its buttons. */
+.journal-day-entries > .journal-entry + .journal-entry {
+	margin-top: var(--size-4-3);
+}
+
+.journal-entry-hidden {
+	display: none;
+}
+
+.journal-entry-heading {
+	display: flex;
+	align-items: center;
+	margin-bottom: var(--size-2-3);
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	line-height: var(--line-height-tight);
+}
+
+.journal-entry-heading[hidden] {
+	display: none;
+}
+
+.journal-entry-label {
+	flex: 0 1 auto;
+	margin-right: var(--size-4-2);
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.journal-entry-rule {
+	flex: 1 1 auto;
+	height: 1px;
+	background-color: var(--background-modifier-border);
+}
+
+.journal-entry-actions {
+	display: flex;
+	align-items: center;
+	flex: 0 0 auto;
+}
+
+/* A further note's buttons take no room until they show, so its divider line
+   runs the full width and gives way only to the buttons that appear. A hidden
+   button keeps its height, so the divider never changes height. Open shows
+   for the note being hovered or written in; delete only while the divider
+   itself is hovered. */
+.journal-entry-actions > button {
+	max-width: 0;
+	margin-left: 0;
+	padding-inline: 0;
+	overflow: hidden;
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		max-width 120ms ease-in-out,
+		margin-left 120ms ease-in-out,
+		padding-inline 120ms ease-in-out,
+		opacity 120ms ease-in-out;
+}
+
+.journal-entry:hover .journal-entry-actions > button:not(.journal-day-delete),
+.journal-entry-active .journal-entry-actions > button:not(.journal-day-delete),
+.journal-entry-heading:hover .journal-entry-actions > button,
+.journal-entry-actions > button:focus-visible {
+	max-width: var(--size-4-12);
+	margin-left: var(--size-2-2);
+	padding-inline: var(--size-2-3);
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* Without a hovering pointer, the note being written in shows both. */
+@media (hover: none) {
+	.journal-entry-active .journal-entry-actions > button.journal-day-delete {
+		max-width: var(--size-4-12);
+		margin-left: var(--size-2-2);
+		padding-inline: var(--size-2-3);
+		opacity: 1;
+		pointer-events: auto;
+	}
 }
 
 /* ----------------------------------------------------------- metadata --- */
@@ -725,9 +828,13 @@ button.journal-day-metadata-value-button:focus-visible,
 
 /* ...and more room around its text than the days around it. The bottom stands
    in for the header stacked above the text, so the two gaps read as even; it
-   is short of that sum because the card's own padding sits under the body. */
-.journal-day-today .journal-day-body {
+   is short of that sum because the card's own padding sits under the body.
+   With several notes, the room goes above the first and below the last. */
+.journal-day-today .journal-entry:first-child .journal-day-body {
 	--journal-body-pad-top: var(--size-4-8);
+}
+
+.journal-day-today .journal-entry:last-child .journal-day-body {
 	--journal-body-pad-bottom: var(--size-4-12);
 }
 

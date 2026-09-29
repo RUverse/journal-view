@@ -74,6 +74,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private readonly editors = new EditorWindow(this);
 	private walker!: DayWalker;
 
+	/** Every path a loaded day shows or will create, to the day it belongs to. */
 	private byPath = new Map<string, DaySection>();
 	private today: Moment = createMoment().startOf("day");
 	private resizeObserver: ResizeObserver | null = null;
@@ -452,9 +453,20 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private indexPaths(): void {
 		this.byPath.clear();
-		for (const section of this.sections) {
-			this.byPath.set(section.path, section);
-			if (section.file) this.byPath.set(section.file.path, section);
+		for (const section of this.sections) this.indexDay(section);
+	}
+
+	/** Maps every note path of `day` - existing or still to be created - to it. */
+	private indexDay(day: DaySection): void {
+		for (const entry of day.entries) {
+			this.byPath.set(entry.path, day);
+			if (entry.file) this.byPath.set(entry.file.path, day);
+		}
+	}
+
+	private unindexDay(day: DaySection): void {
+		for (const [path, section] of this.byPath) {
+			if (section === day) this.byPath.delete(path);
 		}
 	}
 
@@ -472,8 +484,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		if (where === "start") this.daysEl.insertBefore(fragment, this.daysEl.firstChild);
 		else this.daysEl.appendChild(fragment);
 		for (const section of sections) {
-			this.byPath.set(section.path, section);
-			if (section.file) this.byPath.set(section.file.path, section);
+			this.indexDay(section);
 			this.resizeObserver?.observe(section.el);
 		}
 		if (where === "start") this.sections.unshift(...sections);
@@ -603,8 +614,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private forget(section: DaySection): void {
 		this.resizeObserver?.unobserve(section.el);
-		this.byPath.delete(section.path);
-		if (section.file) this.byPath.delete(section.file.path);
+		this.unindexDay(section);
 		this.anchoring.forget(section);
 		section.destroy();
 	}
@@ -1077,7 +1087,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			// A filtered target may fall inside the loaded range without having a
 			// section. Insert it while still hidden, then reveal it only after its
 			// real file content is loaded so a blank editor can never replace a note.
-			const fresh = this.ensureSectionFor(offset);
+			const fresh = this.ensureSectionFor(offset, false);
 			if (fresh) {
 				void fresh.reload().then(() => {
 					if (
@@ -1111,9 +1121,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			if (candidate === null) continue;
 			const section = this.sectionAt(candidate);
 			if (!section) continue;
-			const wasHidden = section.isHidden;
-			section.refreshVisibility();
-			changed = section.isHidden !== wasHidden || changed;
+			changed = section.refreshVisibility() || changed;
 		}
 		if (!changed) return;
 		this.syncDateSeparators();
@@ -1158,25 +1166,17 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
 				this.syncWithIndex();
-				let section = this.byPath.get(file.path);
-				if (!section) section = this.ensureVisiblePath(file.path);
-				if (!section || section.file?.path !== file.path) return;
-				this.byPath.delete(file.path);
-				section.setFile(null);
-				void section.reload();
+				const section = this.byPath.get(file.path) ?? this.ensureVisiblePath(file.path);
+				if (section) this.syncDay(section);
 			}),
 		);
 
 		this.registerEvent(
 			this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
-				const previous = this.byPath.get(oldPath);
-				if (previous && previous.file?.path === oldPath) {
-					this.byPath.delete(oldPath);
-					previous.setFile(null);
-				}
-				if (!previous) this.ensureVisiblePath(oldPath);
+				this.syncWithIndex();
+				const previous = this.byPath.get(oldPath) ?? this.ensureVisiblePath(oldPath);
+				if (previous) this.syncDay(previous);
 				if (file instanceof TFile) this.attachFile(file);
-				else this.syncWithIndex();
 			}),
 		);
 
@@ -1188,12 +1188,15 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 					const key = this.plugin.index.keyForPath(file.path);
 					if (key && this.plugin.filteredIndex.has(key)) {
 						section = this.ensureSectionFor(this.walker.offsetFor(key));
+						// A day already loaded may not show this note yet.
+						if (section) this.syncDay(section);
 					}
 				}
-				if (section?.file?.path === file.path) {
+				const entry = section?.entryFor(file);
+				if (section && entry) {
 					section.refreshState();
 					this.syncDateSeparators();
-					void section.reload(data);
+					void entry.reload(data);
 				}
 			}),
 		);
@@ -1222,15 +1225,26 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		let section = this.byPath.get(file.path);
 		if (!section) {
 			// A note can appear for a day the view skipped over (sync, another
-			// window, "hide empty days" turned on). Slot it into place.
+			// window, "hide empty days" turned on), or join a day already shown.
 			const key = this.plugin.index.keyForPath(file.path);
 			const offset = key ? this.walker.offsetFor(key) : null;
 			section = offset !== null && this.walker.isVisible(offset) ? this.ensureSectionFor(offset) : undefined;
 		}
-		if (!section || section.file?.path === file.path) return;
-		if (section.path !== file.path) return;
-		section.setFile(file);
-		void section.reload();
+		if (section) this.syncDay(section);
+	}
+
+	/**
+	 * Re-reads which notes a loaded day holds after the vault changed under it,
+	 * and reads the content of any it now shows for the first time.
+	 */
+	private syncDay(day: DaySection): void {
+		const stale = day.syncEntries();
+		this.unindexDay(day);
+		this.indexDay(day);
+		this.syncDateSeparators();
+		for (const entry of stale) void entry.reload().then(() => this.editors.schedule());
+		this.editors.schedule();
+		this.find?.sectionsChanged();
 	}
 
 	/** Restores a date that became an empty, visible day after a delete or rename. */
@@ -1256,8 +1270,12 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		return true;
 	}
 
-	/** Materialises a day that falls inside the range already rendered. */
-	private ensureSectionFor(offset: number): DaySection | undefined {
+	/**
+	 * Materialises a day that falls inside the range already rendered. A new
+	 * day starts empty and reads its notes straight after, unless the caller
+	 * wants to wait for that itself (`read` false).
+	 */
+	private ensureSectionFor(offset: number, read = true): DaySection | undefined {
 		if (!this.ready || !this.sections.length) return undefined;
 		if (
 			this.compareOffsets(offset, this.sections[0].offset) < 0 ||
@@ -1272,16 +1290,24 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 		const section = this.createSection(offset);
 		this.daysEl.insertBefore(section.el, this.sections[at]?.el ?? null);
-		// The caller reloads the real content right after; the day starts
-		// empty and any growth is re-pinned by the resize observer.
+		// Any growth once the notes are read is re-pinned by the resize observer.
 		this.sections.splice(at, 0, section);
 		this.syncDateSeparators();
-		this.byPath.set(section.path, section);
-		if (section.file) this.byPath.set(section.file.path, section);
+		this.indexDay(section);
 		this.resizeObserver?.observe(section.el);
 		this.anchoring.settle();
 		this.editors.schedule();
+		if (read) void section.reload().then(() => this.editors.schedule());
 		return section;
+	}
+
+	/**
+	 * Within a day, notes are filtered one by one. A day reached by command
+	 * shows every note, like the day itself.
+	 */
+	isVisibleEntry(day: DaySection, entry: NoteEntry): boolean {
+		if (!entry.file || entry.hasFocus || day.offset === this.commandTargetOffset) return true;
+		return this.plugin.filteredIndex.matchesPath(entry.file.path);
 	}
 
 	/** Keeps each rendered section aligned with the walker's visibility rules. */
@@ -1297,9 +1323,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	onDayFileChanged(day: DaySection, previousPath: string | null): void {
-		if (previousPath) this.byPath.delete(previousPath);
-		this.byPath.set(day.path, day);
-		if (day.file) this.byPath.set(day.file.path, day);
+		if (previousPath && this.byPath.get(previousPath) === day) this.byPath.delete(previousPath);
+		this.indexDay(day);
 		this.syncDateSeparators();
 	}
 
@@ -1309,9 +1334,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	onDayFocusChanged(day: DaySection): void {
 		if (!day.el.isConnected) return;
-		const wasHidden = day.isHidden;
-		day.refreshVisibility();
-		if (day.isHidden === wasHidden) return;
+		if (!day.refreshVisibility()) return;
 		this.syncDateSeparators();
 		this.find?.sectionsChanged();
 	}
@@ -1341,14 +1364,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.plugin.filteredIndex.ensureCurrent();
 		this.syncWithIndex();
 
-		let changed = false;
 		for (const section of this.sections) {
-			const before = section.path;
-			section.revalidate();
-			if (section.path !== before) changed = true;
+			for (const entry of section.syncEntries()) void entry.reload().then(() => this.editors.schedule());
 		}
 		this.syncDateSeparators();
-		if (changed) this.indexPaths();
+		this.indexPaths();
+		this.editors.schedule();
+		this.find?.sectionsChanged();
 	}
 
 	/* ------------------------------------------------------------ settings */
