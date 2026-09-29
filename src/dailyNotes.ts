@@ -57,6 +57,15 @@ export class DailyNoteResolver {
 		};
 	}
 
+	/**
+	 * What Journal View's fields fall back to when left empty: the vault's
+	 * daily-note settings, or `YYYY-MM-DD` in the vault root.
+	 */
+	inherited(): VaultDailyConfig {
+		const vault = this.vaultConfig();
+		return { format: vault.format || FALLBACK_FORMAT, folder: trimSlashes(vault.folder), template: vault.template };
+	}
+
 	/** The date format as configured, `*` included. */
 	displayFormat(config = this.config()): string {
 		return config.wildcard ? `${config.format}${WILDCARD}` : config.format;

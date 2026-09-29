@@ -169,6 +169,9 @@ export class JournalViewSettingTab extends PluginSettingTab {
 
 	private definitions(): JournalSettingGroup[] {
 		const resolved = this.plugin.daily.config();
+		// An empty field falls back to the vault's own daily-note settings, so that
+		// is what each one shows - never Journal View's own override.
+		const inherited = this.plugin.daily.inherited();
 		return [
 			{
 				type: "group",
@@ -189,21 +192,17 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							"Moment.js format used for the file name of each day. End it with * to also show " +
 							"notes named with more after the date, such as 2026-08-16 Birthday. Include a time, " +
 							"such as YYYY-MM-DD HHmm, to keep several notes a day.",
-						control: {
-							type: "text",
-							key: "dateFormat",
-							placeholder: this.plugin.daily.displayFormat(resolved),
-						},
+						control: { type: "text", key: "dateFormat", placeholder: inherited.format },
 					},
 					{
 						name: "Folder",
 						desc: "Folder that holds the daily notes.",
-						control: { type: "text", key: "folder", placeholder: resolved.folder || "vault root" },
+						control: { type: "text", key: "folder", placeholder: inherited.folder || "vault root" },
 					},
 					{
 						name: "Template",
 						desc: "Applied to every note this view creates, including when you write in an empty day.",
-						control: { type: "text", key: "templatePath", placeholder: resolved.template || "none" },
+						control: { type: "text", key: "templatePath", placeholder: inherited.template || "none" },
 					},
 				],
 			},
