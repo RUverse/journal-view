@@ -6,6 +6,7 @@ import { DatePickerModal } from "./datePicker";
 import { FilterModal } from "./filterModal";
 import { isFilterActive } from "./filter";
 import { DayHost, DaySection } from "./day";
+import type { NoteEntry } from "./entry";
 import { DayWalker, isOffsetReachable } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
 import { distanceFromViewport, findAnchorIndex } from "./scroll";
@@ -609,13 +610,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	/**
-	 * True while a day is out of sight. Swapping a day's body is only ever
+	 * True while `el` is out of sight. Swapping a note's body is only ever
 	 * allowed here, and the answer has to be asked for again after any await -
-	 * rendering a preview takes long enough for a scroll to bring the day back.
+	 * rendering a preview takes long enough for a scroll to bring the note back.
 	 */
-	isOffScreen(day: DaySection): boolean {
+	isOffScreen(el: HTMLElement): boolean {
 		if (!this.scrollEl || this.scrollEl.clientHeight === 0) return true;
-		return this.distanceFrom(day) > 0;
+		return distanceFromViewport(this.scrollEl, el) > 0;
 	}
 
 	private distanceFrom(section: DaySection): number {
@@ -779,13 +780,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		return this.anchoring.sectionNear(this.scrollEl.scrollTop) ?? this.anchoring.section;
 	}
 
-	revealFindMatch(section: DaySection, range: FindRange): void {
-		if (!section.el.isConnected) return;
+	revealFindMatch(section: DaySection, entry: NoteEntry, range: FindRange): void {
+		if (!entry.el.isConnected) return;
 		this.centerOn(section, "instant");
-		const mounted = this.editors.mountForFind(section);
+		const mounted = this.editors.mountForFind(entry);
 		const reveal = () => {
-			if (!section.el.isConnected) return;
-			section.revealFindRange(range);
+			if (!entry.el.isConnected) return;
+			entry.revealFindRange(range);
 			this.editors.declareScroll();
 			this.anchoring.pin();
 		};

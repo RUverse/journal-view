@@ -2,10 +2,25 @@
  * Scroll geometry: pure measurements, no state and no DOM writes.
  */
 
+/**
+ * An element's distance from the top of the scroller's content. A day sits
+ * directly in the scroller, but the notes inside it are measured through the
+ * positioned day and card around them.
+ */
+export function offsetTopWithin(scroller: HTMLElement, el: HTMLElement): number {
+	let top = 0;
+	let current: HTMLElement | null = el;
+	while (current && current !== scroller) {
+		top += current.offsetTop;
+		current = current.offsetParent as HTMLElement | null;
+	}
+	return top;
+}
+
 /** Pixels between an element and the visible area; 0 means it is on screen. */
 export function distanceFromViewport(scroller: HTMLElement, el: HTMLElement): number {
 	const { scrollTop, clientHeight } = scroller;
-	const top = el.offsetTop;
+	const top = offsetTopWithin(scroller, el);
 	const bottom = top + el.offsetHeight;
 	if (bottom < scrollTop) return scrollTop - bottom;
 	if (top > scrollTop + clientHeight) return top - (scrollTop + clientHeight);
