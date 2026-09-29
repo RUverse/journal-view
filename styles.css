@@ -688,9 +688,9 @@ button.journal-day-metadata-value-button:focus-visible,
 	);
 }
 
-/* A day that has just become an editor is held at the height of the preview it
+/* A note that has just become an editor is held at the height of the preview it
    replaced until the editor completes its first real layout pass. */
-.journal-day-editing .journal-day-body {
+.journal-entry-editing .journal-day-body {
 	min-height: max(
 		calc(var(--line-height-normal) * 1em + var(--journal-body-pad-top) + var(--journal-body-pad-bottom)),
 		var(--journal-held-height, 0px)
@@ -744,8 +744,8 @@ button.journal-day-metadata-value-button:focus-visible,
 	opacity: 1;
 }
 
-/* Placeholder, shown by the view while a day's editor is empty. */
-.journal-day-blank .journal-day-body::after {
+/* Placeholder, shown by the view while a note's editor is empty. */
+.journal-entry-blank .journal-day-body::after {
 	content: attr(data-placeholder);
 	position: absolute;
 	/* Absolute children sit against the padding box, so pay the padding back
@@ -784,7 +784,7 @@ button.journal-day-metadata-value-button:focus-visible,
    clear its floating header. That host rule also matches these embedded
    editors and is more specific than the reset above, so keep it out of each
    journal day explicitly. */
-body.is-phone .journal-view .view-content .journal-day-editing .journal-day-body
+body.is-phone .journal-view .view-content .journal-entry-editing .journal-day-body
 	.markdown-source-view > .cm-editor > .cm-scroller {
 	padding-top: 0;
 }

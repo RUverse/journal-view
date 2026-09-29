@@ -59,6 +59,7 @@ Two traps, both of which look exactly like the feature being broken:
 
 - `src/main.ts`: plugin lifecycle, commands, and view registration
 - `src/view.ts` / `src/day.ts`: timeline virtualization and per-day UI
+- `src/entry.ts`: one note inside a day - editor or preview, properties, saving
 - `src/dailyNotes.ts` / `src/noteIndex.ts`: note resolution and indexing
 - `src/editor.ts` / `src/saveQueue.ts`: editing and durable writes
 

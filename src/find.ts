@@ -1,6 +1,7 @@
 import { App, getFrontMatterInfo, setIcon, setTooltip } from "obsidian";
 import type JournalViewPlugin from "./main";
 import type { DaySection } from "./day";
+import type { NoteEntry } from "./entry";
 import { isOffsetReachable } from "./dayWalk";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
@@ -21,7 +22,15 @@ function applyIcon(el: HTMLElement, ...names: string[]): void {
 interface FindMatch extends FindRange {
 	section: DaySection;
 	sectionIndex: number;
+	entry: NoteEntry;
+	/** The day the match is in, which is what a scan beyond the window targets. */
 	key: string;
+	/** The note the match is in; stays the same across a rebuild of the window. */
+	path: string;
+}
+
+function sameMatch(left: FindMatch, right: FindMatch): boolean {
+	return left.path === right.path && left.from === right.from && left.to === right.to;
 }
 
 export interface JournalFindHost {
@@ -31,7 +40,7 @@ export interface JournalFindHost {
 	sortStep(): -1 | 1;
 	setFindMode(open: boolean): void;
 	findAnchorSection(): DaySection | null;
-	revealFindMatch(section: DaySection, range: FindRange): void;
+	revealFindMatch(section: DaySection, entry: NoteEntry, range: FindRange): void;
 	loadFindDate(date: Moment): Promise<void>;
 	isFindReady(): boolean;
 }
@@ -108,7 +117,7 @@ export class JournalFind {
 		this.matches = [];
 		this.selected = null;
 		this.updateCount();
-		if (selected?.section.el.isConnected) selected.section.focusEditor();
+		if (selected?.entry.el.isConnected) selected.entry.focusEditor();
 	}
 
 	isOpen(): boolean {
@@ -153,13 +162,17 @@ export class JournalFind {
 		this.matches = [];
 
 		for (const [sectionIndex, section] of this.host.sections.entries()) {
-			if (section.isHidden) {
-				section.setFindState(query, this.caseSensitive, [], null);
-				continue;
+			for (const entry of section.entries) {
+				if (section.isHidden) {
+					entry.setFindState(query, this.caseSensitive, [], null);
+					continue;
+				}
+				const ranges = findLiteralRanges(entry.searchText(), query, this.caseSensitive);
+				entry.setFindState(query, this.caseSensitive, ranges, null);
+				for (const range of ranges) {
+					this.matches.push({ section, sectionIndex, entry, key: section.key, path: entry.path, ...range });
+				}
 			}
-			const ranges = findLiteralRanges(section.searchText(), query, this.caseSensitive);
-			section.setFindState(query, this.caseSensitive, ranges, null);
-			for (const range of ranges) this.matches.push({ section, sectionIndex, key: section.key, ...range });
 		}
 
 		let selected: FindMatch | null = null;
@@ -168,10 +181,7 @@ export class JournalFind {
 			selected = direction > 0 ? (candidates[0] ?? null) : (candidates[candidates.length - 1] ?? null);
 		}
 		if (!selected && previous) {
-			selected =
-				this.matches.find(
-					(match) => match.key === previous.key && match.from === previous.from && match.to === previous.to,
-				) ?? null;
+			selected = this.matches.find((match) => sameMatch(match, previous)) ?? null;
 		}
 		if (!selected && query) selected = this.initialMatch();
 		// A content-driven refresh may invalidate source offsets while the reader
@@ -193,15 +203,15 @@ export class JournalFind {
 	}
 
 	private select(match: FindMatch | null, reveal: boolean): void {
-		const previousSection = this.selected?.section;
+		const previousEntry = this.selected?.entry;
 		this.selected = match;
-		if (previousSection && previousSection !== match?.section && previousSection.el.isConnected) {
-			previousSection.selectFindRange(null);
+		if (previousEntry && previousEntry !== match?.entry && previousEntry.el.isConnected) {
+			previousEntry.selectFindRange(null);
 		}
 		if (match) {
-			match.section.selectFindRange(match);
+			match.entry.selectFindRange(match);
 			if (reveal) {
-				this.host.revealFindMatch(match.section, match);
+				this.host.revealFindMatch(match.section, match.entry, match);
 				window.requestAnimationFrame(() => this.focusInput());
 			}
 		}
@@ -212,12 +222,8 @@ export class JournalFind {
 	private async navigate(direction: -1 | 1): Promise<void> {
 		if (!this.open || !this.input.value || this.scanning) return;
 		this.refresh(false);
-		const at = this.selected
-			? this.matches.findIndex(
-					(match) =>
-						match.key === this.selected?.key && match.from === this.selected.from && match.to === this.selected.to,
-				)
-			: -1;
+		const selected = this.selected;
+		const at = selected ? this.matches.findIndex((match) => sameMatch(match, selected)) : -1;
 		const next = at < 0 ? (direction > 0 ? this.matches[0] : this.matches[this.matches.length - 1]) : this.matches[at + direction];
 		if (next) {
 			this.select(next, true);
@@ -312,12 +318,8 @@ export class JournalFind {
 			this.countEl.setText("No matches loaded");
 			return;
 		}
-		const at = this.selected
-			? this.matches.findIndex(
-					(match) =>
-						match.key === this.selected?.key && match.from === this.selected.from && match.to === this.selected.to,
-				)
-			: -1;
+		const selected = this.selected;
+		const at = selected ? this.matches.findIndex((match) => sameMatch(match, selected)) : -1;
 		this.countEl.setText(at >= 0 ? `${at + 1} / ${this.matches.length} loaded` : `${this.matches.length} loaded`);
 	}
 
@@ -328,7 +330,9 @@ export class JournalFind {
 	}
 
 	private clearSections(): void {
-		for (const section of this.host.sections) section.clearFindState();
+		for (const section of this.host.sections) {
+			for (const entry of section.entries) entry.clearFindState();
+		}
 	}
 
 	private cancelScan(): void {

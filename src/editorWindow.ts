@@ -1,11 +1,12 @@
 import type { DaySection } from "./day";
+import type { NoteEntry } from "./entry";
 import { distanceFromViewport } from "./scroll";
 
 /**
- * How far beyond the viewport (px) days are kept as live editors. At least a
- * screenful, so a day is an editor well before the reader can scroll to it and
- * click. Days beyond twice this go back to a preview; the gap between the two
- * keeps a day sitting on the boundary from flipping back and forth.
+ * How far beyond the viewport (px) notes are kept as live editors. At least a
+ * screenful, so a note is an editor well before the reader can scroll to it and
+ * click. Notes beyond twice this go back to a preview; the gap between the two
+ * keeps a note sitting on the boundary from flipping back and forth.
  */
 const EDITOR_MARGIN = 800;
 /** Editors mounted per frame, so a burst of them cannot stall a scroll. */
@@ -29,8 +30,8 @@ export interface EditorWindowHost {
 }
 
 /**
- * Decides which days are live editors and which are static previews, and keeps
- * a freshly built editor from dragging the view along with it.
+ * Decides which notes are live editors and which are static previews, and
+ * keeps a freshly built editor from dragging the view along with it.
  */
 export class EditorWindow {
 	private frame = 0;
@@ -67,19 +68,21 @@ export class EditorWindow {
 	}
 
 	/** Mounts a find target under the same scroll guard used by window updates. */
-	mountForFind(section: DaySection): boolean {
-		if (section.isEditing) return false;
+	mountForFind(entry: NoteEntry): boolean {
+		if (entry.isEditing) return false;
 		const before = this.host.scrollEl.scrollTop;
-		section.mountEditor();
+		entry.mountEditor();
 		this.guardMountScroll(before);
 		return true;
 	}
 
 	/**
-	 * Brings every day's mode in line with where it sits: a live editor at and
-	 * around the viewport, a static preview further out.
+	 * Brings every note's mode in line with where it sits: a live editor at and
+	 * around the viewport, a static preview further out. Notes are measured one
+	 * by one rather than by day, so a long day does not become a burst of
+	 * editors all at once.
 	 *
-	 * A day on screen is never touched. Swapping its body would move text the
+	 * A note on screen is never touched. Swapping its body would move text the
 	 * reader is looking at, and no scroll correction can undo that - a
 	 * correction can only hold a fixed point, and the reader's eye is not on
 	 * it. Days become editors while they are still out of sight, a screenful
@@ -102,28 +105,30 @@ export class EditorWindow {
 
 		// Every distance is measured before anything moves: mounting an editor
 		// changes the layout the remaining measurements would come from.
-		const mount: { section: DaySection; distance: number }[] = [];
-		const unmount: DaySection[] = [];
+		const mount: { entry: NoteEntry; distance: number }[] = [];
+		const unmount: NoteEntry[] = [];
 		for (const section of this.host.sections) {
-			// A hidden day reports its position as 0, and needs no editor.
-			if (!section.isLaidOut) {
-				if (section.isEditing) unmount.push(section);
-				continue;
+			for (const entry of section.entries) {
+				// A note in a hidden day reports its position as 0, and needs no editor.
+				if (!entry.isLaidOut) {
+					if (entry.isEditing) unmount.push(entry);
+					continue;
+				}
+				const distance = distanceFromViewport(scrollEl, entry.el);
+				if (distance > far) {
+					if (entry.isEditing) unmount.push(entry);
+					continue;
+				}
+				if (entry.isEditing || distance > near) continue;
+				if (distance === 0 && !includeVisible) continue;
+				mount.push({ entry, distance });
 			}
-			const distance = distanceFromViewport(scrollEl, section.el);
-			if (distance > far) {
-				if (section.isEditing) unmount.push(section);
-				continue;
-			}
-			if (section.isEditing || distance > near) continue;
-			if (distance === 0 && !includeVisible) continue;
-			mount.push({ section, distance });
 		}
 		if (!mount.length && !unmount.length) return;
 
-		// Giving a day back to a preview is pure housekeeping; it can wait for
+		// Giving a note back to a preview is pure housekeeping; it can wait for
 		// a gap in the gesture.
-		if (!flicking) for (const section of unmount) void section.unmountEditor();
+		if (!flicking) for (const entry of unmount) void entry.unmountEditor();
 
 		// Nearest first, so what the reader is about to reach is ready first.
 		mount.sort((a, b) => a.distance - b.distance);
@@ -132,9 +137,9 @@ export class EditorWindow {
 		// behind a fast scroll is what leaves a preview on screen, and once it
 		// is on screen this pass will not touch it.
 		let budget = flicking ? 1 : MOUNTS_PER_FRAME;
-		if (includeVisible) budget = Math.max(budget, mount.filter((entry) => entry.distance === 0).length);
+		if (includeVisible) budget = Math.max(budget, mount.filter((item) => item.distance === 0).length);
 		const before = scrollEl.scrollTop;
-		for (const entry of mount.slice(0, budget)) entry.section.mountEditor();
+		for (const item of mount.slice(0, budget)) item.entry.mountEditor();
 		if (mount.length) this.guardMountScroll(before);
 		// A fresh editor is held at the height of the preview it replaced, so
 		// this should find nothing to correct - but it is not free to assume.
