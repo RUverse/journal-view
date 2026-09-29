@@ -1242,7 +1242,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.unindexDay(day);
 		this.indexDay(day);
 		this.syncDateSeparators();
-		for (const entry of stale) void entry.reload();
+		for (const entry of stale) void entry.reload().then(() => this.editors.schedule());
 		this.editors.schedule();
 		this.find?.sectionsChanged();
 	}
@@ -1297,7 +1297,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.resizeObserver?.observe(section.el);
 		this.anchoring.settle();
 		this.editors.schedule();
-		if (read) void section.reload();
+		if (read) void section.reload().then(() => this.editors.schedule());
 		return section;
 	}
 
@@ -1365,7 +1365,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.syncWithIndex();
 
 		for (const section of this.sections) {
-			for (const entry of section.syncEntries()) void entry.reload();
+			for (const entry of section.syncEntries()) void entry.reload().then(() => this.editors.schedule());
 		}
 		this.syncDateSeparators();
 		this.indexPaths();

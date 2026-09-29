@@ -1,6 +1,6 @@
 import { moment as obsidianMoment } from "obsidian";
 
-export type MomentUnit = "day" | "days" | "week" | "month";
+export type MomentUnit = "minutes" | "day" | "days" | "week" | "month";
 
 /** The subset of Moment used by Journal View. */
 export interface Moment {

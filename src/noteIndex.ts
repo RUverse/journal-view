@@ -20,6 +20,8 @@ export interface DailyNoteLocation {
 	key: string;
 	/** Parsed from the file name; the start of the day unless the format records a time. */
 	time: number;
+	/** Text after the date, taken in by a format ending in `*`; empty otherwise. */
+	suffix: string;
 }
 
 interface IndexedNote extends DailyNoteLocation {
@@ -27,6 +29,82 @@ interface IndexedNote extends DailyNoteLocation {
 }
 
 const noteNames = new Intl.Collator(undefined, { numeric: true });
+
+/** Text after the date has to be set off from it, by a space or punctuation. */
+const SUFFIX_START = /^[\s\p{P}\p{S}]/u;
+const SUFFIX_SEPARATOR = /^[\s\p{P}\p{S}]+/u;
+
+/** What every date written in a format has in common, used to pass over other names cheaply. */
+interface DateShape {
+	/** The shortest and longest the written date can be. */
+	min: number;
+	max: number;
+	/** It always starts with an ASCII digit, as `YYYY-MM-DD` does. */
+	leadingDigit: boolean;
+	/** It always holds a run of at least this many ASCII digits, such as a year. */
+	digitRun: number;
+}
+
+const shapes = new Map<string, DateShape>();
+
+function longestDigitRun(text: string): number {
+	let longest = 0;
+	for (const run of text.match(/[0-9]+/g) ?? []) longest = Math.max(longest, run.length);
+	return longest;
+}
+
+/**
+ * Works out the shape of dates written in `format` by writing out every day
+ * of a leap year, at times that vary in width. Parsing is what costs, and a
+ * vault kept in the same folder as its daily notes asks this of every note.
+ */
+function dateShape(format: string): DateShape {
+	let shape = shapes.get(format);
+	if (!shape) {
+		shape = { min: Infinity, max: 0, leadingDigit: true, digitRun: Infinity };
+		const day = createMoment("2000-01-01", DAY_KEY_FORMAT, true);
+		for (let index = 0; index < 366; index++, day.add(1, "days")) {
+			for (const [hour, minute] of [[0, 0], [9, 5], [13, 30]]) {
+				const written = day.clone().set({ hour, minute, second: minute }).format(format);
+				shape.min = Math.min(shape.min, written.length);
+				shape.max = Math.max(shape.max, written.length);
+				shape.leadingDigit &&= /^[0-9]/.test(written);
+				shape.digitRun = Math.min(shape.digitRun, longestDigitRun(written));
+			}
+		}
+		shapes.set(format, shape);
+	}
+	return shape;
+}
+
+/** False when `name` cannot begin with a date of this shape, found without parsing it. */
+function mayHoldDate(name: string, shape: DateShape): boolean {
+	if (name.length < shape.min) return false;
+	if (shape.leadingDigit && !/^[0-9]/.test(name)) return false;
+	return shape.digitRun < 2 || longestDigitRun(name) >= shape.digitRun;
+}
+
+/**
+ * Reads a name that starts with a date written in `format` and goes on after
+ * it, set off by a space or punctuation: `2026-08-16 Birthday`. The date is
+ * parsed as strictly as a plain daily note's name, which rules out loose
+ * readings such as `2026-08-161`, and the rest has to stay in the same folder.
+ */
+function locateWithSuffix(relative: string, format: string): DailyNoteLocation | null {
+	const { min, max } = dateShape(format);
+	for (let length = min; length <= Math.min(max, relative.length - 1); length++) {
+		const rest = relative.slice(length);
+		if (!SUFFIX_START.test(rest) || rest.includes("/")) continue;
+		const parsed = createMoment(relative.slice(0, length), format, true);
+		if (!parsed.isValid()) continue;
+		return {
+			key: parsed.format(DAY_KEY_FORMAT),
+			time: parsed.valueOf(),
+			suffix: rest.replace(SUFFIX_SEPARATOR, "") || rest.trim(),
+		};
+	}
+	return null;
+}
 
 /**
  * The order notes are shown in within a day: by the time their file name
@@ -90,7 +168,7 @@ export class DailyNoteIndex implements OrderedDayIndex {
 	/** The day and time a path represents, or null if it is not a daily note. */
 	locate(path: string, config?: ResolvedDailyConfig): DailyNoteLocation | null {
 		if (!path.endsWith(".md")) return null;
-		const { folder, format } = config ?? this.resolver.config();
+		const { folder, format, wildcard } = config ?? this.resolver.config();
 
 		let relative = path.slice(0, -3);
 		if (folder) {
@@ -98,8 +176,10 @@ export class DailyNoteIndex implements OrderedDayIndex {
 			relative = relative.slice(folder.length + 1);
 		}
 
+		if (!mayHoldDate(relative, dateShape(format))) return null;
 		const parsed = createMoment(relative, format, true);
-		return parsed.isValid() ? { key: parsed.format(DAY_KEY_FORMAT), time: parsed.valueOf() } : null;
+		if (parsed.isValid()) return { key: parsed.format(DAY_KEY_FORMAT), time: parsed.valueOf(), suffix: "" };
+		return wildcard ? locateWithSuffix(relative, format) : null;
 	}
 
 	/** The notes indexed for a day, in the order they are shown. */

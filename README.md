@@ -34,7 +34,7 @@ Some Customization is only visible in the customization menu accessible from the
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View |
+| Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View; end the format with `*` to include notes with more after the date |
 | Day order | Oldest to newest | Reverses the complete timeline when set to newest to oldest |
 | Daily header format | `dddd, D MMMM` | Controls how each daily header displays its date |
 | Daily header style | Subtle | Shows each date subtly, as an H1, or hides the date display |
@@ -49,11 +49,17 @@ Some Customization is only visible in the customization menu accessible from the
 
 ## Several notes a day
 
-When your daily-note date format records a time as well as the date, for example
-`YYYY-MM-DD HHmm`, a day can hold several notes. Journal View shows all of them under that day,
-ordered by the time in their file names. The first note sits directly under the day's header, which
-shows its time; each further note gets a divider with its time and its own open and delete buttons.
-Writing in an empty day creates a note named after the current time.
+A day can hold more than one note in two ways, and Journal View shows all of them under that day:
+
+- **Text after the date.** End the date format with `*`, for example `YYYY-MM-DD*`, to also include
+  notes whose names go on after the date, such as `2026-08-16 Birthday`. The text has to be set off
+  from the date by a space or punctuation. New notes are still named with the plain date.
+- **A time in the name.** A format that records a time, for example `YYYY-MM-DD HHmm`, keeps a
+  separate note for each moment. Writing in an empty day creates a note named after the current time.
+
+Notes are ordered by their time, then by name, with the plain-date note first. The first note sits
+directly under the day's header, which shows its time or the text after its date; each further note
+gets a divider with its own label and its own open and delete buttons.
 
 ## Filters
 

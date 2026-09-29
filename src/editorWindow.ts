@@ -119,7 +119,8 @@ export class EditorWindow {
 					if (entry.isEditing) unmount.push(entry);
 					continue;
 				}
-				if (entry.isEditing || distance > near) continue;
+				// A note still being read cannot be edited; the view asks again once it is.
+				if (entry.isEditing || !entry.isLoaded || distance > near) continue;
 				if (distance === 0 && !includeVisible) continue;
 				mount.push({ entry, distance });
 			}

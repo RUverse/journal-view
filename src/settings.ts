@@ -178,14 +178,22 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						name: "Current configuration",
 						desc:
 							`Leave the fields below empty to follow your vault's daily-note settings. ` +
-							`Currently resolving to: format "${resolved.format}", folder "${resolved.folder || "/"}"` +
+							`Currently resolving to: format "${this.plugin.daily.displayFormat(resolved)}", ` +
+							`folder "${resolved.folder || "/"}"` +
 							(resolved.template ? `, template "${resolved.template}".` : "."),
 						searchable: false,
 					},
 					{
 						name: "Date format",
-						desc: "Moment.js format used for the file name of each day.",
-						control: { type: "text", key: "dateFormat", placeholder: resolved.format },
+						desc:
+							"Moment.js format used for the file name of each day. End it with * to also show " +
+							"notes named with more after the date, such as 2026-08-16 Birthday. Include a time, " +
+							"such as YYYY-MM-DD HHmm, to keep several notes a day.",
+						control: {
+							type: "text",
+							key: "dateFormat",
+							placeholder: this.plugin.daily.displayFormat(resolved),
+						},
 					},
 					{
 						name: "Folder",

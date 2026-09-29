@@ -4,12 +4,19 @@ import type { Moment } from "./moment";
 import type { JournalViewSettings } from "./settings";
 
 export interface ResolvedDailyConfig {
+	/** The date format file names are written with, without any trailing `*`. */
 	format: string;
 	folder: string;
 	template: string;
+	/** The format ended in `*`: a note's name may go on after the date. */
+	wildcard: boolean;
 }
 
+type VaultDailyConfig = Omit<ResolvedDailyConfig, "wildcard">;
+
 const FALLBACK_FORMAT = "YYYY-MM-DD";
+/** Ends a date format to take in notes named with more after the date. */
+const WILDCARD = "*";
 
 function trimSlashes(value: string): string {
 	return value.replace(/^\/+|\/+$/g, "").trim();
@@ -40,15 +47,23 @@ export class DailyNoteResolver {
 	config(): ResolvedDailyConfig {
 		const settings = this.getSettings();
 		const vault = this.vaultConfig();
+		const format = (settings.dateFormat || vault.format || FALLBACK_FORMAT).trim();
+		const wildcard = format.endsWith(WILDCARD);
 		return {
-			format: settings.dateFormat || vault.format || FALLBACK_FORMAT,
+			format: (wildcard ? format.slice(0, -WILDCARD.length).trimEnd() : format) || FALLBACK_FORMAT,
 			folder: trimSlashes(settings.folder || vault.folder || ""),
 			template: (settings.templatePath || vault.template || "").trim(),
+			wildcard,
 		};
 	}
 
-	private vaultConfig(): ResolvedDailyConfig {
-		const empty: ResolvedDailyConfig = { format: "", folder: "", template: "" };
+	/** The date format as configured, `*` included. */
+	displayFormat(config = this.config()): string {
+		return config.wildcard ? `${config.format}${WILDCARD}` : config.format;
+	}
+
+	private vaultConfig(): VaultDailyConfig {
+		const empty: VaultDailyConfig = { format: "", folder: "", template: "" };
 		try {
 			const periodic = this.app.plugins?.getPlugin("periodic-notes") as
 				| { settings?: { daily?: { enabled?: boolean; format?: string; folder?: string; template?: string } } }
@@ -114,27 +129,63 @@ export class DailyNoteResolver {
 	}
 
 	/**
-	 * Creates the note named after `date` from the configured template - pass a
-	 * `creationMoment` so formats that record a time get the current one.
+	 * The first name for a new note for `date`, starting at `preferred`, that no
+	 * file has taken. A format that records a time moves on a minute at a time
+	 * within the day, and one that ends in `*` numbers the note after the date.
+	 * A plain format names a single note per day, so its one name is returned
+	 * even when taken; null means every name the format could give is taken.
+	 */
+	freePath(date: Moment, preferred = this.pathFor(date)): string | null {
+		const taken = (path: string) => this.app.vault.getAbstractFileByPath(path) !== null;
+		if (!taken(preferred)) return preferred;
+		const config = this.config();
+		if (formatRecordsTime(config.format)) {
+			const day = date.clone().startOf("day");
+			const at = date.clone();
+			while (at.add(1, "minutes").isSame(day, "day")) {
+				const path = this.pathFor(at);
+				if (!taken(path)) return path;
+			}
+		}
+		if (config.wildcard) {
+			const base = preferred.slice(0, -".md".length);
+			for (let number = 2; number < 1000; number++) {
+				const path = `${base} ${number}.md`;
+				if (!taken(path)) return path;
+			}
+		}
+		return config.wildcard || formatRecordsTime(config.format) ? null : preferred;
+	}
+
+	/**
+	 * Creates a note for `date` from the configured template, at `preferred` or
+	 * the first free name after it (see `freePath`), so a new note never lands
+	 * in a file another note already has. Pass a `creationMoment` so formats
+	 * that record a time get the current one. `claim` hears the chosen path
+	 * before the file exists.
+	 *
 	 * Callers that have body text of their own write it over the result, which
 	 * keeps the template's frontmatter without duplicating it.
 	 */
-	async create(date: Moment): Promise<TFile> {
-		const path = this.pathFor(date);
-		const existing = this.app.vault.getAbstractFileByPath(path);
-		if (existing instanceof TFile) return existing;
-
-		await this.ensureFolder(path);
+	async create(date: Moment, preferred = this.pathFor(date), claim?: (path: string) => void): Promise<TFile> {
 		const body = await this.templateContent(date);
-		try {
-			return await this.app.vault.create(path, body);
-		} catch (error) {
-			// Someone (another view, a sync client) may have created it in the
-			// meantime - reuse it rather than failing the keystroke.
-			const raced = this.app.vault.getAbstractFileByPath(path);
-			if (raced instanceof TFile) return raced;
-			throw error;
+		// A name can be taken between choosing it and creating the file - by
+		// another view, or a sync client. Choose again when that happens.
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const path = this.freePath(date, preferred);
+			if (!path) break;
+			// A plain format's one note for the day already exists: write to it.
+			const existing = this.app.vault.getAbstractFileByPath(path);
+			if (existing instanceof TFile) return existing;
+			claim?.(path);
+			await this.ensureFolder(path);
+			try {
+				return await this.app.vault.create(path, body);
+			} catch (error) {
+				if (!this.app.vault.getAbstractFileByPath(path)) throw error;
+			}
 		}
+		throw new Error(`No free name for a new note at ${preferred}`);
 	}
 
 	private async ensureFolder(filePath: string): Promise<void> {

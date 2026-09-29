@@ -198,15 +198,17 @@ export class DaySection implements EntryHost {
 
 	/**
 	 * What names a note beyond its date: the time its file name records, when
-	 * the date format has one. A note that is not the first shown in its day
+	 * the date format has one, and any text after the date that a format
+	 * ending in `*` takes in. A note that is not the first shown in its day
 	 * always needs a name, so it falls back to the file's own.
 	 */
 	private labelFor(entry: NoteEntry, required: boolean): string | null {
 		const { daily, index } = this.host.plugin;
-		if (daily.recordsTime() && entry.file) {
-			const location = index.locate(entry.file.path);
-			if (location) return createMoment(location.time).format("LT");
-		}
+		const location = entry.file ? index.locate(entry.file.path) : null;
+		const parts: string[] = [];
+		if (location && daily.recordsTime()) parts.push(createMoment(location.time).format("LT"));
+		if (location?.suffix) parts.push(location.suffix);
+		if (parts.length) return parts.join(" · ");
 		if (!required) return null;
 		if (!entry.file) return "New note";
 		return entry.file.basename;
@@ -305,11 +307,15 @@ export class DaySection implements EntryHost {
 					// Renamed to another day, or out of the journal. Pending edits
 					// are handed to the save queue, which follows the file.
 					entry.destroy();
+				} else if (file && entry.isDirty) {
+					// Deleted under unsaved edits, which are kept and written
+					// back as the note on the next save.
+					entry.detachFile();
+					next.push(entry);
 				} else if (file) {
-					// Deleted. Unsaved text is kept, to be written as a new note;
-					// otherwise the entry goes, unless the day now needs one to
+					// Deleted. The entry goes, unless the day now needs one to
 					// stand in for its missing note.
-					if (!entry.isDirty && next.length) {
+					if (next.length) {
 						entry.destroy();
 						continue;
 					}
@@ -319,7 +325,7 @@ export class DaySection implements EntryHost {
 				} else if (entry.isDirty || entry.hasFocus || !next.length) {
 					// Not written yet. Kept while the reader is in it or has typed
 					// in it, and as the stand-in for a day without notes.
-					if (!entry.isDirty) entry.setPendingPath(plugin.daily.pathFor(this.date));
+					if (!entry.isDirty) entry.standIn(plugin.daily.pathFor(this.date));
 					next.push(entry);
 				} else {
 					entry.destroy();

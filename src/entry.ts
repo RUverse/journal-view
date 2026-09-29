@@ -321,6 +321,13 @@ export class NoteEntry {
 	private endReveal: (() => void) | null = null;
 
 	private lastKnownContent = "";
+	/**
+	 * False until the entry has read its note. An editor opened before then
+	 * would start from an empty body, and saving it would replace the note.
+	 */
+	private loaded = false;
+	/** The note was deleted under unsaved edits; saving writes it back at `path`. */
+	private recovering = false;
 	/** Newest complete file content, including external frontmatter held off from a dirty editor. */
 	private latestContent = "";
 	private propertyEdit: PropertyEditState | null = null;
@@ -480,6 +487,11 @@ export class NoteEntry {
 		return this.editor !== null;
 	}
 
+	/** True once the entry has read its note, and can be edited. */
+	get isLoaded(): boolean {
+		return this.loaded;
+	}
+
 	/** False for an entry the layout is ignoring, e.g. inside a hidden day. */
 	get isLaidOut(): boolean {
 		return this.el.offsetParent !== null;
@@ -576,7 +588,7 @@ export class NoteEntry {
 
 		try {
 			const { displayProperties, showTags } = this.host.plugin.settings;
-			if (!this.file || (!displayProperties.length && !showTags)) {
+			if (!this.file || !this.loaded || (!displayProperties.length && !showTags)) {
 				this.propertyEdit = null;
 				this.propertyListEdit = null;
 				this.tagEdit = null;
@@ -1338,8 +1350,21 @@ export class NoteEntry {
 		const previousPath = this.file?.path ?? this.path;
 		this.file = file;
 		this.path = file?.path ?? this.host.plugin.daily.pathFor(this.date);
+		this.recovering = false;
 		this.editor?.setFile(file);
 		this.host.onEntryFileChanged(this, previousPath);
+	}
+
+	/**
+	 * The note was deleted while the entry held unsaved edits. The entry keeps
+	 * them, and its path, so the next save writes the note back where it was.
+	 */
+	detachFile(): void {
+		if (!this.file) return;
+		this.file = null;
+		this.recovering = true;
+		this.editor?.setFile(null);
+		this.host.onEntryFileChanged(this, this.path);
 	}
 
 	/**
@@ -1353,8 +1378,14 @@ export class NoteEntry {
 		this.host.onEntryFileChanged(this, previousPath);
 	}
 
-	/** Moves where an entry without a file will create its note. */
-	setPendingPath(path: string): void {
+	/** Makes an entry without a file the stand-in for the day's next note, at `path`. */
+	standIn(path: string): void {
+		if (this.file) return;
+		this.recovering = false;
+		this.setPendingPath(path);
+	}
+
+	private setPendingPath(path: string): void {
 		if (this.file || this.path === path) return;
 		const previousPath = this.path;
 		this.path = path;
@@ -1362,15 +1393,15 @@ export class NoteEntry {
 	}
 
 	/**
-	 * Creates the note this entry stands in for. The path is claimed before the
-	 * file exists, so the vault event announcing it finds this entry rather than
-	 * adding a second one for the same note.
+	 * Creates the note this entry stands in for, or writes a deleted one back.
+	 * The chosen path is claimed before the file exists, so the vault event
+	 * announcing it finds this entry rather than adding a second one.
 	 */
 	private async createNote(): Promise<TFile> {
 		const daily = this.host.plugin.daily;
 		const at = daily.creationMoment(this.date);
-		this.setPendingPath(daily.pathFor(at));
-		const file = await daily.create(at);
+		const preferred = this.recovering ? this.path : daily.pathFor(at);
+		const file = await daily.create(at, preferred, (path) => this.setPendingPath(path));
 		this.setFile(file);
 		return file;
 	}
@@ -1458,6 +1489,7 @@ export class NoteEntry {
 	async prepare(): Promise<void> {
 		const content = await this.readContent();
 		if (this.destroyed) return;
+		this.loaded = true;
 		this.lastKnownContent = content;
 		this.refreshMetadata(content);
 		await this.renderPreview(content);
@@ -1577,7 +1609,7 @@ export class NoteEntry {
 	 * behind for the reader to release with their first click.
 	 */
 	mountEditor(): void {
-		if (this.destroyed || this.editor) return;
+		if (this.destroyed || this.editor || !this.loaded) return;
 		this.modeToken++;
 		this.pendingTemplate = null;
 		this.heldHeight = this.bodyEl.offsetHeight;
@@ -1828,6 +1860,8 @@ export class NoteEntry {
 	async reload(knownContent?: string): Promise<void> {
 		const content = knownContent ?? (await this.readContent());
 		if (this.destroyed) return;
+		// Known from here on, whichever way it is applied below.
+		this.loaded = true;
 		this.refreshMetadata(content);
 		if (this.editor) {
 			this.applyExternalContent(content);
