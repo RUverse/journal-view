@@ -46,7 +46,7 @@ Some Customization is only visible in the customization menu accessible from the
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |
 | Open journal on startup | Off | Opens or reveals Journal View after Obsidian restores the workspace |
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |
-| Show files from each day | Off | Lists the files created or last edited on each day at the bottom of the day; see [Files from each day](#files-from-each-day) |
+| Show file modification history | Off | Lists the files created or last edited on each day at the bottom of the day; see [File modification history](#file-modification-history) |
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
@@ -65,9 +65,9 @@ Notes are ordered by their time, then by name, with the plain-date note first. T
 directly under the day's header, which shows its time or the text after its date; each further note
 gets a divider with its own label and its own open and delete buttons.
 
-## Files from each day
+## File modification history
 
-Turn on **Files from each day** in the customization menu, or **Show files from each day** in
+Turn on **File modification history** in the customization menu, or **Show file modification history** in
 **Settings → Journal View**, to list the other files from each day at the bottom of that day. The
 list starts folded into one line, such as `3 files created · 2 last edited`; select it to see the files.
 

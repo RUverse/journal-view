@@ -146,7 +146,7 @@ tags:
 ## Notes
 MARKDOWN
 
-# Files that are not daily notes, for Files from each day. The article carries
+# Files that are not daily notes, for File modification history. The article carries
 # the date it was written in a property, which falls on a day without a note.
 write Reading/Article.md <<'MARKDOWN'
 ---
@@ -271,10 +271,10 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 5. **A template that cannot be read.** Point `daily-notes.json` at a missing file:
    the day stays empty, a warning is logged, and `dev:errors` stays clean.
 
-## Files from each day checks
+## File modification history checks
 
 `Reading/Article.md` and `Projects/Board.canvas` are ordinary files, not daily
-notes. Turn on **Files from each day** in the toolbar's Customization menu.
+notes. Turn on **File modification history** in the toolbar's Customization menu.
 
 1. **Today's list.** Both files sit under the day they were created, folded into
    one line. Opening the list shows them; folding it leaves only the count.

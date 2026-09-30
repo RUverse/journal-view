@@ -59,6 +59,21 @@ export class AppearanceModal extends Modal {
 		this.titleEl.setText("Customization");
 		this.knownProperties = this.discoverProperties();
 
+		const filesSetting = new Setting(this.contentEl)
+			.setName("File modification history")
+			.setDesc("List the files created or last edited on each day at the bottom of the day.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showDayFiles).onChange((value) => {
+					this.plugin.settings.showDayFiles = value;
+					this.persist();
+				}),
+			);
+		filesSetting.nameEl.addClass("journal-appearance-setting-name");
+		const filesIcon = filesSetting.nameEl.createSpan({ cls: "journal-appearance-setting-icon" });
+		setIcon(filesIcon, "files");
+		filesIcon.setAttribute("aria-hidden", "true");
+		filesSetting.nameEl.prepend(filesIcon);
+
 		const tagsSetting = new Setting(this.contentEl)
 			.setName("Tags")
 			.setDesc("Show tags from each daily note's frontmatter above its body.")
@@ -73,21 +88,6 @@ export class AppearanceModal extends Modal {
 		setIcon(tagsIcon, "tags");
 		tagsIcon.setAttribute("aria-hidden", "true");
 		tagsSetting.nameEl.prepend(tagsIcon);
-
-		const filesSetting = new Setting(this.contentEl)
-			.setName("Files from each day")
-			.setDesc("List the files created or last edited on each day at the bottom of the day.")
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.showDayFiles).onChange((value) => {
-					this.plugin.settings.showDayFiles = value;
-					this.persist();
-				}),
-			);
-		filesSetting.nameEl.addClass("journal-appearance-setting-name");
-		const filesIcon = filesSetting.nameEl.createSpan({ cls: "journal-appearance-setting-icon" });
-		setIcon(filesIcon, "files");
-		filesIcon.setAttribute("aria-hidden", "true");
-		filesSetting.nameEl.prepend(filesIcon);
 
 		const propertiesSetting = new Setting(this.contentEl)
 			.setName("Properties")

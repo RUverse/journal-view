@@ -338,10 +338,10 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
-				heading: "Files from each day",
+				heading: "File modification history",
 				items: [
 					{
-						name: "Show files from each day",
+						name: "Show file modification history",
 						desc:
 							"List the files created or last edited on each day at the bottom of the day, folded into " +
 							"one line until you open it. Days that only have files appear in the journal too, " +
