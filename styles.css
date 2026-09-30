@@ -548,7 +548,7 @@ button.journal-day-files-toggle {
 	border: none;
 	box-shadow: none;
 	background: none;
-	color: var(--text-faint);
+	color: var(--text-muted);
 	font-size: inherit;
 	cursor: var(--cursor);
 }
@@ -602,7 +602,7 @@ button.journal-day-files-toggle:focus-visible {
 	min-width: 0;
 	padding: var(--size-2-1) var(--size-2-2);
 	border-radius: var(--radius-s);
-	color: var(--text-faint);
+	color: var(--text-muted);
 	cursor: var(--cursor);
 }
 
