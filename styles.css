@@ -1795,7 +1795,22 @@ button.journal-appearance-settings-link:hover {
 	color: color-mix(in srgb, var(--text-faint) 35%, transparent);
 }
 
-.journal-year-progress-month:hover:not(.is-current) {
+/* Without names, the lines alone have to single out the marked month, so the
+   others step further back; still to come stays fainter than past. */
+.journal-year-progress:not(.is-labelled) .journal-year-progress-month {
+	color: color-mix(in srgb, var(--text-faint) 60%, transparent);
+}
+
+.journal-year-progress:not(.is-labelled) .journal-year-progress-month.is-current {
+	color: var(--text-normal);
+}
+
+.journal-year-progress:not(.is-labelled) .journal-year-progress-month.is-future {
+	color: color-mix(in srgb, var(--text-faint) 25%, transparent);
+}
+
+/* Outranks every shade above, so hovering brightens a month in any mode. */
+.journal-year-progress .journal-year-progress-month:hover:not(.is-current) {
 	color: var(--text-muted);
 	transition-duration: 100ms;
 }
