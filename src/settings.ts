@@ -16,8 +16,11 @@ export type DaySortDirection = "ascending" | "descending";
 export type DailyHeaderStyle = "subtle" | "h1" | "hidden";
 /** Which of a file's dates puts it under a day. */
 export type DayFilesDate = "created" | "modified" | "both";
-/** Which side of the journal column the year's month lines sit on. */
-export type YearProgressSide = "left" | "right" | "hidden";
+/**
+ * Which side of the journal column the year's month lines sit on. The
+ * experimental mode puts them on the left and names the months.
+ */
+export type YearProgressMode = "left" | "right" | "experimental" | "hidden";
 export type JournalFilterMode = "include" | "exclude";
 export type JournalFilterValue = string | number | boolean;
 
@@ -46,7 +49,7 @@ export interface JournalViewSettings {
 	/** Group rendered days beneath year boundary headings. */
 	groupDaysByYear: boolean;
 	/** Where the year progress indicator sits beside the journal, when there is room. */
-	yearProgress: YearProgressSide;
+	yearProgress: YearProgressMode;
 	/** Milliseconds of inactivity before an edited day is written to disk. */
 	saveDelay: number;
 	/** Target maximum number of day sections kept in the timeline. */
@@ -107,11 +110,16 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	dayFilesExcluded: "",
 };
 
-export const YEAR_PROGRESS_OPTIONS: Record<YearProgressSide, string> = {
+export const YEAR_PROGRESS_OPTIONS: Record<YearProgressMode, string> = {
 	left: "Left",
 	right: "Right",
+	experimental: "Experimental",
 	hidden: "Hidden",
 };
+
+export function isYearProgressMode(value: unknown): value is YearProgressMode {
+	return typeof value === "string" && Object.keys(YEAR_PROGRESS_OPTIONS).includes(value);
+}
 
 type SettingKey = keyof JournalViewSettings;
 type TextSettingKey = "headerFormat" | "dayFilesProperty" | "dayFilesExcluded";
@@ -187,7 +195,7 @@ type JournalDropdownControl =
 	| {
 			type: "dropdown";
 			key: "yearProgress";
-			options: Record<YearProgressSide, string>;
+			options: Record<YearProgressMode, string>;
 	  };
 
 interface JournalDropdownSetting extends JournalSettingBase {
@@ -341,8 +349,8 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						name: "Year progress",
 						desc:
 							"Show twelve month lines beside the journal that mark the month you are reading, " +
-							"like a scrollbar for the year; select a month to go to its first note. They appear " +
-							"only when the pane is wide enough.",
+							"like a scrollbar for the year; select a month to go to its first note. Experimental " +
+							"puts them on the left with the months named. They appear only when the pane is wide enough.",
 						control: {
 							type: "dropdown",
 							key: "yearProgress",
@@ -525,7 +533,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				}
 				break;
 			case "yearProgress":
-				if (value === "left" || value === "right" || value === "hidden") {
+				if (isYearProgressMode(value)) {
 					this.plugin.settings[key] = value;
 					changed = true;
 				}

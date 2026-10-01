@@ -1,4 +1,4 @@
-import type { YearProgressSide } from "./settings";
+import type { YearProgressMode } from "./settings";
 import { createMoment } from "./moment";
 
 /** Pane width beyond the journal column needed before the strip is drawn. */
@@ -14,8 +14,9 @@ const LABEL_MARGIN = 8;
 
 /**
  * Twelve month lines beside the journal column that follow the reader like a
- * scrollbar: every month is named, the month being read is brightest and
- * labelled with its year, and months that have not come yet are dimmest. Selecting a month moves the journal to it. It only appears
+ * scrollbar: the month being read is brightest and months that have not come
+ * yet are dimmest. The experimental mode also names every month, and the
+ * marked one's year. Selecting a month moves the journal to it. It only appears
  * when the pane has room beside the column.
  */
 export class YearProgress {
@@ -33,7 +34,7 @@ export class YearProgress {
 	constructor(
 		private readonly hostEl: HTMLElement,
 		private readonly scrollEl: HTMLElement,
-		private side: YearProgressSide,
+		private mode: YearProgressMode,
 		onPick: (year: number, month: number) => void,
 	) {
 		// Hidden until the first layout has a column to place it beside.
@@ -71,10 +72,19 @@ export class YearProgress {
 		this.layout();
 	}
 
-	setSide(side: YearProgressSide): void {
-		if (side === this.side) return;
-		this.side = side;
+	setMode(mode: YearProgressMode): void {
+		if (mode === this.mode) return;
+		this.mode = mode;
 		this.layout();
+	}
+
+	/** Every mode but right keeps the strip on the journal's left. */
+	private get onLeft(): boolean {
+		return this.mode !== "right";
+	}
+
+	private get labelled(): boolean {
+		return this.mode === "experimental";
 	}
 
 	/** Marks the day being read. Runs every scroll frame, so it only redraws on a change. */
@@ -103,9 +113,10 @@ export class YearProgress {
 	private layout(): void {
 		const column = this.columnEl;
 		const spare = column?.isConnected ? this.scrollEl.clientWidth - column.offsetWidth : 0;
-		const visible = this.side !== "hidden" && !!column && spare >= MIN_SPARE_WIDTH;
+		const visible = this.mode !== "hidden" && !!column && spare >= MIN_SPARE_WIDTH;
 		this.el.toggleClass("is-hidden", !visible);
-		this.el.toggleClass("is-left", this.side === "left");
+		this.el.toggleClass("is-left", this.onLeft);
+		this.el.toggleClass("is-labelled", this.labelled);
 		if (!visible || !column) return;
 
 		const host = this.hostEl.getBoundingClientRect();
@@ -113,7 +124,7 @@ export class YearProgress {
 		const columnRect = column.getBoundingClientRect();
 		const style = getComputedStyle(column);
 		const left =
-			this.side === "left"
+			this.onLeft
 				? columnRect.left + parseFloat(style.paddingLeft) - host.left - GAP + TARGET_PAD
 				: columnRect.right - parseFloat(style.paddingRight) - host.left + GAP - TARGET_PAD;
 		this.el.setCssProps({
@@ -126,11 +137,11 @@ export class YearProgress {
 	/** Leaves only the lines when the marked month's label would not fit in the pane. */
 	private fitLabels(): void {
 		const current = this.months.findIndex((el) => el.hasClass("is-current"));
-		if (current < 0 || this.el.hasClass("is-hidden")) return;
+		if (!this.labelled || current < 0 || this.el.hasClass("is-hidden")) return;
 		const scroll = this.scrollEl.getBoundingClientRect();
 		const label = this.labels[current].getBoundingClientRect();
 		const fits =
-			this.side === "left"
+			this.onLeft
 				? label.left >= scroll.left + LABEL_MARGIN
 				: label.right <= scroll.left + this.scrollEl.clientWidth - LABEL_MARGIN;
 		this.el.toggleClass("is-unlabelled", !fits);

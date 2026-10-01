@@ -1,6 +1,6 @@
 import { AbstractInputSuggest, App, Modal, Notice, Setting, setIcon } from "obsidian";
 import type JournalViewPlugin from "./main";
-import { YEAR_PROGRESS_OPTIONS } from "./settings";
+import { YEAR_PROGRESS_OPTIONS, isYearProgressMode } from "./settings";
 
 interface AppearanceModalOptions {
 	onDismiss?(): void;
@@ -68,7 +68,7 @@ export class AppearanceModal extends Modal {
 					.addOptions(YEAR_PROGRESS_OPTIONS)
 					.setValue(this.plugin.settings.yearProgress)
 					.onChange((value) => {
-						if (value !== "left" && value !== "right" && value !== "hidden") return;
+						if (!isYearProgressMode(value)) return;
 						this.plugin.settings.yearProgress = value;
 						this.persist();
 					}),

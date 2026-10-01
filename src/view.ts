@@ -1584,7 +1584,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.plugin.filteredIndex.ensureCurrent();
 		this.syncWithIndex();
 		this.syncFilterButton();
-		this.yearProgress?.setSide(this.plugin.settings.yearProgress);
+		this.yearProgress?.setMode(this.plugin.settings.yearProgress);
 		if (!this.ready) {
 			// A build is in flight against the old values - dropping the change
 			// here would leave the toolbar and the days disagreeing.
