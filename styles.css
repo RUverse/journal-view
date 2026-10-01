@@ -1777,6 +1777,6 @@ button.journal-appearance-settings-link:hover {
 	opacity: 1;
 }
 
-.journal-year-progress-month.is-after {
+.journal-year-progress-month.is-future {
 	opacity: 0.1;
 }

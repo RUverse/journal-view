@@ -11,8 +11,8 @@ const DAY_MS = 86_400_000;
 /**
  * Twelve month lines beside the journal column that follow the reader like a
  * scrollbar: the month being read is brightest, the earlier months of its
- * season stand out from the rest of the year before it, and the months after
- * it are dimmest. It only appears when the pane has room beside the column.
+ * season stand out from the rest of its year, and months that have not come
+ * yet are dimmest. It only appears when the pane has room beside the column.
  */
 export class YearProgress {
 	private readonly el: HTMLElement;
@@ -53,8 +53,14 @@ export class YearProgress {
 
 	/** Marks the day being read. Runs every scroll frame, so it only redraws on a change. */
 	show(date: Date): void {
+		const year = date.getFullYear();
 		const current = date.getMonth();
-		const monthKey = `${date.getFullYear()}-${current}`;
+		// The first month of the marked year that is still to come: none of a
+		// past year's, those after today's month in this year, all of a later year's.
+		const today = new Date();
+		const thisYear = today.getFullYear();
+		const firstFuture = year < thisYear ? 12 : year > thisYear ? 0 : today.getMonth() + 1;
+		const monthKey = `${year}-${current}-${firstFuture}`;
 		const day = `${monthKey}-${date.getDate()}`;
 		if (day === this.shownDay) return;
 		this.shownDay = day;
@@ -66,8 +72,8 @@ export class YearProgress {
 		const seasonStart = current - ((current + 1) % 3);
 		this.months.forEach((el, month) => {
 			el.toggleClass("is-current", month === current);
-			el.toggleClass("is-season", month >= seasonStart && month < current);
-			el.toggleClass("is-after", month > current);
+			el.toggleClass("is-season", month >= seasonStart && month < current && month < firstFuture);
+			el.toggleClass("is-future", month !== current && month >= firstFuture);
 		});
 	}
 
