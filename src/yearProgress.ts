@@ -130,12 +130,13 @@ export class YearProgress {
 			if (offset === 0) cell.el.setAttribute("aria-current", "date");
 			else cell.el.removeAttribute("aria-current");
 			cell.el.toggleClass("is-future", offset !== 0 && key >= firstFuture);
-			// The marked month carries its year, and on the wheel so do the
-			// nearest months of the years either side, until one reaches the middle.
+			// On the wheel the marked month carries its year, and so do the nearest
+			// months of the years either side, until one reaches the middle. The
+			// left and right modes hold a single year, so a hovered name needs none.
 			const cellYear = Math.floor(key / 12);
 			const nearestOfItsYear =
 				(cellYear === year - 1 && key % 12 === 11) || (cellYear === year + 1 && key % 12 === 0);
-			cell.el.toggleClass("shows-year", offset === 0 || (this.wheel && nearestOfItsYear));
+			cell.el.toggleClass("shows-year", this.wheel && (offset === 0 || nearestOfItsYear));
 		}
 		// A label of another length may no longer fit beside the strip.
 		this.fitLabels();
