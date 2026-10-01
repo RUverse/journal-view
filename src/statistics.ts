@@ -125,8 +125,8 @@ export class JournalStatistics extends Component {
 			if (words === null || !unchanged()) return null;
 			this.cache.set(path, { file, mtime, size, words });
 			if (this.cache.size > MAX_CACHED_NOTES) {
-				const oldest = this.cache.keys().next().value as string | undefined;
-				if (oldest !== undefined) this.cache.delete(oldest);
+				const oldest = this.cache.keys().next();
+				if (!oldest.done) this.cache.delete(oldest.value);
 			}
 			return { status: "ready", words };
 		} catch (error) {
