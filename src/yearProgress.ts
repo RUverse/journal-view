@@ -16,11 +16,14 @@ const LABEL_MARGIN = 8;
  * Twelve month lines beside the journal column that follow the reader like a
  * scrollbar: the month being read is brightest and months that have not come
  * yet are dimmest. The experimental mode also names every month, and the
- * marked one's year. Selecting a month moves the journal to it. It only appears
+ * marked one's year, and turns like a wheel picker to hold the marked month
+ * in the middle. Selecting a month moves the journal to it. It only appears
  * when the pane has room beside the column.
  */
 export class YearProgress {
 	private readonly el: HTMLElement;
+	/** Carries the months, and slides to centre the marked one in the experimental mode. */
+	private readonly trackEl: HTMLElement;
 	private readonly months: HTMLElement[] = [];
 	private readonly labels: HTMLElement[] = [];
 	private readonly years: HTMLElement[] = [];
@@ -39,8 +42,9 @@ export class YearProgress {
 	) {
 		// Hidden until the first layout has a column to place it beside.
 		this.el = hostEl.createDiv({ cls: "journal-year-progress is-hidden" });
+		this.trackEl = this.el.createDiv({ cls: "journal-year-progress-track" });
 		for (let month = 0; month < 12; month++) {
-			const el = this.el.createDiv({ cls: "journal-year-progress-month" });
+			const el = this.trackEl.createDiv({ cls: "journal-year-progress-month" });
 			const label = el.createDiv({ cls: "journal-year-progress-label" });
 			this.years.push(label.createSpan({ cls: "journal-year-progress-year" }));
 			label.createSpan({ text: createMoment(new Date(2000, month, 1)).format("MMM") });
@@ -99,7 +103,9 @@ export class YearProgress {
 		const monthKey = `${year}-${current}-${firstFuture}`;
 		if (monthKey === this.drawnMonth) return;
 		this.drawnMonth = monthKey;
+		this.trackEl.setCssProps({ "--journal-year-progress-index": String(current) });
 		this.months.forEach((el, month) => {
+			el.setCssProps({ "--journal-year-progress-distance": String(Math.abs(month - current)) });
 			el.toggleClass("is-current", month === current);
 			if (month === current) el.setAttribute("aria-current", "date");
 			else el.removeAttribute("aria-current");
