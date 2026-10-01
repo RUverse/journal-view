@@ -16,6 +16,8 @@ export type DaySortDirection = "ascending" | "descending";
 export type DailyHeaderStyle = "subtle" | "h1" | "hidden";
 /** Which of a file's dates puts it under a day. */
 export type DayFilesDate = "created" | "modified" | "both";
+/** Which side of the journal column the year's month lines sit on. */
+export type YearProgressSide = "left" | "right" | "hidden";
 export type JournalFilterMode = "include" | "exclude";
 export type JournalFilterValue = string | number | boolean;
 
@@ -43,6 +45,8 @@ export interface JournalViewSettings {
 	showMonthSeparators: boolean;
 	/** Group rendered days beneath year boundary headings. */
 	groupDaysByYear: boolean;
+	/** Where the year progress indicator sits beside the journal, when there is room. */
+	yearProgress: YearProgressSide;
 	/** Milliseconds of inactivity before an edited day is written to disk. */
 	saveDelay: number;
 	/** Target maximum number of day sections kept in the timeline. */
@@ -83,6 +87,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	headerStyle: "subtle",
 	showMonthSeparators: false,
 	groupDaysByYear: true,
+	yearProgress: "left",
 	// Obsidian debounces its own `TextFileView.requestSave` by the same amount,
 	// so an edited day reaches disk as often as the note would in a normal pane.
 	saveDelay: 2000,
@@ -100,6 +105,12 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	dayFilesProperty: "",
 	dayFilesAttachments: false,
 	dayFilesExcluded: "",
+};
+
+export const YEAR_PROGRESS_OPTIONS: Record<YearProgressSide, string> = {
+	left: "Left",
+	right: "Right",
+	hidden: "Hidden",
 };
 
 type SettingKey = keyof JournalViewSettings;
@@ -172,6 +183,11 @@ type JournalDropdownControl =
 			type: "dropdown";
 			key: "dayFilesDate";
 			options: Record<DayFilesDate, string>;
+	  }
+	| {
+			type: "dropdown";
+			key: "yearProgress";
+			options: Record<YearProgressSide, string>;
 	  };
 
 interface JournalDropdownSetting extends JournalSettingBase {
@@ -320,6 +336,17 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						name: "Group days by month",
 						desc: "Show month and year once above the first visible day of each month.",
 						control: { type: "toggle", key: "showMonthSeparators" },
+					},
+					{
+						name: "Year progress",
+						desc:
+							"Show twelve month lines beside the journal, marking how far through the year today is. " +
+							"They appear only when the pane is wide enough.",
+						control: {
+							type: "dropdown",
+							key: "yearProgress",
+							options: YEAR_PROGRESS_OPTIONS,
+						},
 					},
 					{
 						name: "Focus today on open",
@@ -492,6 +519,12 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				break;
 			case "headerStyle":
 				if (value === "subtle" || value === "h1" || value === "hidden") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
+			case "yearProgress":
+				if (value === "left" || value === "right" || value === "hidden") {
 					this.plugin.settings[key] = value;
 					changed = true;
 				}

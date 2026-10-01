@@ -10,6 +10,8 @@
 }
 
 .journal-content {
+	/* Places the year progress strip beside the scroller. */
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	height: 100%;
@@ -1731,3 +1733,50 @@ button.journal-appearance-settings-link:hover {
 }
 
 .journal-statistics-selection button[hidden] { display: none; }
+
+/* ------------------------------------------------------- year progress --- */
+
+/* Twelve month lines beside the journal column. The view places the strip at
+   the card edge and centres it on the pane; it hides itself when the pane has
+   no room beside the column. It sits over the scroller rather than in it, so
+   it lets the wheel and pointer through to the journal. */
+.journal-year-progress {
+	position: absolute;
+	top: var(--journal-year-progress-top, 50%);
+	left: var(--journal-year-progress-left, 0);
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	height: min(26rem, 60%);
+	padding: var(--size-2-2) 0;
+	transform: translateY(-50%);
+	pointer-events: none;
+}
+
+.journal-year-progress.is-left {
+	transform: translate(-100%, -50%);
+}
+
+.journal-year-progress.is-hidden {
+	display: none;
+}
+
+.journal-year-progress-month {
+	width: 12px;
+	height: 2px;
+	border-radius: 1px;
+	background-color: var(--text-normal);
+	opacity: 0.25;
+}
+
+.journal-year-progress-month.is-season {
+	opacity: 0.5;
+}
+
+.journal-year-progress-month.is-current {
+	opacity: 1;
+}
+
+.journal-year-progress-month.is-future {
+	opacity: 0.1;
+}

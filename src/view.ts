@@ -12,6 +12,7 @@ import { DayWalker, isOffsetReachable } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
 import { distanceFromViewport, findAnchorIndex } from "./scroll";
 import { JournalToolbar } from "./toolbar";
+import { YearProgress } from "./yearProgress";
 import { JournalFind, JournalFindHost } from "./find";
 import type { FindRange } from "./findText";
 import { createMoment } from "./moment";
@@ -67,6 +68,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private toolbar?: JournalToolbar;
 	private find?: JournalFind;
+	private yearProgress?: YearProgress;
 	/** The open date picker, which has to go when the view does. */
 	private picker: DatePickerModal | null = null;
 	/** Appearance settings owned by this view while its modal is open. */
@@ -204,6 +206,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.find = new JournalFind(this.contentEl, this);
 
 		this.scrollEl = this.contentEl.createDiv({ cls: "journal-scroll" });
+		this.yearProgress = new YearProgress(this.contentEl, this.scrollEl, this.plugin.settings.yearProgress);
 
 		this.registerDomEvent(this.scrollEl, "scroll", () => this.onScroll(), { passive: true });
 		this.registerDomEvent(this.scrollEl, "pointerdown", () => (this.pointerHeld = true), { passive: true });
@@ -236,6 +239,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.find = undefined;
 		this.toolbar?.destroy();
 		this.toolbar = undefined;
+		this.yearProgress?.destroy();
+		this.yearProgress = undefined;
 		await this.flushAll();
 		this.teardown();
 	}
@@ -302,6 +307,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const epoch = ++this.epoch;
 
 		this.daysEl = this.scrollEl.createDiv({ cls: "journal-days" });
+		this.yearProgress?.track(this.daysEl);
 		this.lastScrollTop = 0;
 		this.lastScrollAt = 0;
 		this.scrollStep = 0;
@@ -1287,6 +1293,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			window.setInterval(() => {
 				this.revalidatePaths();
 				this.checkDayRollover();
+				this.yearProgress?.refresh();
 			}, 30_000),
 		);
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.revalidatePaths()));
@@ -1549,6 +1556,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.plugin.filteredIndex.ensureCurrent();
 		this.syncWithIndex();
 		this.syncFilterButton();
+		this.yearProgress?.setSide(this.plugin.settings.yearProgress);
 		if (!this.ready) {
 			// A build is in flight against the old values - dropping the change
 			// here would leave the toolbar and the days disagreeing.

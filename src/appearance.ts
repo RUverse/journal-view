@@ -1,5 +1,6 @@
 import { AbstractInputSuggest, App, Modal, Notice, Setting, setIcon } from "obsidian";
 import type JournalViewPlugin from "./main";
+import { YEAR_PROGRESS_OPTIONS } from "./settings";
 
 interface AppearanceModalOptions {
 	onDismiss?(): void;
@@ -88,6 +89,25 @@ export class AppearanceModal extends Modal {
 		setIcon(tagsIcon, "tags");
 		tagsIcon.setAttribute("aria-hidden", "true");
 		tagsSetting.nameEl.prepend(tagsIcon);
+
+		const progressSetting = new Setting(this.contentEl)
+			.setName("Year progress")
+			.setDesc("Mark how far through the year today is, beside the journal when the pane is wide enough.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions(YEAR_PROGRESS_OPTIONS)
+					.setValue(this.plugin.settings.yearProgress)
+					.onChange((value) => {
+						if (value !== "left" && value !== "right" && value !== "hidden") return;
+						this.plugin.settings.yearProgress = value;
+						this.persist();
+					}),
+			);
+		progressSetting.nameEl.addClass("journal-appearance-setting-name");
+		const progressIcon = progressSetting.nameEl.createSpan({ cls: "journal-appearance-setting-icon" });
+		setIcon(progressIcon, "calendar-range");
+		progressIcon.setAttribute("aria-hidden", "true");
+		progressSetting.nameEl.prepend(progressIcon);
 
 		const propertiesSetting = new Setting(this.contentEl)
 			.setName("Properties")
