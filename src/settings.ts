@@ -14,6 +14,8 @@ export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
 export type DailyHeaderStyle = "subtle" | "h1" | "hidden";
+/** Which of a file's dates puts it under a day. */
+export type DayFilesDate = "created" | "modified" | "both";
 export type JournalFilterMode = "include" | "exclude";
 export type JournalFilterValue = string | number | boolean;
 
@@ -61,6 +63,16 @@ export interface JournalViewSettings {
 	displayProperties: string[];
 	/** Chronological direction in which days are laid out. */
 	daySortDirection: DaySortDirection;
+	/** List the files from each day at the bottom of the day. */
+	showDayFiles: boolean;
+	/** Which of a file's dates puts it under a day. */
+	dayFilesDate: DayFilesDate;
+	/** Note property holding the date a note was created, used instead of the file's. Empty = file dates. */
+	dayFilesProperty: string;
+	/** Also list attachments, not only notes, canvases and bases. */
+	dayFilesAttachments: boolean;
+	/** Comma-separated folders whose files are left out of the lists. */
+	dayFilesExcluded: string;
 }
 
 export const DEFAULT_SETTINGS: JournalViewSettings = {
@@ -83,10 +95,15 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	showTags: false,
 	displayProperties: [],
 	daySortDirection: "ascending",
+	showDayFiles: false,
+	dayFilesDate: "created",
+	dayFilesProperty: "",
+	dayFilesAttachments: false,
+	dayFilesExcluded: "",
 };
 
 type SettingKey = keyof JournalViewSettings;
-type TextSettingKey = "headerFormat";
+type TextSettingKey = "headerFormat" | "dayFilesProperty" | "dayFilesExcluded";
 type InheritedSettingKey = "dateFormat" | "folder" | "templatePath";
 type ToggleSettingKey =
 	| "richEditor"
@@ -94,7 +111,9 @@ type ToggleSettingKey =
 	| "openJournalOnStartup"
 	| "hideEmptyDays"
 	| "showMonthSeparators"
-	| "groupDaysByYear";
+	| "groupDaysByYear"
+	| "showDayFiles"
+	| "dayFilesAttachments";
 
 interface JournalSettingBase {
 	name: string;
@@ -148,6 +167,11 @@ type JournalDropdownControl =
 			type: "dropdown";
 			key: "headerStyle";
 			options: Record<DailyHeaderStyle, string>;
+	  }
+	| {
+			type: "dropdown";
+			key: "dayFilesDate";
+			options: Record<DayFilesDate, string>;
 	  };
 
 interface JournalDropdownSetting extends JournalSettingBase {
@@ -305,9 +329,58 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					{
 						name: "Only show days that have a note",
 						desc:
-							"Days with no file are skipped entirely, so the journal jumps from one note to the next. " +
-							"Today is always shown. When off, every day appears, faded until you type in it.",
+							"Days with no note are skipped entirely, so the journal jumps from one note to the next. " +
+							"Today is always shown, and so are days with files while files from each day are shown. " +
+							"When off, every day appears, faded until you type in it.",
 						control: { type: "toggle", key: "hideEmptyDays" },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "File modification history",
+				items: [
+					{
+						name: "Show file modification history",
+						desc:
+							"List the files created or last edited on each day at the bottom of the day, folded into " +
+							"one line until you open it. Days that only have files appear in the journal too, " +
+							"unless an include filter is active.",
+						control: { type: "toggle", key: "showDayFiles" },
+					},
+					{
+						name: "Date",
+						desc:
+							"Which of a file's dates puts it under a day. A file only keeps its last edit, so " +
+							"last edited moves it to the latest day it changed.",
+						control: {
+							type: "dropdown",
+							key: "dayFilesDate",
+							options: {
+								created: "Created",
+								modified: "Last edited",
+								both: "Created and last edited",
+							},
+						},
+					},
+					{
+						name: "Created date property",
+						desc:
+							"A note property holding the date the note was created, used instead of the file's " +
+							"own date, which Sync, git and copying a vault can reset. Leave empty to use file dates.",
+						control: { type: "text", key: "dayFilesProperty", placeholder: "created" },
+					},
+					{
+						name: "Include attachments",
+						desc: "Also list images, PDFs and other files. Notes, canvases and bases are always listed.",
+						control: { type: "toggle", key: "dayFilesAttachments" },
+					},
+					{
+						name: "Excluded folders",
+						desc:
+							"Folders whose files are left out, separated by commas. Daily notes, templates and " +
+							"Obsidian's excluded files are always left out.",
+						control: { type: "text", key: "dayFilesExcluded", placeholder: "Archive, Attachments" },
 					},
 				],
 			},
@@ -386,6 +459,19 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					changed = true;
 				}
 				break;
+			case "dayFilesProperty":
+			case "dayFilesExcluded":
+				if (typeof value === "string") {
+					this.plugin.settings[key] = value.trim();
+					changed = true;
+				}
+				break;
+			case "dayFilesDate":
+				if (value === "created" || value === "modified" || value === "both") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
 			case "saveDelay":
 				if (typeof value === "number" && Number.isFinite(value)) {
 					this.plugin.settings[key] = clampSaveDelay(value);
@@ -416,6 +502,8 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "hideEmptyDays":
 			case "showMonthSeparators":
 			case "groupDaysByYear":
+			case "showDayFiles":
+			case "dayFilesAttachments":
 				if (typeof value === "boolean") {
 					this.plugin.settings[key] = value;
 					changed = true;

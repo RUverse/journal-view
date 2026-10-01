@@ -1,5 +1,6 @@
 import { App, TFile, getAllTags } from "obsidian";
 import type { CachedMetadata } from "obsidian";
+import { keyAfter, keyBefore } from "./noteIndex";
 import type { DailyNoteIndex, OrderedDayIndex } from "./noteIndex";
 import type {
 	JournalFilterMode,
@@ -15,6 +16,11 @@ export function normalizeFilterTag(value: string): string {
 
 export function isFilterActive(settings: JournalViewSettings): boolean {
 	return settings.filterRules.length > 0;
+}
+
+/** True when a rule requires something of every note, which a day without one cannot have. */
+export function hasIncludeFilter(settings: JournalViewSettings): boolean {
+	return settings.filterRules.some((rule) => rule.mode === "include");
 }
 
 function isFilterMode(value: unknown): value is JournalFilterMode {
@@ -219,27 +225,11 @@ export class FilteredDailyNoteIndex implements OrderedDayIndex {
 	}
 
 	next(key: string): string | null {
-		const list = this.list();
-		let low = 0;
-		let high = list.length;
-		while (low < high) {
-			const mid = (low + high) >> 1;
-			if (list[mid] <= key) low = mid + 1;
-			else high = mid;
-		}
-		return low < list.length ? list[low] : null;
+		return keyAfter(this.list(), key);
 	}
 
 	prev(key: string): string | null {
-		const list = this.list();
-		let low = 0;
-		let high = list.length;
-		while (low < high) {
-			const mid = (low + high) >> 1;
-			if (list[mid] < key) low = mid + 1;
-			else high = mid;
-		}
-		return low > 0 ? list[low - 1] : null;
+		return keyBefore(this.list(), key);
 	}
 
 	keysFrom(key: string, direction: -1 | 1): string[] {

@@ -1,7 +1,10 @@
 import { MarkdownView, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
+import { DayFileIndex } from "./dayFiles";
+import { FILES_HOVER_SOURCE } from "./dayFilesList";
+import { ShownDays } from "./dayWalk";
 import { WorkspaceEditorBridge } from "./editor";
-import { FilteredDailyNoteIndex, filterRulesSetting } from "./filter";
+import { FilteredDailyNoteIndex, filterRulesSetting, hasIncludeFilter } from "./filter";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
@@ -14,7 +17,7 @@ import {
 	clampLoadedDays,
 	clampSaveDelay,
 } from "./settings";
-import type { DailyHeaderStyle, DaySortDirection } from "./settings";
+import type { DailyHeaderStyle, DayFilesDate, DaySortDirection } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 import { JournalStatistics } from "./statistics";
 import { StatisticsView, VIEW_TYPE_STATISTICS } from "./statisticsView";
@@ -25,6 +28,8 @@ interface InitialJournalTarget {
 	date: Moment;
 	focusAtEnd: boolean;
 	revealThroughFilters: boolean;
+	/** The note to put the reader in, when the day has several. */
+	path?: string;
 }
 
 export default class JournalViewPlugin extends Plugin {
@@ -32,6 +37,10 @@ export default class JournalViewPlugin extends Plugin {
 	daily!: DailyNoteResolver;
 	index!: DailyNoteIndex;
 	filteredIndex!: FilteredDailyNoteIndex;
+	/** The files from each day, while the journal lists them. */
+	dayFiles!: DayFileIndex;
+	/** The days the journal shows while empty days are hidden. */
+	shownDays!: ShownDays;
 	statistics!: JournalStatistics;
 	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
@@ -85,6 +94,14 @@ export default class JournalViewPlugin extends Plugin {
 		this.statistics = this.addChild(new JournalStatistics(this.app));
 		this.index = new DailyNoteIndex(this.app, this.daily);
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
+		this.dayFiles = new DayFileIndex(this.app, this.index, this.daily, () => this.settings);
+		// File history never makes an empty day eligible in note-only mode.
+		// Include filters also cannot match a day without a note.
+		this.shownDays = new ShownDays(this.index, this.filteredIndex, () =>
+			this.settings.showDayFiles && !this.settings.hideEmptyDays && !hasIncludeFilter(this.settings)
+				? this.dayFiles
+				: null,
+		);
 		// onLayoutReady queues callbacks without returning an EventRef, so they
 		// need an explicit guard when the plugin unloads before layout restoration.
 		let layoutReadyCallbacksEnabled = true;
@@ -98,6 +115,7 @@ export default class JournalViewPlugin extends Plugin {
 			if (!layoutReadyCallbacksEnabled) return;
 			this.index.rebuild();
 			this.filteredIndex.rebuild();
+			this.dayFiles.rebuild();
 			this.syncDailyNoteActions();
 		});
 		this.registerEvent(
@@ -105,13 +123,20 @@ export default class JournalViewPlugin extends Plugin {
 				if (file instanceof TFile) {
 					this.index.handleCreate(file);
 					this.filteredIndex.ensureCurrent();
+					this.dayFiles.update(file);
 				}
+			}),
+		);
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (file instanceof TFile) this.dayFiles.update(file);
 			}),
 		);
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
 				this.index.handleDelete(file.path);
 				this.filteredIndex.ensureCurrent();
+				this.dayFiles.remove(file.path);
 			}),
 		);
 		this.registerEvent(
@@ -119,12 +144,15 @@ export default class JournalViewPlugin extends Plugin {
 				this.index.handleDelete(oldPath);
 				if (file instanceof TFile) this.index.handleCreate(file);
 				this.filteredIndex.ensureCurrent();
+				this.dayFiles.update(file, oldPath);
 				this.syncDailyNoteActions();
 			}),
 		);
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (file) => {
 				this.filteredIndex.handleMetadataChange(file);
+				// A note's created date can come from one of its properties.
+				this.dayFiles.update(file);
 			}),
 		);
 		this.registerEvent(this.app.workspace.on("file-open", () => this.syncDailyNoteActions()));
@@ -135,6 +163,8 @@ export default class JournalViewPlugin extends Plugin {
 		this.register(() => this.clearDailyNoteActions());
 
 		this.registerView(VIEW_TYPE_JOURNAL, (leaf) => new JournalView(leaf, this));
+		// Listed under Page preview, where it can be set to preview on hover.
+		this.registerHoverLinkSource(FILES_HOVER_SOURCE, { display: "Journal files", defaultMod: true });
 		this.registerView(VIEW_TYPE_STATISTICS, (leaf) => new StatisticsView(leaf, this));
 		this.app.workspace.onLayoutReady(() => {
 			if (!layoutReadyCallbacksEnabled || !this.settings.openJournalOnStartup) return;
@@ -207,11 +237,13 @@ export default class JournalViewPlugin extends Plugin {
 		await workspace.revealLeaf(leaf);
 	}
 
+	/** Opens the journal, on `date` when given, and on the note at `path` in it. */
 	async activateView(
 		forceNewTab = false,
 		date?: Moment,
 		focusAtEnd = false,
 		revealThroughFilters = false,
+		path?: string,
 	): Promise<void> {
 		const { workspace } = this.app;
 		const existing = workspace.getLeavesOfType(VIEW_TYPE_JOURNAL);
@@ -228,6 +260,7 @@ export default class JournalViewPlugin extends Plugin {
 					date: date.clone().startOf("day"),
 					focusAtEnd,
 					revealThroughFilters,
+					path,
 				});
 			}
 			try {
@@ -241,7 +274,7 @@ export default class JournalViewPlugin extends Plugin {
 		await workspace.revealLeaf(leaf);
 		if (date && !created && leaf.view instanceof JournalView) {
 			if (revealThroughFilters) leaf.view.goToCommandDate(date, true);
-			else leaf.view.goToDate(date, true);
+			else leaf.view.goToDate(date, true, path);
 		}
 	}
 
@@ -310,12 +343,14 @@ export default class JournalViewPlugin extends Plugin {
 		this.dailyNoteActions.clear();
 	}
 
+	/** Opens the journal on the day of the note in `view`, in that very note. */
 	private async openDailyNoteInJournal(view: MarkdownView): Promise<void> {
-		const key = view.file ? this.index.keyForPath(view.file.path) : null;
+		const path = view.file?.path;
+		const key = path ? this.index.keyForPath(path) : null;
 		if (!key) return;
 		const date = createMoment(key, DAY_KEY_FORMAT, true);
 		if (!date.isValid()) return;
-		await this.activateView(false, date);
+		await this.activateView(false, date, false, false, path);
 	}
 
 	async loadSettings(): Promise<void> {
@@ -351,6 +386,11 @@ export default class JournalViewPlugin extends Plugin {
 			showTags: booleanSetting(saved.showTags, DEFAULT_SETTINGS.showTags),
 			displayProperties: propertyNamesSetting(saved.displayProperties),
 			daySortDirection: daySortDirectionSetting(saved.daySortDirection),
+			showDayFiles: booleanSetting(saved.showDayFiles, DEFAULT_SETTINGS.showDayFiles),
+			dayFilesDate: dayFilesDateSetting(saved.dayFilesDate),
+			dayFilesProperty: stringSetting(saved.dayFilesProperty, DEFAULT_SETTINGS.dayFilesProperty).trim(),
+			dayFilesAttachments: booleanSetting(saved.dayFilesAttachments, DEFAULT_SETTINGS.dayFilesAttachments),
+			dayFilesExcluded: stringSetting(saved.dayFilesExcluded, DEFAULT_SETTINGS.dayFilesExcluded),
 		};
 	}
 
@@ -358,6 +398,7 @@ export default class JournalViewPlugin extends Plugin {
 		this.syncFilterControls();
 		await this.saveData(this.settings);
 		this.filteredIndex?.ensureCurrent();
+		this.dayFiles?.ensureCurrent();
 		this.syncDailyNoteActions();
 		if (scheduleViewUpdate) this.notifyViews();
 	}
@@ -415,4 +456,8 @@ function propertyNamesSetting(value: unknown): string[] {
 
 function daySortDirectionSetting(value: unknown): DaySortDirection {
 	return value === "descending" ? "descending" : DEFAULT_SETTINGS.daySortDirection;
+}
+
+function dayFilesDateSetting(value: unknown): DayFilesDate {
+	return value === "modified" || value === "both" ? value : DEFAULT_SETTINGS.dayFilesDate;
 }

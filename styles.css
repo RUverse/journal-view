@@ -515,6 +515,171 @@ button.journal-day-create:hover {
 	}
 }
 
+/* -------------------------------------------------------------- files --- */
+
+/* The files from a day sit under its notes as one quiet line, drawn like a
+   further note's divider, which opens into a list of plain links. */
+.journal-day-files {
+	margin-top: var(--size-4-3);
+	margin-inline: var(--size-4-3);
+	font-size: var(--font-ui-smaller);
+	line-height: var(--line-height-tight);
+}
+
+.journal-day-files[hidden],
+.journal-day-files-list[hidden],
+.journal-day-files-more[hidden] {
+	display: none;
+}
+
+.journal-day-files-heading {
+	display: flex;
+	align-items: center;
+}
+
+button.journal-day-files-toggle {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	flex: 0 1 auto;
+	min-width: 0;
+	height: auto;
+	margin-right: var(--size-4-2);
+	padding: 0;
+	border: none;
+	box-shadow: none;
+	background: none;
+	color: var(--text-muted);
+	font-size: inherit;
+	cursor: var(--cursor);
+}
+
+button.journal-day-files-toggle:hover,
+button.journal-day-files-toggle:focus-visible {
+	background: none;
+	color: var(--text-muted);
+}
+
+.journal-day-files-chevron {
+	display: flex;
+}
+
+.journal-day-files-chevron svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+	transition: transform 120ms ease-in-out;
+}
+
+.journal-day-files.is-open .journal-day-files-chevron svg {
+	transform: rotate(90deg);
+}
+
+.journal-day-files-summary {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.journal-day-files-rule {
+	flex: 1 1 auto;
+	height: 1px;
+	background-color: var(--background-modifier-border);
+}
+
+.journal-day-files-list,
+.journal-day-files-rows {
+	display: flex;
+	flex-direction: column;
+}
+
+.journal-day-files-list {
+	margin-top: var(--size-2-2);
+}
+
+.journal-day-file {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-3);
+	min-width: 0;
+	padding: var(--size-2-1) var(--size-2-2);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	cursor: var(--cursor);
+}
+
+.journal-day-file:hover,
+.journal-day-file:focus-visible {
+	background-color: var(--background-modifier-hover);
+}
+
+.journal-day-file-icon {
+	display: flex;
+	flex: 0 0 auto;
+}
+
+.journal-day-file-icon svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+.journal-day-file-name {
+	flex: 0 1 auto;
+	min-width: 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.journal-day-file:hover .journal-day-file-name,
+.journal-day-file:focus-visible .journal-day-file-name {
+	color: var(--text-normal);
+}
+
+.journal-day-file-extension {
+	flex: 0 0 auto;
+	padding: 0 var(--size-2-1);
+	border-radius: var(--radius-s);
+	background-color: var(--background-modifier-hover);
+}
+
+.journal-day-file-folder {
+	flex: 1 1 0;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.journal-day-file-time {
+	display: flex;
+	gap: var(--size-2-2);
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+.journal-day-file-kind {
+	font-style: italic;
+}
+
+button.journal-day-files-more {
+	align-self: flex-start;
+	height: auto;
+	margin-top: var(--size-2-1);
+	padding: var(--size-2-1) var(--size-2-2);
+	border: none;
+	box-shadow: none;
+	background: none;
+	color: var(--text-accent);
+	font-size: inherit;
+	cursor: var(--cursor);
+}
+
+button.journal-day-files-more:hover {
+	background-color: var(--background-modifier-hover);
+}
+
 /* ----------------------------------------------------------- metadata --- */
 
 .journal-day-metadata {
@@ -1121,6 +1286,17 @@ button.journal-picker-day.is-current.has-note::after {
 	opacity: 0.8;
 }
 
+/* A day that only has files gets a hollow dot. */
+button.journal-picker-day.has-files::after {
+	background-color: transparent;
+	box-shadow: inset 0 0 0 1px currentColor;
+	opacity: 0.6;
+}
+
+button.journal-picker-day.is-current.has-files::after {
+	opacity: 0.8;
+}
+
 button.journal-picker-day:focus-visible {
 	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 }
@@ -1312,6 +1488,25 @@ button.journal-appearance-settings-link:hover {
 }
 
 @media (max-width: 520px) {
+	.modal.journal-appearance-modal .journal-appearance-add-property.setting-item {
+		flex-direction: column;
+		align-items: stretch;
+		gap: var(--size-2-2);
+	}
+
+	.journal-appearance-add-property .setting-item-info {
+		margin-inline-end: 0;
+	}
+
+	.journal-appearance-add-property .setting-item-control {
+		justify-content: flex-start;
+	}
+
+	.journal-appearance-add-property input[type="text"] {
+		flex: 1;
+		min-width: 0;
+	}
+
 	.modal.journal-filter-modal .journal-filter-add.setting-item {
 		display: block;
 	}
