@@ -341,7 +341,8 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						name: "Year progress",
 						desc:
 							"Show twelve month lines beside the journal that mark the month you are reading, " +
-							"like a scrollbar for the year. They appear only when the pane is wide enough.",
+							"like a scrollbar for the year; select a month to go to its first note. They appear " +
+							"only when the pane is wide enough.",
 						control: {
 							type: "dropdown",
 							key: "yearProgress",

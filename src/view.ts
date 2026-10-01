@@ -8,11 +8,12 @@ import { FilterModal } from "./filterModal";
 import { isFilterActive } from "./filter";
 import { DayHost, DaySection } from "./day";
 import type { NoteEntry } from "./entry";
-import { DayWalker, isOffsetReachable } from "./dayWalk";
+import { DayWalker, isOffsetReachable, monthTarget } from "./dayWalk";
 import { EditorWindow, EditorWindowHost } from "./editorWindow";
 import { distanceFromViewport, findAnchorIndex } from "./scroll";
 import { JournalToolbar } from "./toolbar";
 import { YearProgress } from "./yearProgress";
+import { DAY_KEY_FORMAT } from "./noteIndex";
 import { JournalFind, JournalFindHost } from "./find";
 import type { FindRange } from "./findText";
 import { createMoment } from "./moment";
@@ -206,7 +207,12 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.find = new JournalFind(this.contentEl, this);
 
 		this.scrollEl = this.contentEl.createDiv({ cls: "journal-scroll" });
-		this.yearProgress = new YearProgress(this.contentEl, this.scrollEl, this.plugin.settings.yearProgress);
+		this.yearProgress = new YearProgress(
+			this.contentEl,
+			this.scrollEl,
+			this.plugin.settings.yearProgress,
+			(year, month) => this.goToMonth(year, month),
+		);
 
 		this.registerDomEvent(this.scrollEl, "scroll", () => this.onScroll(), { passive: true });
 		this.registerDomEvent(this.scrollEl, "pointerdown", () => (this.pointerHeld = true), { passive: true });
@@ -1094,6 +1100,22 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		appearance.open();
 	}
 
+	/** Moves the journal to a month (0-based) selected on the year progress strip. */
+	private goToMonth(year: number, month: number): void {
+		this.plugin.index.ensureCurrent();
+		this.plugin.filteredIndex.ensureCurrent();
+		this.plugin.dayFiles.ensureCurrent();
+		const target = monthTarget(
+			this.plugin.shownDays,
+			year,
+			month,
+			createMoment().format(DAY_KEY_FORMAT),
+			this.plugin.settings.hideEmptyDays,
+			(key) => this.isDateVisible(createMoment(key, DAY_KEY_FORMAT, true)),
+		);
+		if (target) this.goToDate(createMoment(target, DAY_KEY_FORMAT, true), false);
+	}
+
 	/**
 	 * Moves the journal to a visible `date`, and to the note at `path` in it
 	 * when there is one. The same predicate is used by every caller so direct
@@ -1221,20 +1243,25 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private updateHeaderLabel(): void {
 		if (!this.ready || !this.toolbar) return;
-		// The first day at the viewport top determines the sticky group label and
-		// the month the year progress strip marks. The indexed lookup skips
-		// filtered days, falls back to the first day in top padding, and retains
-		// the last day in bottom padding.
-		const at = findAnchorIndex(
-			this.sections.length,
-			(index) => {
-				const el = this.sections[index].el;
-				return el.offsetParent === null ? null : el.offsetTop;
-			},
-			this.scrollEl.scrollTop,
-		);
-		const section = at >= 0 ? this.sections[at] : this.anchoring.section;
-		if (section) this.yearProgress?.show(new Date(section.date.valueOf()));
+		// The first day at the viewport top determines the sticky group label, and
+		// the day across its middle the month the year progress strip marks, which
+		// is where navigation centres a day. The indexed lookup skips filtered
+		// days, falls back to the first day in top padding, and retains the last
+		// day in bottom padding.
+		const dayAt = (position: number) => {
+			const at = findAnchorIndex(
+				this.sections.length,
+				(index) => {
+					const el = this.sections[index].el;
+					return el.offsetParent === null ? null : el.offsetTop;
+				},
+				position,
+			);
+			return at >= 0 ? this.sections[at] : this.anchoring.section;
+		};
+		const section = dayAt(this.scrollEl.scrollTop);
+		const middle = dayAt(this.scrollEl.scrollTop + this.scrollEl.clientHeight / 2);
+		if (middle) this.yearProgress?.show(new Date(middle.date.valueOf()));
 		let label = "Journal";
 		if (section && this.plugin.settings.showMonthSeparators) label = section.date.format("MMMM YYYY");
 		else if (section && this.plugin.settings.groupDaysByYear) label = section.date.format("YYYY");

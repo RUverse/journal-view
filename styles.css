@@ -1738,19 +1738,16 @@ button.journal-appearance-settings-link:hover {
 
 /* Twelve month lines beside the journal column. The view places the strip at
    the card edge and centres it on the pane; it hides itself when the pane has
-   no room beside the column. It sits over the scroller rather than in it, so
-   it lets the wheel and pointer through to the journal. */
+   no room beside the column. It sits over the scroller rather than in it, and
+   passes the wheel on to the journal itself. */
 .journal-year-progress {
 	position: absolute;
 	top: var(--journal-year-progress-top, 50%);
 	left: var(--journal-year-progress-left, 0);
 	display: flex;
 	flex-direction: column;
-	justify-content: space-between;
 	height: min(26rem, 60%);
-	padding: var(--size-2-2) 0;
 	transform: translateY(-50%);
-	pointer-events: none;
 }
 
 .journal-year-progress.is-left {
@@ -1761,15 +1758,26 @@ button.journal-appearance-settings-link:hover {
 	display: none;
 }
 
+/* Each month is a click target as tall as its share of the strip, with its
+   line drawn across the middle. */
 .journal-year-progress-month {
-	width: 12px;
-	height: 2px;
-	border-radius: 1px;
-	background-color: var(--text-normal);
+	display: flex;
+	align-items: center;
+	flex: 1 1 0;
+	padding: 0 var(--size-4-2);
+	cursor: var(--cursor);
 	opacity: 0.25;
 	/* Long enough that the bright month glides between lines while scrolling
 	   rather than jumping; a fast scroll retargets the fade mid-way. */
 	transition: opacity 300ms ease-out;
+}
+
+.journal-year-progress-month::before {
+	content: "";
+	width: 12px;
+	height: 2px;
+	border-radius: 1px;
+	background-color: var(--text-normal);
 }
 
 .journal-year-progress-month.is-season {
@@ -1782,4 +1790,9 @@ button.journal-appearance-settings-link:hover {
 
 .journal-year-progress-month.is-future {
 	opacity: 0.1;
+}
+
+.journal-year-progress-month:hover:not(.is-current) {
+	opacity: 0.75;
+	transition-duration: 100ms;
 }
