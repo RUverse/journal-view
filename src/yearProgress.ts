@@ -9,18 +9,19 @@ const GAP = 40;
 const DAY_MS = 86_400_000;
 
 /**
- * Twelve month lines beside the journal column showing how far through the
- * year today is. Past months of the current season stand out from the rest
- * of the year so far, and the months still to come are dimmest. It only
- * appears when the pane has room for it beside the column.
+ * Twelve month lines beside the journal column that follow the reader like a
+ * scrollbar: the month being read is brightest, the earlier months of its
+ * season stand out from the rest of the year before it, and the months after
+ * it are dimmest. It only appears when the pane has room beside the column.
  */
 export class YearProgress {
 	private readonly el: HTMLElement;
 	private readonly months: HTMLElement[] = [];
 	private readonly observer = new ResizeObserver(() => this.layout());
 	private columnEl: HTMLElement | null = null;
-	/** The month and year the lines were last drawn for. */
-	private drawn = "";
+	/** The day the strip last marked, and the month its lines were drawn for. */
+	private shownDay = "";
+	private drawnMonth = "";
 
 	constructor(
 		private readonly hostEl: HTMLElement,
@@ -33,7 +34,7 @@ export class YearProgress {
 			this.months.push(this.el.createDiv({ cls: "journal-year-progress-month" }));
 		}
 		this.observer.observe(scrollEl);
-		this.refresh();
+		this.show(new Date());
 	}
 
 	/** Follows the timeline's column, which the view replaces on every rebuild. */
@@ -50,31 +51,32 @@ export class YearProgress {
 		this.layout();
 	}
 
-	/** Redraws the lines when the month has turned since they were drawn. */
-	refresh(): void {
-		const now = new Date();
-		this.updateLabel(now);
-		const current = now.getMonth();
-		const key = `${now.getFullYear()}-${current}`;
-		if (key === this.drawn) return;
-		this.drawn = key;
+	/** Marks the day being read. Runs every scroll frame, so it only redraws on a change. */
+	show(date: Date): void {
+		const current = date.getMonth();
+		const monthKey = `${date.getFullYear()}-${current}`;
+		const day = `${monthKey}-${date.getDate()}`;
+		if (day === this.shownDay) return;
+		this.shownDay = day;
+		this.el.setAttribute("aria-label", this.describe(date));
+		if (monthKey === this.drawnMonth) return;
+		this.drawnMonth = monthKey;
 		// Meteorological seasons begin in March, June, September and December;
 		// January and February belong to the season that began the year before.
 		const seasonStart = current - ((current + 1) % 3);
 		this.months.forEach((el, month) => {
 			el.toggleClass("is-current", month === current);
 			el.toggleClass("is-season", month >= seasonStart && month < current);
-			el.toggleClass("is-future", month > current);
+			el.toggleClass("is-after", month > current);
 		});
 	}
 
-	private updateLabel(now: Date): void {
-		const year = now.getFullYear();
+	private describe(date: Date): string {
+		const year = date.getFullYear();
 		const start = new Date(year, 0, 1).getTime();
-		const day = Math.round((new Date(year, now.getMonth(), now.getDate()).getTime() - start) / DAY_MS) + 1;
+		const day = Math.round((new Date(year, date.getMonth(), date.getDate()).getTime() - start) / DAY_MS) + 1;
 		const days = Math.round((new Date(year + 1, 0, 1).getTime() - start) / DAY_MS);
-		const label = `${createMoment(now).format("MMMM YYYY")}, day ${day} of ${days}`;
-		if (this.el.getAttribute("aria-label") !== label) this.el.setAttribute("aria-label", label);
+		return `${createMoment(date).format("MMMM YYYY")}, day ${day} of ${days}`;
 	}
 
 	private layout(): void {

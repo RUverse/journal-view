@@ -1221,9 +1221,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	private updateHeaderLabel(): void {
 		if (!this.ready || !this.toolbar) return;
-		// The first day at the viewport top determines the sticky group label. The
-		// indexed lookup skips filtered days, falls back to the first day in top
-		// padding, and retains the last day in bottom padding.
+		// The first day at the viewport top determines the sticky group label and
+		// the month the year progress strip marks. The indexed lookup skips
+		// filtered days, falls back to the first day in top padding, and retains
+		// the last day in bottom padding.
 		const at = findAnchorIndex(
 			this.sections.length,
 			(index) => {
@@ -1233,6 +1234,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.scrollEl.scrollTop,
 		);
 		const section = at >= 0 ? this.sections[at] : this.anchoring.section;
+		if (section) this.yearProgress?.show(new Date(section.date.valueOf()));
 		let label = "Journal";
 		if (section && this.plugin.settings.showMonthSeparators) label = section.date.format("MMMM YYYY");
 		else if (section && this.plugin.settings.groupDaysByYear) label = section.date.format("YYYY");
@@ -1293,7 +1295,6 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			window.setInterval(() => {
 				this.revalidatePaths();
 				this.checkDayRollover();
-				this.yearProgress?.refresh();
 			}, 30_000),
 		);
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.revalidatePaths()));

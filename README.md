@@ -43,7 +43,7 @@ Some Customization is only visible in the customization menu accessible from the
 | Daily header style | Subtle | Shows each date subtly, as an H1, or hides the date display |
 | Group days by year | On | Marks year boundaries between consecutive visible daily entries |
 | Group days by month | Off | Groups daily entries beneath compact month and year headings |
-| Year progress | Left | Shows twelve month lines beside the journal, marking how far through the year today is; choose left, right, or hidden. Appears only when the pane is at least 120 px wider than the journal |
+| Year progress | Left | Shows twelve month lines beside the journal that mark the month you are reading, like a scrollbar for the year; choose left, right, or hidden. Appears only when the pane is at least 120 px wider than the journal |
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |
 | Open journal on startup | Off | Opens or reveals Journal View after Obsidian restores the workspace |
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |

@@ -92,7 +92,7 @@ export class AppearanceModal extends Modal {
 
 		const progressSetting = new Setting(this.contentEl)
 			.setName("Year progress")
-			.setDesc("Mark how far through the year today is, beside the journal when the pane is wide enough.")
+			.setDesc("Mark the month you are reading beside the journal, when the pane is wide enough.")
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOptions(YEAR_PROGRESS_OPTIONS)
