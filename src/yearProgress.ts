@@ -14,9 +14,8 @@ const LABEL_MARGIN = 8;
 
 /**
  * Twelve month lines beside the journal column that follow the reader like a
- * scrollbar: the month being read is brightest and labelled with its year,
- * the two months either side of it are named, and months that have not come
- * yet are dimmest. Selecting a month moves the journal to it. It only appears
+ * scrollbar: every month is named, the month being read is brightest and
+ * labelled with its year, and months that have not come yet are dimmest. Selecting a month moves the journal to it. It only appears
  * when the pane has room beside the column.
  */
 export class YearProgress {
@@ -41,8 +40,6 @@ export class YearProgress {
 		this.el = hostEl.createDiv({ cls: "journal-year-progress is-hidden" });
 		for (let month = 0; month < 12; month++) {
 			const el = this.el.createDiv({ cls: "journal-year-progress-month" });
-			// Every month carries its name, which also names it to assistive
-			// technology; only the marked month and those near it show theirs.
 			const label = el.createDiv({ cls: "journal-year-progress-label" });
 			this.years.push(label.createSpan({ cls: "journal-year-progress-year" }));
 			label.createSpan({ text: createMoment(new Date(2000, month, 1)).format("MMM") });
@@ -93,13 +90,10 @@ export class YearProgress {
 		if (monthKey === this.drawnMonth) return;
 		this.drawnMonth = monthKey;
 		this.months.forEach((el, month) => {
-			const distance = Math.abs(month - current);
-			el.toggleClass("is-current", distance === 0);
-			el.toggleClass("is-near", distance === 1);
-			el.toggleClass("is-nearby", distance === 2);
-			if (distance === 0) el.setAttribute("aria-current", "date");
+			el.toggleClass("is-current", month === current);
+			if (month === current) el.setAttribute("aria-current", "date");
 			else el.removeAttribute("aria-current");
-			el.toggleClass("is-future", distance !== 0 && month >= firstFuture);
+			el.toggleClass("is-future", month !== current && month >= firstFuture);
 		});
 		for (const el of this.years) el.setText(String(year));
 		// A label of another length may no longer fit beside the strip.

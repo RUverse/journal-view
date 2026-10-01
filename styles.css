@@ -1800,9 +1800,8 @@ button.journal-appearance-settings-link:hover {
 	transition-duration: 100ms;
 }
 
-/* The marked month's year and name, and the names of the two months either
-   side, sit on the side of the lines away from the journal. A label only
-   ever shows or hides; its colour is its month's. */
+/* Every month's name, and the marked month's year, sit on the side of the
+   lines away from the journal, in the month's colour. */
 .journal-year-progress-label {
 	position: absolute;
 	top: 50%;
@@ -1814,9 +1813,6 @@ button.journal-appearance-settings-link:hover {
 	text-transform: uppercase;
 	white-space: nowrap;
 	transform: translateY(-50%);
-	opacity: 0;
-	pointer-events: none;
-	transition: opacity 300ms ease-out;
 }
 
 .journal-year-progress.is-left .journal-year-progress-label {
@@ -1828,14 +1824,6 @@ button.journal-appearance-settings-link:hover {
    year on the right. */
 .journal-year-progress:not(.is-left) .journal-year-progress-label {
 	flex-direction: row-reverse;
-}
-
-.journal-year-progress-month.is-current .journal-year-progress-label,
-.journal-year-progress-month.is-near .journal-year-progress-label,
-.journal-year-progress-month.is-nearby .journal-year-progress-label,
-.journal-year-progress-month:hover .journal-year-progress-label {
-	opacity: 1;
-	pointer-events: auto;
 }
 
 .journal-year-progress-month.is-current .journal-year-progress-label {
@@ -1852,6 +1840,5 @@ button.journal-appearance-settings-link:hover {
 }
 
 .journal-year-progress.is-unlabelled .journal-year-progress-label {
-	opacity: 0;
-	pointer-events: none;
+	visibility: hidden;
 }
