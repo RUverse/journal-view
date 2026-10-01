@@ -11,47 +11,49 @@ const TARGET_PAD = 8;
 const WHEEL_LINE = 16;
 /** Room kept between the month labels and the edge of the pane. */
 const LABEL_MARGIN = 8;
+/**
+ * Months kept either side of the marked one on the wheel. They have faded out
+ * by six away; the rest are there so months turning out of sight, a few at a
+ * time while scrolling quickly, leave without popping.
+ */
+const WHEEL_RADIUS = 9;
+
+/** One month's line and label. */
+interface MonthCell {
+	el: HTMLElement;
+	label: HTMLElement;
+}
 
 /**
- * Twelve month lines beside the journal column that follow the reader like a
+ * Month lines beside the journal column that follow the reader like a
  * scrollbar: the month being read is brightest and months that have not come
- * yet are dimmest. The experimental mode also names every month, and the
- * marked one's year, and turns like a wheel picker to hold the marked month
- * in the middle. Selecting a month moves the journal to it. It only appears
+ * yet are dimmest. Selecting a month moves the journal to it. It only appears
  * when the pane has room beside the column.
+ *
+ * The left and right modes show the twelve months of the year being read. The
+ * experimental mode instead turns like a wheel picker, holding the marked month
+ * in the middle with the months around it, across the turn of a year, named.
  */
 export class YearProgress {
 	private readonly el: HTMLElement;
-	/** Carries the months, and slides to centre the marked one in the experimental mode. */
 	private readonly trackEl: HTMLElement;
-	private readonly months: HTMLElement[] = [];
-	private readonly labels: HTMLElement[] = [];
-	private readonly years: HTMLElement[] = [];
+	/** Keyed by months since the start of year 0, so they run on across years. */
+	private readonly cells = new Map<number, MonthCell>();
 	private readonly observer = new ResizeObserver(() => this.layout());
 	private columnEl: HTMLElement | null = null;
-	/** The year of the day being read, which a selected month belongs to. */
-	private year = 0;
-	/** The month the lines were last drawn for. */
-	private drawnMonth = "";
+	/** The day being read, and what its months were last drawn for. */
+	private date = new Date();
+	private drawn = "";
 
 	constructor(
 		private readonly hostEl: HTMLElement,
 		private readonly scrollEl: HTMLElement,
 		private mode: YearProgressMode,
-		onPick: (year: number, month: number) => void,
+		private readonly onPick: (year: number, month: number) => void,
 	) {
 		// Hidden until the first layout has a column to place it beside.
 		this.el = hostEl.createDiv({ cls: "journal-year-progress is-hidden" });
 		this.trackEl = this.el.createDiv({ cls: "journal-year-progress-track" });
-		for (let month = 0; month < 12; month++) {
-			const el = this.trackEl.createDiv({ cls: "journal-year-progress-month" });
-			const label = el.createDiv({ cls: "journal-year-progress-label" });
-			this.years.push(label.createSpan({ cls: "journal-year-progress-year" }));
-			label.createSpan({ text: createMoment(new Date(2000, month, 1)).format("MMM") });
-			el.addEventListener("click", () => onPick(this.year, month));
-			this.months.push(el);
-			this.labels.push(label);
-		}
 		// The strip sits over the scroller rather than in it, so a wheel turned
 		// over it would otherwise go nowhere. Passing the event on first lets
 		// the view see the reader taking over scrolling, as it would anywhere.
@@ -65,7 +67,7 @@ export class YearProgress {
 			{ passive: true },
 		);
 		this.observer.observe(scrollEl);
-		this.show(new Date());
+		this.show(this.date);
 	}
 
 	/** Follows the timeline's column, which the view replaces on every rebuild. */
@@ -78,7 +80,11 @@ export class YearProgress {
 
 	setMode(mode: YearProgressMode): void {
 		if (mode === this.mode) return;
+		const wasWheel = this.wheel;
 		this.mode = mode;
+		// The two layouts hold different months; start the new one afresh.
+		if (this.wheel !== wasWheel) this.clear();
+		this.show(this.date);
 		this.layout();
 	}
 
@@ -87,33 +93,70 @@ export class YearProgress {
 		return this.mode !== "right";
 	}
 
-	private get labelled(): boolean {
+	private get wheel(): boolean {
 		return this.mode === "experimental";
 	}
 
 	/** Marks the day being read. Runs every scroll frame, so it only redraws on a change. */
 	show(date: Date): void {
-		const year = (this.year = date.getFullYear());
-		const current = date.getMonth();
-		// The first month of the marked year that is still to come: none of a
-		// past year's, those after today's month in this year, all of a later year's.
+		this.date = date;
+		const current = date.getFullYear() * 12 + date.getMonth();
 		const today = new Date();
-		const thisYear = today.getFullYear();
-		const firstFuture = year < thisYear ? 12 : year > thisYear ? 0 : today.getMonth() + 1;
-		const monthKey = `${year}-${current}-${firstFuture}`;
-		if (monthKey === this.drawnMonth) return;
-		this.drawnMonth = monthKey;
-		this.trackEl.setCssProps({ "--journal-year-progress-index": String(current) });
-		this.months.forEach((el, month) => {
-			el.setCssProps({ "--journal-year-progress-distance": String(Math.abs(month - current)) });
-			el.toggleClass("is-current", month === current);
-			if (month === current) el.setAttribute("aria-current", "date");
-			else el.removeAttribute("aria-current");
-			el.toggleClass("is-future", month !== current && month >= firstFuture);
-		});
-		for (const el of this.years) el.setText(String(year));
+		const firstFuture = today.getFullYear() * 12 + today.getMonth() + 1;
+		const drawn = `${current}-${firstFuture}-${this.wheel}`;
+		if (drawn === this.drawn) return;
+		this.drawn = drawn;
+
+		const year = Math.floor(current / 12);
+		const first = this.wheel ? current - WHEEL_RADIUS : year * 12;
+		const last = this.wheel ? current + WHEEL_RADIUS : year * 12 + 11;
+		for (const [key, cell] of this.cells) {
+			if (key < first || key > last) {
+				cell.el.remove();
+				this.cells.delete(key);
+			}
+		}
+		// The wheel places each month itself, so only the year's lines, which
+		// stack in order, need to be laid down from the top.
+		for (let key = first; key <= last; key++) {
+			const cell = this.cells.get(key) ?? this.createCell(key);
+			const offset = key - current;
+			cell.el.setCssProps({
+				"--journal-year-progress-offset": String(offset),
+				"--journal-year-progress-distance": String(Math.abs(offset)),
+			});
+			cell.el.toggleClass("is-current", offset === 0);
+			if (offset === 0) cell.el.setAttribute("aria-current", "date");
+			else cell.el.removeAttribute("aria-current");
+			cell.el.toggleClass("is-future", offset !== 0 && key >= firstFuture);
+			// The marked month carries its year, and on the wheel so do the
+			// nearest months of the years either side, until one reaches the middle.
+			const cellYear = Math.floor(key / 12);
+			const nearestOfItsYear =
+				(cellYear === year - 1 && key % 12 === 11) || (cellYear === year + 1 && key % 12 === 0);
+			cell.el.toggleClass("shows-year", offset === 0 || (this.wheel && nearestOfItsYear));
+		}
 		// A label of another length may no longer fit beside the strip.
 		this.fitLabels();
+	}
+
+	private createCell(key: number): MonthCell {
+		const year = Math.floor(key / 12);
+		const month = key % 12;
+		const el = this.trackEl.createDiv({ cls: "journal-year-progress-month" });
+		const label = el.createDiv({ cls: "journal-year-progress-label" });
+		label.createSpan({ cls: "journal-year-progress-year", text: String(year) });
+		label.createSpan({ text: createMoment(new Date(year, month, 1)).format("MMM") });
+		el.addEventListener("click", () => this.onPick(year, month));
+		const cell = { el, label };
+		this.cells.set(key, cell);
+		return cell;
+	}
+
+	private clear(): void {
+		for (const cell of this.cells.values()) cell.el.remove();
+		this.cells.clear();
+		this.drawn = "";
 	}
 
 	private layout(): void {
@@ -122,7 +165,7 @@ export class YearProgress {
 		const visible = this.mode !== "hidden" && !!column && spare >= MIN_SPARE_WIDTH;
 		this.el.toggleClass("is-hidden", !visible);
 		this.el.toggleClass("is-left", this.onLeft);
-		this.el.toggleClass("is-labelled", this.labelled);
+		this.el.toggleClass("is-labelled", this.wheel);
 		if (!visible || !column) return;
 
 		const host = this.hostEl.getBoundingClientRect();
@@ -142,10 +185,11 @@ export class YearProgress {
 
 	/** Leaves only the lines when the marked month's label would not fit in the pane. */
 	private fitLabels(): void {
-		const current = this.months.findIndex((el) => el.hasClass("is-current"));
-		if (!this.labelled || current < 0 || this.el.hasClass("is-hidden")) return;
+		const date = this.date;
+		const current = this.cells.get(date.getFullYear() * 12 + date.getMonth());
+		if (!this.wheel || !current || this.el.hasClass("is-hidden")) return;
 		const scroll = this.scrollEl.getBoundingClientRect();
-		const label = this.labels[current].getBoundingClientRect();
+		const label = current.label.getBoundingClientRect();
 		const fits =
 			this.onLeft
 				? label.left >= scroll.left + LABEL_MARGIN

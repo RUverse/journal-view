@@ -1748,6 +1748,8 @@ button.journal-appearance-settings-link:hover {
 	position: absolute;
 	top: var(--journal-year-progress-top, 50%);
 	left: var(--journal-year-progress-left, 0);
+	/* A month's line and the click target around it. */
+	width: calc(12px + 2 * var(--size-4-2));
 	height: min(26rem, 60%);
 	transform: translateY(-50%);
 }
@@ -1758,26 +1760,34 @@ button.journal-appearance-settings-link:hover {
 	height: 100%;
 }
 
-/* The experimental mode turns like a wheel picker: the track slides so the
-   marked month sits in the middle of the strip, months fade with distance
-   from it, and the strip clips whatever has turned past its ends. Only the
-   vertical overflow is clipped, as the names reach out to the side. */
+/* The experimental mode turns like a wheel picker. Every month sits in the
+   middle slot, a twelfth of the strip tall, moved up or down by its distance
+   in months from the marked one, so they all slide as the marked month
+   changes. Months fade with distance, and the strip clips whatever has turned
+   past its ends. Only the vertical overflow is clipped, as the names reach
+   out to the side. */
 .journal-year-progress.is-labelled {
 	overflow-x: visible;
 	overflow-y: clip;
 }
 
 .journal-year-progress.is-labelled .journal-year-progress-track {
-	/* Each month is a twelfth of the track; move the marked one's middle,
-	   (index + 0.5) twelfths down, to the track's middle at six twelfths. */
-	transform: translateY(calc((5.5 - var(--journal-year-progress-index, 5.5)) * 100% / 12));
-	transition: transform 300ms ease-out;
+	position: relative;
 }
 
 .journal-year-progress.is-labelled .journal-year-progress-month {
+	position: absolute;
+	top: calc(50% - 100% / 24);
+	left: 0;
+	right: 0;
+	height: calc(100% / 12);
+	transform: translateY(calc(var(--journal-year-progress-offset, 0) * 100%));
 	/* Gone by six months away, where the strip's ends cut through a month. */
 	opacity: max(0, calc(1 - var(--journal-year-progress-distance, 0) * 0.18));
-	transition: color 300ms ease-out, opacity 300ms ease-out;
+	transition:
+		transform 300ms ease-out,
+		color 300ms ease-out,
+		opacity 300ms ease-out;
 }
 
 .journal-year-progress.is-left {
@@ -1880,7 +1890,7 @@ button.journal-appearance-settings-link:hover {
 	text-transform: none;
 }
 
-.journal-year-progress-month.is-current .journal-year-progress-year {
+.journal-year-progress-month.shows-year .journal-year-progress-year {
 	display: inline;
 }
 
