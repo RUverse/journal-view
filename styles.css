@@ -1767,6 +1767,9 @@ button.journal-appearance-settings-link:hover {
 	border-radius: 1px;
 	background-color: var(--text-normal);
 	opacity: 0.25;
+	/* Long enough that the bright month glides between lines while scrolling
+	   rather than jumping; a fast scroll retargets the fade mid-way. */
+	transition: opacity 300ms ease-out;
 }
 
 .journal-year-progress-month.is-season {
