@@ -6,8 +6,13 @@ editable timeline. See [README.md](README.md) for behavior and installation.
 ## Development
 
 - Use TypeScript and Obsidian APIs; keep UI styling in `styles.css`.
-- Run `npm run typecheck` while developing and `npm run build` before handing
-  off changes. The build output, `main.js`, is intentionally ignored.
+- Run `npm run typecheck` while developing, and `npm run lint` and
+  `npm run build` before handing off changes. The build output, `main.js`, is
+  intentionally ignored.
+- `npm run lint` applies the rules of Obsidian's plugin review, and the `Check`
+  workflow runs it on every pull request. Keep `tsconfig.json` on `strict`:
+  looser compiler options turn some types into `any`, which hides warnings the
+  review would still raise.
 - Preserve user content: flush pending edits during teardown and handle vault
   writes, renames, and concurrent file creation defensively.
 - Obsidian's embedded Markdown editor is an internal API. Keep access isolated
@@ -89,8 +94,9 @@ When the user asks to prepare a release:
   only the feature and fix pull requests intended for the release. Prepare the
   release on `dev`, not on a feature branch or `main`.
 - On `dev`, update all version files with
-  `npm version <version> --no-git-tag-version`. Run `npm run typecheck` and
-  `npm run build`, then commit and push the version bump to `dev`.
+  `npm version <version> --no-git-tag-version`. Run `npm run typecheck`,
+  `npm run lint`, and `npm run build`, then commit and push the version bump to
+  `dev`.
 - Open one pull request from `dev` into `main`. That release pull request must
   contain both the accumulated user-visible changes and their version bump.
   Describe the changes and include only verification that was actually

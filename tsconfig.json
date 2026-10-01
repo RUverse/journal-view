@@ -10,7 +10,7 @@
 		"moduleResolution": "node",
 		"importHelpers": true,
 		"isolatedModules": true,
-		"strictNullChecks": true,
+		"strict": true,
 		"skipLibCheck": true,
 		"lib": ["DOM", "ES5", "ES6", "ES7", "ES2018", "ES2020"]
 	},
