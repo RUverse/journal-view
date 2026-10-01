@@ -1,4 +1,3 @@
-import { setTooltip } from "obsidian";
 import type { YearProgressSide } from "./settings";
 import { createMoment } from "./moment";
 
@@ -10,6 +9,8 @@ const GAP = 40;
 const TARGET_PAD = 8;
 /** Pixels per line for wheels that scroll by lines rather than pixels. */
 const WHEEL_LINE = 16;
+/** Room kept between the month labels and the edge of the pane. */
+const LABEL_MARGIN = 8;
 
 /**
  * Twelve month lines beside the journal column that follow the reader like a
@@ -21,6 +22,8 @@ const WHEEL_LINE = 16;
 export class YearProgress {
 	private readonly el: HTMLElement;
 	private readonly months: HTMLElement[] = [];
+	private readonly labels: HTMLElement[] = [];
+	private readonly years: HTMLElement[] = [];
 	private readonly observer = new ResizeObserver(() => this.layout());
 	private columnEl: HTMLElement | null = null;
 	/** The year of the day being read, which a selected month belongs to. */
@@ -38,8 +41,14 @@ export class YearProgress {
 		this.el = hostEl.createDiv({ cls: "journal-year-progress is-hidden" });
 		for (let month = 0; month < 12; month++) {
 			const el = this.el.createDiv({ cls: "journal-year-progress-month" });
+			// Every month carries its name, which also names it to assistive
+			// technology; only the marked month and its neighbours show theirs.
+			const label = el.createDiv({ cls: "journal-year-progress-label" });
+			this.years.push(label.createSpan({ cls: "journal-year-progress-year" }));
+			label.createSpan({ text: createMoment(new Date(2000, month, 1)).format("MMM") });
 			el.addEventListener("click", () => onPick(this.year, month));
 			this.months.push(el);
+			this.labels.push(label);
 		}
 		// The strip sits over the scroller rather than in it, so a wheel turned
 		// over it would otherwise go nowhere. Passing the event on first lets
@@ -68,7 +77,6 @@ export class YearProgress {
 	setSide(side: YearProgressSide): void {
 		if (side === this.side) return;
 		this.side = side;
-		this.labelMonths();
 		this.layout();
 	}
 
@@ -83,7 +91,6 @@ export class YearProgress {
 		const firstFuture = year < thisYear ? 12 : year > thisYear ? 0 : today.getMonth() + 1;
 		const monthKey = `${year}-${current}-${firstFuture}`;
 		if (monthKey === this.drawnMonth) return;
-		const yearChanged = !this.drawnMonth.startsWith(`${year}-`);
 		this.drawnMonth = monthKey;
 		// Meteorological seasons begin in March, June, September and December.
 		// Winter spans the turn of the year, so December's season goes on into
@@ -91,21 +98,16 @@ export class YearProgress {
 		const seasonStart = current - ((current + 1) % 3);
 		this.months.forEach((el, month) => {
 			el.toggleClass("is-current", month === current);
+			el.toggleClass("is-near", Math.abs(month - current) === 1);
 			if (month === current) el.setAttribute("aria-current", "date");
 			else el.removeAttribute("aria-current");
 			const inSeason = month >= seasonStart && month < seasonStart + 3;
 			el.toggleClass("is-season", inSeason && month !== current && month < firstFuture);
 			el.toggleClass("is-future", month !== current && month >= firstFuture);
 		});
-		if (yearChanged) this.labelMonths();
-	}
-
-	/** Names each month, with its tooltip on the side away from the journal. */
-	private labelMonths(): void {
-		const placement = this.side === "left" ? "left" : "right";
-		this.months.forEach((el, month) => {
-			setTooltip(el, createMoment(new Date(this.year, month, 1)).format("MMMM YYYY"), { placement });
-		});
+		for (const el of this.years) el.setText(String(year));
+		// A label of another length may no longer fit beside the strip.
+		this.fitLabels();
 	}
 
 	private layout(): void {
@@ -128,6 +130,20 @@ export class YearProgress {
 			"--journal-year-progress-top": `${scroll.top - host.top + this.scrollEl.clientHeight / 2}px`,
 			"--journal-year-progress-left": `${left}px`,
 		});
+		this.fitLabels();
+	}
+
+	/** Leaves only the lines when the marked month's label would not fit in the pane. */
+	private fitLabels(): void {
+		const current = this.months.findIndex((el) => el.hasClass("is-current"));
+		if (current < 0 || this.el.hasClass("is-hidden")) return;
+		const scroll = this.scrollEl.getBoundingClientRect();
+		const label = this.labels[current].getBoundingClientRect();
+		const fits =
+			this.side === "left"
+				? label.left >= scroll.left + LABEL_MARGIN
+				: label.right <= scroll.left + this.scrollEl.clientWidth - LABEL_MARGIN;
+		this.el.toggleClass("is-unlabelled", !fits);
 	}
 
 	destroy(): void {

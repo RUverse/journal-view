@@ -1765,15 +1765,12 @@ button.journal-appearance-settings-link:hover {
 /* Each month is a click target as tall as its share of the strip, with its
    line drawn across the middle. */
 .journal-year-progress-month {
+	position: relative;
 	display: flex;
 	align-items: center;
 	flex: 1 1 0;
 	padding: 0 var(--size-4-2);
 	cursor: var(--cursor);
-	opacity: 0.25;
-	/* Long enough that the bright month glides between lines while scrolling
-	   rather than jumping; a fast scroll retargets the fade mid-way. */
-	transition: opacity 300ms ease-out;
 }
 
 .journal-year-progress-month::before {
@@ -1782,21 +1779,81 @@ button.journal-appearance-settings-link:hover {
 	height: 2px;
 	border-radius: 1px;
 	background-color: var(--text-normal);
+	opacity: 0.25;
+	/* Long enough that the bright month glides between lines while scrolling
+	   rather than jumping; a fast scroll retargets the fade mid-way. */
+	transition: opacity 300ms ease-out;
 }
 
-.journal-year-progress-month.is-season {
+.journal-year-progress-month.is-season::before {
 	opacity: 0.5;
 }
 
-.journal-year-progress-month.is-current {
+.journal-year-progress-month.is-current::before {
 	opacity: 1;
 }
 
-.journal-year-progress-month.is-future {
+.journal-year-progress-month.is-future::before {
 	opacity: 0.1;
 }
 
-.journal-year-progress-month:hover:not(.is-current) {
+.journal-year-progress-month:hover:not(.is-current)::before {
 	opacity: 0.75;
 	transition-duration: 100ms;
+}
+
+/* The marked month's year and name, and its neighbours' names, sit on the
+   side of the lines away from the journal. */
+.journal-year-progress-label {
+	position: absolute;
+	top: 50%;
+	left: calc(100% + var(--size-4-2));
+	display: flex;
+	gap: var(--size-4-3);
+	color: var(--text-faint);
+	font-size: var(--font-ui-small);
+	line-height: 1;
+	text-transform: uppercase;
+	white-space: nowrap;
+	transform: translateY(-50%);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 300ms ease-out, color 300ms ease-out;
+}
+
+.journal-year-progress.is-left .journal-year-progress-label {
+	right: calc(100% + var(--size-4-2));
+	left: auto;
+}
+
+/* Away from the journal on either side: year, month on the left; month,
+   year on the right. */
+.journal-year-progress:not(.is-left) .journal-year-progress-label {
+	flex-direction: row-reverse;
+}
+
+.journal-year-progress-month.is-near .journal-year-progress-label,
+.journal-year-progress-month.is-current .journal-year-progress-label,
+.journal-year-progress-month:hover .journal-year-progress-label {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.journal-year-progress-month.is-current .journal-year-progress-label {
+	color: var(--text-normal);
+	font-weight: var(--font-medium);
+}
+
+.journal-year-progress-year {
+	display: none;
+	text-transform: none;
+}
+
+.journal-year-progress-month.is-current .journal-year-progress-year {
+	display: inline;
+}
+
+.journal-year-progress.is-unlabelled .journal-year-progress-label {
+	opacity: 0;
+	pointer-events: none;
 }
