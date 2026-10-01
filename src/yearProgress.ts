@@ -10,7 +10,7 @@ const DAY_MS = 86_400_000;
 
 /**
  * Twelve month lines beside the journal column that follow the reader like a
- * scrollbar: the month being read is brightest, the earlier months of its
+ * scrollbar: the month being read is brightest, the other months of its
  * season stand out from the rest of its year, and months that have not come
  * yet are dimmest. It only appears when the pane has room beside the column.
  */
@@ -67,12 +67,14 @@ export class YearProgress {
 		this.el.setAttribute("aria-label", this.describe(date));
 		if (monthKey === this.drawnMonth) return;
 		this.drawnMonth = monthKey;
-		// Meteorological seasons begin in March, June, September and December;
-		// January and February belong to the season that began the year before.
+		// Meteorological seasons begin in March, June, September and December.
+		// Winter spans the turn of the year, so December's season goes on into
+		// the next year's lines and January's began on the last year's.
 		const seasonStart = current - ((current + 1) % 3);
 		this.months.forEach((el, month) => {
 			el.toggleClass("is-current", month === current);
-			el.toggleClass("is-season", month >= seasonStart && month < current && month < firstFuture);
+			const inSeason = month >= seasonStart && month < seasonStart + 3;
+			el.toggleClass("is-season", inSeason && month !== current && month < firstFuture);
 			el.toggleClass("is-future", month !== current && month >= firstFuture);
 		});
 	}
