@@ -16,8 +16,9 @@ import {
 	MONTH_SEPARATOR_DAY_FORMAT,
 	clampLoadedDays,
 	clampSaveDelay,
+	isYearProgressMode,
 } from "./settings";
-import type { DailyHeaderStyle, DayFilesDate, DaySortDirection } from "./settings";
+import type { DailyHeaderStyle, DayFilesDate, DaySortDirection, YearProgressMode } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 import { JournalStatistics } from "./statistics";
 import { StatisticsView, VIEW_TYPE_STATISTICS } from "./statisticsView";
@@ -373,6 +374,7 @@ export default class JournalViewPlugin extends Plugin {
 				saved.groupDaysByYear,
 				booleanSetting(saved.showYearSeparators, DEFAULT_SETTINGS.groupDaysByYear),
 			),
+			yearProgress: yearProgressSetting(saved.yearProgress),
 			saveDelay: saveDelaySetting(saved.saveDelay),
 			maxLoadedDays: loadedDaysSetting(saved.maxLoadedDays),
 			richEditor: booleanSetting(saved.richEditor, DEFAULT_SETTINGS.richEditor),
@@ -423,6 +425,10 @@ function headerFormatSetting(value: unknown, hasGroupingSetting: boolean): strin
 
 function headerStyleSetting(value: unknown): DailyHeaderStyle {
 	return value === "h1" || value === "hidden" ? value : DEFAULT_SETTINGS.headerStyle;
+}
+
+function yearProgressSetting(value: unknown): YearProgressMode {
+	return isYearProgressMode(value) ? value : DEFAULT_SETTINGS.yearProgress;
 }
 
 function saveDelaySetting(value: unknown): number {

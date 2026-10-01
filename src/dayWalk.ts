@@ -15,6 +15,37 @@ export function isOffsetReachable(offset: number, hideEmpty: boolean, indexed: b
 	return Number.isFinite(offset) && (Math.abs(offset) <= MAX_OFFSET || (hideEmpty && indexed));
 }
 
+/**
+ * The day to go to for a month (0-based): its first shown day, or, in a month
+ * with none, its first visible day while empty days are shown and otherwise
+ * the shown day nearest it. Today counts as shown, which it always is.
+ */
+export function monthTarget(
+	shown: DaySequence,
+	year: number,
+	month: number,
+	todayKey: string,
+	hideEmpty: boolean,
+	isVisible: (key: string) => boolean,
+): string | null {
+	const days = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+	const keyOf = (day: number) => new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+	const firstKey = keyOf(1);
+	const lastKey = keyOf(days);
+	const candidates = [shown.next(keyOf(0)), shown.prev(firstKey), todayKey].filter(
+		(key): key is string => key !== null,
+	);
+	const within = candidates.filter((key) => key >= firstKey && key <= lastKey).sort()[0];
+	if (within) return within;
+	if (!hideEmpty) {
+		for (let day = 1; day <= days; day++) if (isVisible(keyOf(day))) return keyOf(day);
+	}
+	// Days either side of the month, counted from its nearer end.
+	const time = (key: string) => Date.parse(key) / 86_400_000;
+	const away = (key: string) => (key < firstKey ? time(firstKey) - time(key) : time(key) - time(lastKey));
+	return candidates.sort((a, b) => away(a) - away(b))[0] ?? null;
+}
+
 /** Sorts before and after every day key. */
 const BEFORE_ALL = "";
 const AFTER_ALL = "\uffff";

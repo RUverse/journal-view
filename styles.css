@@ -10,6 +10,8 @@
 }
 
 .journal-content {
+	/* Places the year progress strip beside the scroller. */
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	height: 100%;
@@ -173,6 +175,10 @@ button.journal-find-button.is-active {
 	   second time, and the two corrections fight each other. */
 	overflow-anchor: none;
 	overscroll-behavior: contain;
+	/* A rebuild empties the timeline for a moment. Keeping the scrollbar's
+	   room then stops the column, and the year progress strip beside it,
+	   from shifting sideways while the scrollbar comes and goes. */
+	scrollbar-gutter: stable;
 }
 
 .journal-days,
@@ -1731,3 +1737,168 @@ button.journal-appearance-settings-link:hover {
 }
 
 .journal-statistics-selection button[hidden] { display: none; }
+
+/* ------------------------------------------------------- year progress --- */
+
+/* Twelve month lines beside the journal column. The view places the strip at
+   the card edge and centres it on the pane; it hides itself when the pane has
+   no room beside the column. It sits over the scroller rather than in it, and
+   passes the wheel on to the journal itself. */
+.journal-year-progress {
+	position: absolute;
+	top: var(--journal-year-progress-top, 50%);
+	left: var(--journal-year-progress-left, 0);
+	/* A month's line and the click target around it. */
+	width: calc(12px + 2 * var(--size-4-2));
+	height: min(26rem, 60%);
+	transform: translateY(-50%);
+}
+
+.journal-year-progress-track {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
+/* The experimental mode turns like a wheel picker. Every month sits in the
+   middle slot, a twelfth of the strip tall, moved up or down by its distance
+   in months from the marked one, so they all slide as the marked month
+   changes. Months fade with distance, and the strip clips whatever has turned
+   past its ends. Only the vertical overflow is clipped, as the names reach
+   out to the side. */
+.journal-year-progress.is-labelled {
+	overflow-x: visible;
+	overflow-y: clip;
+}
+
+.journal-year-progress.is-labelled .journal-year-progress-track {
+	position: relative;
+}
+
+.journal-year-progress.is-labelled .journal-year-progress-month {
+	position: absolute;
+	top: calc(50% - 100% / 24);
+	left: 0;
+	right: 0;
+	height: calc(100% / 12);
+	transform: translateY(calc(var(--journal-year-progress-offset, 0) * 100%));
+	/* Gone by six months away, where the strip's ends cut through a month. */
+	opacity: max(0, calc(1 - var(--journal-year-progress-distance, 0) * 0.18));
+	transition:
+		transform 300ms ease-out,
+		color 300ms ease-out,
+		opacity 300ms ease-out;
+}
+
+.journal-year-progress.is-left {
+	transform: translate(-100%, -50%);
+}
+
+.journal-year-progress.is-hidden {
+	display: none;
+}
+
+/* Each month is a click target as tall as its share of the strip, with its
+   line drawn across the middle. The month's colour is its line's and its
+   label's alike, always. */
+.journal-year-progress-month {
+	position: relative;
+	display: flex;
+	align-items: center;
+	flex: 1 1 0;
+	padding: 0 var(--size-4-2);
+	color: color-mix(in srgb, var(--text-faint), var(--text-muted));
+	cursor: var(--cursor);
+	/* Long enough that the bright month glides between lines while scrolling
+	   rather than jumping; a fast scroll retargets the fade mid-way. */
+	transition: color 300ms ease-out;
+}
+
+.journal-year-progress-month::before {
+	content: "";
+	width: 12px;
+	height: 2px;
+	border-radius: 1px;
+	background-color: currentColor;
+}
+
+.journal-year-progress-month.is-current {
+	color: var(--text-normal);
+}
+
+/* Months still to come recede well behind the ones already past. */
+.journal-year-progress-month.is-future {
+	color: color-mix(in srgb, var(--text-faint) 35%, transparent);
+}
+
+/* Without names, the lines alone have to single out the marked month, so the
+   others step further back; still to come stays fainter than past. */
+.journal-year-progress:not(.is-labelled) .journal-year-progress-month {
+	color: color-mix(in srgb, var(--text-faint) 60%, transparent);
+}
+
+.journal-year-progress:not(.is-labelled) .journal-year-progress-month.is-current {
+	color: var(--text-normal);
+}
+
+.journal-year-progress:not(.is-labelled) .journal-year-progress-month.is-future {
+	color: color-mix(in srgb, var(--text-faint) 25%, transparent);
+}
+
+/* Outranks every shade above, so hovering brightens a month in any mode. */
+.journal-year-progress .journal-year-progress-month:hover:not(.is-current) {
+	color: var(--text-muted);
+	transition-duration: 100ms;
+}
+
+/* Month names, and the marked month's year, sit on the side of the lines
+   away from the journal, in the month's colour. The experimental mode shows
+   them all; the others show a month's only while it is hovered. Hidden
+   names keep their size, so whether they fit can be measured in any mode. */
+.journal-year-progress-label {
+	position: absolute;
+	display: flex;
+	visibility: hidden;
+	top: 50%;
+	left: calc(100% + var(--size-4-2));
+	gap: var(--size-4-3);
+	font-size: var(--font-ui-small);
+	line-height: 1;
+	text-transform: uppercase;
+	white-space: nowrap;
+	transform: translateY(-50%);
+}
+
+.journal-year-progress.is-labelled .journal-year-progress-label,
+.journal-year-progress-month:hover .journal-year-progress-label {
+	visibility: visible;
+}
+
+.journal-year-progress.is-left .journal-year-progress-label {
+	right: calc(100% + var(--size-4-2));
+	left: auto;
+}
+
+/* Away from the journal on either side: year, month on the left; month,
+   year on the right. */
+.journal-year-progress:not(.is-left) .journal-year-progress-label {
+	flex-direction: row-reverse;
+}
+
+.journal-year-progress-month.is-current .journal-year-progress-label {
+	font-weight: var(--font-medium);
+}
+
+.journal-year-progress-year {
+	display: none;
+	text-transform: none;
+}
+
+.journal-year-progress-month.shows-year .journal-year-progress-year {
+	display: inline;
+}
+
+/* Comes last, to outrank hovering as well as the experimental mode. */
+.journal-year-progress.is-unlabelled .journal-year-progress-label {
+	visibility: hidden;
+}
