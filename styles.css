@@ -175,6 +175,10 @@ button.journal-find-button.is-active {
 	   second time, and the two corrections fight each other. */
 	overflow-anchor: none;
 	overscroll-behavior: contain;
+	/* A rebuild empties the timeline for a moment. Keeping the scrollbar's
+	   room then stops the column, and the year progress strip beside it,
+	   from shifting sideways while the scrollbar comes and goes. */
+	scrollbar-gutter: stable;
 }
 
 .journal-days,
