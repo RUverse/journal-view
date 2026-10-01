@@ -30,9 +30,10 @@ interface MonthCell {
  * yet are dimmest. Selecting a month moves the journal to it. It only appears
  * when the pane has room beside the column.
  *
- * The left and right modes show the twelve months of the year being read. The
- * experimental mode instead turns like a wheel picker, holding the marked month
- * in the middle with the months around it, across the turn of a year, named.
+ * The left and right modes show the twelve months of the year being read,
+ * naming a month while it is hovered. The experimental mode instead turns
+ * like a wheel picker, holding the marked month in the middle with the months
+ * around it, across the turn of a year, named.
  */
 export class YearProgress {
 	private readonly el: HTMLElement;
@@ -187,7 +188,7 @@ export class YearProgress {
 	private fitLabels(): void {
 		const date = this.date;
 		const current = this.cells.get(date.getFullYear() * 12 + date.getMonth());
-		if (!this.wheel || !current || this.el.hasClass("is-hidden")) return;
+		if (!current || this.el.hasClass("is-hidden")) return;
 		const scroll = this.scrollEl.getBoundingClientRect();
 		const label = current.label.getBoundingClientRect();
 		const fits =

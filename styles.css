@@ -1851,11 +1851,14 @@ button.journal-appearance-settings-link:hover {
 	transition-duration: 100ms;
 }
 
-/* In the experimental mode every month's name, and the marked month's year,
-   sit on the side of the lines away from the journal, in the month's colour. */
+/* Month names, and the marked month's year, sit on the side of the lines
+   away from the journal, in the month's colour. The experimental mode shows
+   them all; the others show a month's only while it is hovered. Hidden
+   names keep their size, so whether they fit can be measured in any mode. */
 .journal-year-progress-label {
 	position: absolute;
-	display: none;
+	display: flex;
+	visibility: hidden;
 	top: 50%;
 	left: calc(100% + var(--size-4-2));
 	gap: var(--size-4-3);
@@ -1866,8 +1869,9 @@ button.journal-appearance-settings-link:hover {
 	transform: translateY(-50%);
 }
 
-.journal-year-progress.is-labelled .journal-year-progress-label {
-	display: flex;
+.journal-year-progress.is-labelled .journal-year-progress-label,
+.journal-year-progress-month:hover .journal-year-progress-label {
+	visibility: visible;
 }
 
 .journal-year-progress.is-left .journal-year-progress-label {
@@ -1894,6 +1898,7 @@ button.journal-appearance-settings-link:hover {
 	display: inline;
 }
 
+/* Comes last, to outrank hovering as well as the experimental mode. */
 .journal-year-progress.is-unlabelled .journal-year-progress-label {
 	visibility: hidden;
 }
