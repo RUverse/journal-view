@@ -106,7 +106,7 @@ export class DaySection implements EntryHost, DayFilesHost {
 		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 		this.entriesEl = this.cardEl.createDiv({ cls: "journal-day-entries" });
-		this.files = this.host.plugin.settings.showDayFiles ? new DayFilesList(this, this.cardEl) : null;
+		this.files = this.host.plugin.settings.showDayFiles ? new DayFilesList(this, this.el) : null;
 
 		this.el.addEventListener("focusout", () => {
 			// Focus often moves between the editor and metadata controls inside the

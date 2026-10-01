@@ -279,9 +279,11 @@ notes. Turn on **File modification history** in the toolbar's Customization menu
 1. **Today's list.** Both files sit under the day they were created, folded into
    one line. Opening the list shows them; folding it leaves only the count.
 2. **A created date property.** Set **Created date property** to `created`. The
-   article moves to 1 August, which has no note, so that day now appears in the
-   journal and **Go to date** marks it with a hollow dot.
-3. **Include filter.** Add an include filter: 1 August goes away again.
+   article moves to 1 August, which has no note. With **Only show days that have
+   a note** on, that day stays hidden and disabled in **Go to date**. Turn the
+   option off: the day is available and the calendar marks it with a hollow dot.
+3. **Placement and filters.** History sits outside today’s highlighted note card.
+   A day with a filtered-out daily note stays hidden even if it has file history.
 4. **Live changes.** Create, rename and delete a file while its day is loaded.
    A folded list only changes its count; the day's height stays the same.
 5. **Opening.** Select, Ctrl-select and right-click a file; Ctrl-hover previews it.

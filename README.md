@@ -90,10 +90,13 @@ A file only keeps the date it was last edited, so **Last edited** moves it to th
 changed. File dates can also be reset when a vault is synced, copied, or checked out with git; a
 **Created date property** keeps notes on the day they were written.
 
-Days that have files but no daily note appear in the journal too, even with **Only show days that
-have a note** on. **Go to date** marks them with a hollow dot. They are hidden while an include
-filter is active, since a day without a note cannot match it, and a day whose note is hidden by
-the filters stays hidden whatever files it has.
+With **Only show days that have a note** on, file history does not make a day without a daily note
+appear in the journal or become selectable in **Go to date**. Today and the explicit date-command
+exceptions still apply. Turn note-only filtering off to browse empty days; days with file history
+then carry a hollow dot in **Go to date**. A day whose note is hidden by the filters stays hidden
+whatever files it has.
+
+File history sits below the note card, outside today’s highlighted background.
 
 ## Filters
 

@@ -20,10 +20,10 @@ const BEFORE_ALL = "";
 const AFTER_ALL = "\uffff";
 
 /**
- * The days the journal shows while empty days are hidden: each day with a
- * note that passes the filters and, while files from each day are listed,
- * each day with files but no note. A day whose note the filters leave out
- * stays out whatever files it has, since showing the day would show the note.
+ * Indexed days available for navigation: matching notes, plus file-only days
+ * when both empty days and file history are enabled. A day whose note the
+ * filters leave out stays out whatever files it has, since showing the day
+ * would show the note.
  */
 export class ShownDays implements DaySequence {
 	constructor(
@@ -104,9 +104,9 @@ export class DayWalker {
 
 	/**
 	 * The next day the view should render in `direction`. With empty days
-	 * hidden this skips straight to the next shown day - a matching note, or
-	 * files - so the view never has to materialise a run of blank days to
-	 * cross a gap, except for Today, so a walk that would step over it stops
+	 * hidden this skips straight to the next matching note, so the view never
+	 * has to materialise a run of blank days to cross a gap, except for Today,
+	 * so a walk that would step over it stops
 	 * there instead.
 	 */
 	next(from: number, direction: -1 | 1): number | null {

@@ -95,10 +95,12 @@ export default class JournalViewPlugin extends Plugin {
 		this.index = new DailyNoteIndex(this.app, this.daily);
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
 		this.dayFiles = new DayFileIndex(this.app, this.index, this.daily, () => this.settings);
-		// No include filter can match a day without a note, so days that only
-		// have files go while one is active.
+		// File history never makes an empty day eligible in note-only mode.
+		// Include filters also cannot match a day without a note.
 		this.shownDays = new ShownDays(this.index, this.filteredIndex, () =>
-			this.settings.showDayFiles && !hasIncludeFilter(this.settings) ? this.dayFiles : null,
+			this.settings.showDayFiles && !this.settings.hideEmptyDays && !hasIncludeFilter(this.settings)
+				? this.dayFiles
+				: null,
 		);
 		// onLayoutReady queues callbacks without returning an EventRef, so they
 		// need an explicit guard when the plugin unloads before layout restoration.
