@@ -1785,10 +1785,6 @@ button.journal-appearance-settings-link:hover {
 	transition: opacity 300ms ease-out;
 }
 
-.journal-year-progress-month.is-season::before {
-	opacity: 0.5;
-}
-
 .journal-year-progress-month.is-current::before {
 	opacity: 1;
 }
@@ -1802,8 +1798,9 @@ button.journal-appearance-settings-link:hover {
 	transition-duration: 100ms;
 }
 
-/* The marked month's year and name, and its neighbours' names, sit on the
-   side of the lines away from the journal. */
+/* The marked month's year and name, and the names of the two months either
+   side, fading with distance, sit on the side of the lines away from the
+   journal. */
 .journal-year-progress-label {
 	position: absolute;
 	top: 50%;
@@ -1832,6 +1829,12 @@ button.journal-appearance-settings-link:hover {
 	flex-direction: row-reverse;
 }
 
+.journal-year-progress-month.is-nearby .journal-year-progress-label {
+	opacity: 0.5;
+	pointer-events: auto;
+}
+
+/* Hovering brightens a farther name too, so this has to come after it. */
 .journal-year-progress-month.is-near .journal-year-progress-label,
 .journal-year-progress-month.is-current .journal-year-progress-label,
 .journal-year-progress-month:hover .journal-year-progress-label {

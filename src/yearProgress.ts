@@ -14,8 +14,8 @@ const LABEL_MARGIN = 8;
 
 /**
  * Twelve month lines beside the journal column that follow the reader like a
- * scrollbar: the month being read is brightest, the other months of its
- * season stand out from the rest of its year, and months that have not come
+ * scrollbar: the month being read is brightest and labelled with its year,
+ * the two months either side of it are named, and months that have not come
  * yet are dimmest. Selecting a month moves the journal to it. It only appears
  * when the pane has room beside the column.
  */
@@ -42,7 +42,7 @@ export class YearProgress {
 		for (let month = 0; month < 12; month++) {
 			const el = this.el.createDiv({ cls: "journal-year-progress-month" });
 			// Every month carries its name, which also names it to assistive
-			// technology; only the marked month and its neighbours show theirs.
+			// technology; only the marked month and those near it show theirs.
 			const label = el.createDiv({ cls: "journal-year-progress-label" });
 			this.years.push(label.createSpan({ cls: "journal-year-progress-year" }));
 			label.createSpan({ text: createMoment(new Date(2000, month, 1)).format("MMM") });
@@ -92,18 +92,14 @@ export class YearProgress {
 		const monthKey = `${year}-${current}-${firstFuture}`;
 		if (monthKey === this.drawnMonth) return;
 		this.drawnMonth = monthKey;
-		// Meteorological seasons begin in March, June, September and December.
-		// Winter spans the turn of the year, so December's season goes on into
-		// the next year's lines and January's began on the last year's.
-		const seasonStart = current - ((current + 1) % 3);
 		this.months.forEach((el, month) => {
-			el.toggleClass("is-current", month === current);
-			el.toggleClass("is-near", Math.abs(month - current) === 1);
-			if (month === current) el.setAttribute("aria-current", "date");
+			const distance = Math.abs(month - current);
+			el.toggleClass("is-current", distance === 0);
+			el.toggleClass("is-near", distance === 1);
+			el.toggleClass("is-nearby", distance === 2);
+			if (distance === 0) el.setAttribute("aria-current", "date");
 			else el.removeAttribute("aria-current");
-			const inSeason = month >= seasonStart && month < seasonStart + 3;
-			el.toggleClass("is-season", inSeason && month !== current && month < firstFuture);
-			el.toggleClass("is-future", month !== current && month >= firstFuture);
+			el.toggleClass("is-future", distance !== 0 && month >= firstFuture);
 		});
 		for (const el of this.years) el.setText(String(year));
 		// A label of another length may no longer fit beside the strip.
