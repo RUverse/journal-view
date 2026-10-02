@@ -356,7 +356,7 @@ button.journal-find-button.is-active {
 }
 
 .journal-day-header-hidden:hover .journal-day-actions,
-.journal-day-card:has(.journal-entry-lead:hover) .journal-day-header-hidden .journal-day-actions,
+.journal-day-lead-hovered .journal-day-header-hidden .journal-day-actions,
 .journal-day-lead-active .journal-day-header-hidden .journal-day-actions,
 .journal-day-header-hidden .journal-day-actions:focus-within {
 	pointer-events: auto;
@@ -398,7 +398,7 @@ button.journal-find-button.is-active {
 /* The header's buttons belong to the note directly beneath it, so they show
    for that note - hovered or written in - rather than for the whole day. */
 .journal-day-header:hover .journal-day-actions,
-.journal-day-card:has(.journal-entry-lead:hover) .journal-day-actions,
+.journal-day-lead-hovered .journal-day-actions,
 .journal-day-lead-active .journal-day-actions,
 .journal-day-actions:focus-within {
 	opacity: 1;
