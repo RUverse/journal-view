@@ -1,12 +1,12 @@
 {
 	"name": "journal-view",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"description": "Journal View - a continuous, scrollable journal view of your daily notes for Obsidian.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"lint": "eslint .",
+		"lint": "eslint . && stylelint styles.css --max-warnings 0",
 		"typecheck": "tsc -noEmit -skipLibCheck",
 		"test-vault": "bash scripts/setup-test-vault.sh",
 		"deploy:ios": "node scripts/deploy-ios-test-vault.mjs",
@@ -38,6 +38,8 @@
 		"eslint-plugin-obsidianmd": "^0.4.2",
 		"globals": "^17.6.0",
 		"obsidian": "^1.5.7",
+		"stylelint": "^17.16.0",
+		"stylelint-config-obsidianmd": "^0.1.0",
 		"tslib": "^2.6.2",
 		"typescript": "^5.3.3",
 		"typescript-eslint": "^8.59.1"

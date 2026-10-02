@@ -19,6 +19,7 @@ export default defineConfig(
 				projectService: {
 					allowDefaultProject: [
 						"eslint.config.mjs",
+						"stylelint.config.mjs",
 						"manifest.json",
 						"scripts/deploy-ios-test-vault.mjs",
 					],

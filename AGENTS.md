@@ -13,6 +13,9 @@ editable timeline. See [README.md](README.md) for behavior and installation.
   workflow runs it on every pull request. Keep `tsconfig.json` on `strict`:
   looser compiler options turn some types into `any`, which hides warnings the
   review would still raise.
+- `npm run lint` also checks `styles.css` against the review's CSS rules
+  (`stylelint.config.mjs`) and fails on any warning. Avoid `:has()`: toggle a
+  class from the code instead.
 - Preserve user content: flush pending edits during teardown and handle vault
   writes, renames, and concurrent file creation defensively.
 - Obsidian's embedded Markdown editor is an internal API. Keep access isolated
