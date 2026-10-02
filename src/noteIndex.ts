@@ -50,7 +50,7 @@ export interface DailyNoteLocation {
 	key: string;
 	/** Parsed from the file name; the start of the day unless the format records a time. */
 	time: number;
-	/** Text after the date, taken in by a format ending in `*`; empty otherwise. */
+	/** Text after the date, taken in when a day holds several notes; empty otherwise. */
 	suffix: string;
 }
 
@@ -198,7 +198,7 @@ export class DailyNoteIndex implements OrderedDayIndex {
 	/** The day and time a path represents, or null if it is not a daily note. */
 	locate(path: string, config?: ResolvedDailyConfig): DailyNoteLocation | null {
 		if (!path.endsWith(".md")) return null;
-		const { folder, format, wildcard } = config ?? this.resolver.config();
+		const { folder, format, multipleNotes } = config ?? this.resolver.config();
 
 		let relative = path.slice(0, -3);
 		if (folder) {
@@ -209,7 +209,7 @@ export class DailyNoteIndex implements OrderedDayIndex {
 		if (!mayHoldDate(relative, dateShape(format))) return null;
 		const parsed = createMoment(relative, format, true);
 		if (parsed.isValid()) return { key: parsed.format(DAY_KEY_FORMAT), time: parsed.valueOf(), suffix: "" };
-		return wildcard ? locateWithSuffix(relative, format) : null;
+		return multipleNotes ? locateWithSuffix(relative, format) : null;
 	}
 
 	/** The notes indexed for a day, in the order they are shown. */

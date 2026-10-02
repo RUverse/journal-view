@@ -16,6 +16,8 @@ import type { WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { JournalEditor, createJournalEditor } from "./editor";
 import type { Moment } from "./moment";
+import { renderNoteLabel } from "./noteLabel";
+import type { NoteLabel } from "./noteLabel";
 import { SaveQueue } from "./saveQueue";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
@@ -514,13 +516,14 @@ export class NoteEntry {
 	/**
 	 * Gives the entry a divider of its own, carrying `label` and the buttons
 	 * that act on the note, or takes it away (null) for the note that sits
-	 * directly under the day's header.
+	 * directly under the day's header. `onRetitle` lets the reader rename the
+	 * note by its title.
 	 */
-	setHeading(label: string | null): void {
+	setHeading(label: NoteLabel | null, onRetitle?: (title: string) => void): void {
 		this.headingEl.hidden = label === null;
 		this.actionsEl.empty();
 		if (label === null) return;
-		this.labelEl.setText(label);
+		renderNoteLabel(this.labelEl, label, onRetitle);
 		setTooltip(this.labelEl, this.path, { placement: "top" });
 		this.renderActions(this.actionsEl);
 	}

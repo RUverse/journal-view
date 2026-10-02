@@ -1,10 +1,12 @@
-import { App, TFile, setTooltip } from "obsidian";
+import { App, Notice, TFile, normalizePath, setIcon, setTooltip } from "obsidian";
 import type { HoverParent, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { DayFilesHost, DayFilesList } from "./dayFilesList";
 import { EntryHost, NoteEntry } from "./entry";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
+import { INVALID_TITLE_CHARACTERS, renderNoteLabel } from "./noteLabel";
+import type { NoteLabel } from "./noteLabel";
 
 /** The bits of the journal view a day needs to talk to. Its page previews hang off the view. */
 export interface DayHost extends HoverParent {
@@ -16,6 +18,8 @@ export interface DayHost extends HoverParent {
 	setFilesOpen(day: DaySection, open: boolean): void;
 	/** Called when one of a day's files appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
+	/** Shows a note the day created, without waiting for the vault to announce it. */
+	onDayNoteCreated(file: TFile): void;
 	/** True when this date passes the journal's current visibility rules. */
 	isVisibleDay(day: DaySection): boolean;
 	/** True when this note passes the journal's filters on its own. */
@@ -57,6 +61,8 @@ export class DaySection implements EntryHost, DayFilesHost {
 	private noteLabelEl: HTMLElement;
 	private actionsEl: HTMLElement;
 	private entriesEl: HTMLElement;
+	/** Today's button that adds another note, while the day can hold several. */
+	private addNoteEl: HTMLElement | null = null;
 	/** The files from this date, while the journal lists them. */
 	private files: DayFilesList | null;
 	private destroyed = false;
@@ -106,6 +112,16 @@ export class DaySection implements EntryHost, DayFilesHost {
 		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 		this.entriesEl = this.cardEl.createDiv({ cls: "journal-day-entries" });
+		if (this.isToday && this.host.plugin.settings.multipleNotesPerDay) {
+			this.addNoteEl = this.cardEl.createDiv({ cls: "journal-day-add" });
+			const add = this.addNoteEl.createEl("button", { cls: "clickable-icon journal-day-add-button" });
+			setIcon(add, "file-plus");
+			setTooltip(add, "Add a note to today");
+			add.addEventListener("click", (event) => {
+				event.stopPropagation();
+				void this.addNote();
+			});
+		}
 		this.files = this.host.plugin.settings.showDayFiles ? new DayFilesList(this, this.el) : null;
 
 		this.el.addEventListener("focusout", () => {
@@ -222,20 +238,59 @@ export class DaySection implements EntryHost, DayFilesHost {
 
 	/**
 	 * What names a note beyond its date: the time its file name records, when
-	 * the date format has one, and any text after the date that a format
-	 * ending in `*` takes in. A note that is not the first shown in its day
+	 * the date format has one, and any text after the date when a day holds
+	 * several notes. A note that is not the first shown in its day
 	 * always needs a name, so it falls back to the file's own.
 	 */
-	private labelFor(entry: NoteEntry, required: boolean): string | null {
+	private labelFor(entry: NoteEntry, required: boolean): NoteLabel | null {
 		const { daily, index } = this.host.plugin;
 		const location = entry.file ? index.locate(entry.file.path) : null;
-		const parts: string[] = [];
-		if (location && daily.recordsTime()) parts.push(createMoment(location.time).format("LT"));
-		if (location?.suffix) parts.push(location.suffix);
-		if (parts.length) return parts.join(" · ");
+		const text = location && daily.recordsTime() ? createMoment(location.time).format("LT") : null;
+		const title = location?.suffix || null;
+		if (text || title) return { text, title };
 		if (!required) return null;
-		if (!entry.file) return "New note";
-		return entry.file.basename;
+		return { text: entry.file ? entry.file.basename : "New note", title: null };
+	}
+
+	/**
+	 * Renames a note to `title` after its date, keeping the date and what sets
+	 * the title off from it as they were. Links to the note follow, as they do
+	 * for any rename in Obsidian.
+	 */
+	private async retitle(entry: NoteEntry, title: string): Promise<void> {
+		const { app, plugin } = this.host;
+		const file = entry.file;
+		const suffix = file ? plugin.index.locate(file.path)?.suffix : null;
+		if (!file || !suffix) return;
+		if (INVALID_TITLE_CHARACTERS.test(title)) {
+			new Notice(`Journal View: "${title}" holds a character a note's name cannot: \\ / : * ? " < > | # ^ [ ]`);
+			return;
+		}
+		const base = file.basename;
+		const kept = base.endsWith(suffix) ? base.slice(0, -suffix.length) : `${base} `;
+		const parent = file.parent && !file.parent.isRoot() ? `${file.parent.path}/` : "";
+		const path = normalizePath(`${parent}${kept}${title}.${file.extension}`);
+		if (path === file.path) return;
+		if (plugin.index.locate(path)?.key !== this.key) {
+			new Notice(`Journal View: "${title}" would move the note off this day`);
+			return;
+		}
+		if (app.vault.getAbstractFileByPath(path)) {
+			new Notice(`Journal View: ${path} already exists`);
+			return;
+		}
+		try {
+			await app.fileManager.renameFile(file, path);
+		} catch (error) {
+			console.error(`Journal View: could not rename ${file.path}`, error);
+			new Notice(`Journal View: could not rename ${file.path}`);
+		}
+	}
+
+	/** Lets the reader rename `entry` by its title, when it has one. */
+	private retitler(entry: NoteEntry): ((title: string) => void) | undefined {
+		if (!entry.file || !this.host.plugin.settings.multipleNotesPerDay) return undefined;
+		return (title) => void this.retitle(entry, title);
 	}
 
 	/** Re-applies the classes and header buttons that depend on the day's notes. */
@@ -243,6 +298,7 @@ export class DaySection implements EntryHost, DayFilesHost {
 		this.el.toggleClass("journal-day-today", this.isToday);
 		this.el.toggleClass("journal-day-empty", !this.exists);
 		this.el.toggleClass("journal-day-future", this.offset > 0);
+		if (this.addNoteEl) this.addNoteEl.hidden = !this.exists;
 		for (const entry of this.entries) entry.refreshState();
 		this.refreshVisibility(true);
 	}
@@ -282,10 +338,11 @@ export class DaySection implements EntryHost, DayFilesHost {
 		setTooltip(this.titleEl, lead.path, { placement: "right" });
 		lead.renderActions(this.actionsEl);
 		const label = this.labelFor(lead, false);
-		this.noteLabelEl.setText(label ?? "");
+		renderNoteLabel(this.noteLabelEl, label ?? { text: null, title: null }, this.retitler(lead));
 		this.noteLabelEl.hidden = label === null;
 		for (const entry of this.entries) {
-			entry.setHeading(entry === lead ? null : this.labelFor(entry, true));
+			if (entry === lead) entry.setHeading(null);
+			else entry.setHeading(this.labelFor(entry, true), this.retitler(entry));
 		}
 	}
 
@@ -416,6 +473,36 @@ export class DaySection implements EntryHost, DayFilesHost {
 	 */
 	async prepare(): Promise<void> {
 		await Promise.all(this.entries.map((entry) => entry.prepare()));
+	}
+
+	/**
+	 * Adds another note to the day, named after the current time, and puts
+	 * the reader in it. The note is created straight away, from the template.
+	 */
+	private async addNote(): Promise<void> {
+		const daily = this.host.plugin.daily;
+		const at = daily.atCurrentTime(this.date);
+		const preferred = daily.addedNotePath(at);
+		let file: TFile;
+		try {
+			file = await daily.create(at, preferred, undefined, true);
+		} catch (error) {
+			console.error(`Journal View: could not create ${preferred}`, error);
+			new Notice(`Journal View: could not create ${preferred}`);
+			return;
+		}
+		if (this.destroyed) return;
+		this.host.onDayNoteCreated(file);
+		const entry = this.entryFor(file);
+		if (!entry) return;
+		await entry.reload();
+		if (this.destroyed || !this.entries.includes(entry)) return;
+		// The journal's filters can leave the new note out, e.g. when its
+		// template lacks a tag they ask for. It shows while the reader is in
+		// it, as any note does, so show it for focus to land in.
+		entry.setHidden(false);
+		if (entry.focusEditor(true)) this.refreshVisibility(true);
+		else entry.setHidden(!this.host.isVisibleEntry(this, entry));
 	}
 
 	/** Brings every note in the day up to date with its content on disk. */

@@ -40,6 +40,8 @@ export interface JournalViewSettings {
 	folder: string;
 	/** Overrides the daily-note template. Empty = inherit from the vault. */
 	templatePath: string;
+	/** Notes named with more after the date join that day, and each day can be given more. */
+	multipleNotesPerDay: boolean;
 	/** How the date is written in each day's header. */
 	headerFormat: string;
 	/** How prominently each day's date is displayed. */
@@ -86,6 +88,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	dateFormat: "",
 	folder: "",
 	templatePath: "",
+	multipleNotesPerDay: false,
 	headerFormat: "dddd, D MMMM",
 	headerStyle: "subtle",
 	showMonthSeparators: false,
@@ -125,6 +128,7 @@ type SettingKey = keyof JournalViewSettings;
 type TextSettingKey = "headerFormat" | "dayFilesProperty" | "dayFilesExcluded";
 type InheritedSettingKey = "dateFormat" | "folder" | "templatePath";
 type ToggleSettingKey =
+	| "multipleNotesPerDay"
 	| "richEditor"
 	| "focusTodayOnOpen"
 	| "openJournalOnStartup"
@@ -272,9 +276,8 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					{
 						name: "Date format",
 						desc:
-							"Moment.js format used for the file name of each day. End it with * to also show " +
-							"notes named with more after the date, such as 2026-08-16 Birthday. Include a time, " +
-							"such as YYYY-MM-DD HHmm, to keep several notes a day.",
+							"Moment.js format used for the file name of each day. Include a time, such as " +
+							"YYYY-MM-DD HHmm, to keep several notes a day.",
 						control: {
 							type: "inherited",
 							key: "dateFormat",
@@ -301,6 +304,14 @@ export class JournalViewSettingTab extends PluginSettingTab {
 							inherited: (vault) => vault.template,
 							emptyLabel: "none",
 						},
+					},
+					{
+						name: "Multiple notes per day",
+						desc:
+							"Also show notes named with more after the date, such as 2026-08-16 Birthday, under " +
+							"that day. Today gets a button that adds another note, and selecting the text after " +
+							"a note's date renames it.",
+						control: { type: "toggle", key: "multipleNotesPerDay" },
 					},
 				],
 			},
@@ -538,6 +549,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					changed = true;
 				}
 				break;
+			case "multipleNotesPerDay":
 			case "richEditor":
 			case "focusTodayOnOpen":
 			case "openJournalOnStartup":
@@ -569,7 +581,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		const resolved = this.plugin.daily.config();
 		return (
 			`Leave the fields below empty to follow your vault's daily-note settings. ` +
-			`Currently resolving to: format "${this.plugin.daily.displayFormat(resolved)}", ` +
+			`Currently resolving to: format "${resolved.format}", ` +
 			`folder "${resolved.folder || "/"}"` +
 			(resolved.template ? `, template "${resolved.template}".` : ".")
 		);

@@ -37,7 +37,8 @@ Some Customization is only visible in the customization menu accessible from the
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View; end the format with `*` to include notes with more after the date |
+| Date format / Folder / Template | Inherited | Overrides your vault's daily-note settings for Journal View |
+| Multiple notes per day | Off | Shows notes with more after the date under that day, and adds a button to today that adds another note; see [Several notes a day](#several-notes-a-day) |
 | Day order | Oldest to newest | Reverses the complete timeline when set to newest to oldest |
 | Daily header format | `dddd, D MMMM` | Controls how each daily header displays its date |
 | Daily header style | Subtle | Shows each date subtly, as an H1, or hides the date display |
@@ -56,11 +57,17 @@ Some Customization is only visible in the customization menu accessible from the
 
 A day can hold more than one note in two ways, and Journal View shows all of them under that day:
 
-- **Text after the date.** End the date format with `*`, for example `YYYY-MM-DD*`, to also include
-  notes whose names go on after the date, such as `2026-08-16 Birthday`. The text has to be set off
-  from the date by a space or punctuation. New notes are still named with the plain date.
+- **Text after the date.** Turn on **Multiple notes per day** to also include notes whose names go
+  on after the date, such as `2026-08-16 Birthday`. The text has to be set off from the date by a
+  space or punctuation. Once today has a note, the bottom right of its card has an **Add a note to
+  today** button that creates a note named after the date and the current time, such as
+  `2026-08-16 14-30`, and puts the cursor in it. A second note in the same minute becomes
+  `2026-08-16 14-30-1`, then `-2`, and so on. Select the text after a note's date, in the day's
+  header or above the note, to rename the note: `14-30` can become `Lunch`, and links to the note
+  follow. Writing in an empty day still creates the plain dated note.
 - **A time in the name.** A format that records a time, for example `YYYY-MM-DD HHmm`, keeps a
   separate note for each moment. Writing in an empty day creates a note named after the current time.
+  With **Multiple notes per day** on, the add button names its note the same way.
 
 Notes are ordered by their time, then by name, with the plain-date note first. The first note sits
 directly under the day's header, which shows its time or the text after its date; each further note

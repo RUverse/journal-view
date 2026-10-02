@@ -1490,6 +1490,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.syncDateSeparators();
 	}
 
+	onDayNoteCreated(file: TFile): void {
+		this.attachFile(file);
+	}
+
 	onDayContentChanged(_day: DaySection): void {
 		this.find?.sectionsChanged();
 	}
@@ -1564,6 +1568,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			dateFormat: settings.dateFormat,
 			folder: settings.folder,
 			templatePath: settings.templatePath,
+			multipleNotesPerDay: settings.multipleNotesPerDay,
 			headerFormat: settings.headerFormat,
 			headerStyle: settings.headerStyle,
 			showMonthSeparators: settings.showMonthSeparators,

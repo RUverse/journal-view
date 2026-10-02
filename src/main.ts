@@ -46,6 +46,8 @@ export default class JournalViewPlugin extends Plugin {
 	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
 	private settingsTab: JournalViewSettingTab | null = null;
+	/** No saved choice for Multiple notes per day, which the vault's format may still make. */
+	private multipleNotesUnset = false;
 	private filterControlListeners = new Set<() => void>();
 	/** Navigation handed to journal views before Obsidian constructs them. */
 	private initialTargets = new Map<WorkspaceLeaf, InitialJournalTarget>();
@@ -114,6 +116,7 @@ export default class JournalViewPlugin extends Plugin {
 		// date by the time a view reacts to the same vault event.
 		this.app.workspace.onLayoutReady(() => {
 			if (!layoutReadyCallbacksEnabled) return;
+			if (this.adoptInheritedWildcard()) void this.saveSettings();
 			this.index.rebuild();
 			this.filteredIndex.rebuild();
 			this.dayFiles.rebuild();
@@ -356,12 +359,13 @@ export default class JournalViewPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		const saved: unknown = await this.loadData();
+		this.multipleNotesUnset = !isRecord(saved) || typeof saved.multipleNotesPerDay !== "boolean";
 		if (!isRecord(saved)) {
 			this.settings = { ...DEFAULT_SETTINGS, filterRules: [], displayProperties: [] };
 			return;
 		}
 		this.settings = {
-			dateFormat: stringSetting(saved.dateFormat, DEFAULT_SETTINGS.dateFormat),
+			...dateFormatSettings(saved),
 			folder: stringSetting(saved.folder, DEFAULT_SETTINGS.folder),
 			templatePath: stringSetting(saved.templatePath, DEFAULT_SETTINGS.templatePath),
 			headerFormat: headerFormatSetting(saved.headerFormat, typeof saved.showMonthSeparators === "boolean"),
@@ -396,6 +400,20 @@ export default class JournalViewPlugin extends Plugin {
 		};
 	}
 
+	/**
+	 * Journal View 1.4.0 also read a `*` at the end of the vault's own date
+	 * format, when its own was left empty. Turns Multiple notes per day on for
+	 * such a vault, once; the other plugins' settings that format can come from
+	 * are only certain to be loaded once the layout is ready.
+	 */
+	private adoptInheritedWildcard(): boolean {
+		if (!this.multipleNotesUnset || this.settings.dateFormat) return false;
+		this.multipleNotesUnset = false;
+		if (!this.daily.inherited().format.trim().endsWith("*")) return false;
+		this.settings.multipleNotesPerDay = true;
+		return true;
+	}
+
 	async saveSettings(scheduleViewUpdate = true): Promise<void> {
 		this.syncFilterControls();
 		await this.saveData(this.settings);
@@ -412,6 +430,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringSetting(value: unknown, fallback: string): string {
 	return typeof value === "string" ? value : fallback;
+}
+
+/**
+ * Reads the date format, and whether a day takes in several notes. Journal
+ * View 1.4.0 turned that on with a `*` at the end of the date format; such a
+ * format is migrated to the plain one with the setting on.
+ */
+function dateFormatSettings(
+	saved: Record<string, unknown>,
+): Pick<JournalViewSettings, "dateFormat" | "multipleNotesPerDay"> {
+	const format = stringSetting(saved.dateFormat, DEFAULT_SETTINGS.dateFormat).trim();
+	const wildcard = format.endsWith("*");
+	return {
+		dateFormat: wildcard ? format.slice(0, -1).trimEnd() : format,
+		multipleNotesPerDay: booleanSetting(
+			saved.multipleNotesPerDay,
+			wildcard || DEFAULT_SETTINGS.multipleNotesPerDay,
+		),
+	};
 }
 
 /** Migrates the interim header defaults once, while preserving later choices. */

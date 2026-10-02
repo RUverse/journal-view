@@ -146,6 +146,12 @@ tags:
 ## Notes
 MARKDOWN
 
+# A note named with more after the date, which joins 2 August only while
+# Multiple notes per day is on.
+write "Journal/2026-08-02 Birthday.md" <<'MARKDOWN'
+A note with text after the date in its name.
+MARKDOWN
+
 # Files that are not daily notes, for File modification history. The article carries
 # the date it was written in a property, which falls on a day without a note.
 write Reading/Article.md <<'MARKDOWN'
@@ -270,6 +276,28 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 4. **A day that already has a note.** No template offered; content untouched.
 5. **A template that cannot be read.** Point `daily-notes.json` at a missing file:
    the day stays empty, a warning is logged, and `dev:errors` stays clean.
+
+## Multiple notes per day checks
+
+`Journal/2026-08-02 Birthday.md` has text after the date in its name.
+
+1. **Off by default.** Today's card has no add button, and 2 August shows only
+   its plain note.
+2. **Turn it on** in Settings -> Journal View. The birthday note joins 2 August
+   under a divider labelled `Birthday`. Once today has a note, the bottom right
+   of its card shows Add a note to today; no other day has it, and day headers
+   keep only Delete and Open note in a tab.
+3. **Add twice within a minute.** Creates `<date> HH-mm`, then `<date> HH-mm-1`,
+   under today, each from the template, with the cursor in the new note.
+4. **Rename a note by its title.** Select `Birthday`, type `Party`, press Enter:
+   the file becomes `2026-08-02 Party.md` and stays under 2 August. Escape keeps
+   the name; a title with `/` or `#`, or one another note has, is refused with a
+   notice. A plain `2026-08-02.md` has no title to select.
+5. **Migration from 1.4.0.** Disable the plugin, set `"dateFormat": "YYYY-MM-DD*"`
+   in `.obsidian/plugins/journal-view/data.json`, enable it again: the Date
+   format field reads `YYYY-MM-DD` and the toggle is on.
+6. **A format with a time.** With the format `YYYY-MM-DD HHmm`, the button names
+   its note by the format at the current time, a minute later when that is taken.
 
 ## File modification history checks
 
