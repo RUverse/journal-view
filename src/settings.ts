@@ -309,7 +309,8 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						name: "Multiple notes per day",
 						desc:
 							"Also show notes named with more after the date, such as 2026-08-16 Birthday, under " +
-							"that day, and add a button to each day's header that adds another note to the day.",
+							"that day. Today gets a button that adds another note, and selecting the text after " +
+							"a note's date renames it.",
 						control: { type: "toggle", key: "multipleNotesPerDay" },
 					},
 				],
