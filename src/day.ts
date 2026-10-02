@@ -132,6 +132,10 @@ export class DaySection implements EntryHost, DayFilesHost {
 				if (!this.destroyed && !this.hasFocus) this.onFocusLeft();
 			}, 0);
 		});
+		// The header's buttons show while the note beneath it is hovered. A class
+		// rather than `:has()`, which makes every hover re-match the whole card.
+		this.cardEl.addEventListener("mouseover", () => this.syncLeadHover());
+		this.cardEl.addEventListener("mouseleave", () => this.syncLeadHover());
 
 		this.syncEntries();
 		this.refreshFiles();
@@ -562,6 +566,11 @@ export class DaySection implements EntryHost, DayFilesHost {
 	private syncFocusClasses(): void {
 		this.el.toggleClass("journal-day-focused", this.entries.some((entry) => entry.isEditorFocused));
 		this.el.toggleClass("journal-day-lead-active", this.lead.isEditorFocused);
+		this.syncLeadHover();
+	}
+
+	private syncLeadHover(): void {
+		this.el.toggleClass("journal-day-lead-hovered", this.lead.el.matches(":hover"));
 	}
 
 	onEntryFocusChanged(_entry: NoteEntry): void {
