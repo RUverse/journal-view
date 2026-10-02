@@ -1,4 +1,4 @@
-import { App, TFile, setTooltip } from "obsidian";
+import { App, Notice, TFile, setTooltip } from "obsidian";
 import type { HoverParent, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { DayFilesHost, DayFilesList } from "./dayFilesList";
@@ -16,6 +16,8 @@ export interface DayHost extends HoverParent {
 	setFilesOpen(day: DaySection, open: boolean): void;
 	/** Called when one of a day's files appears, disappears or is renamed. */
 	onDayFileChanged(day: DaySection, previousPath: string | null): void;
+	/** Shows a note the day created, without waiting for the vault to announce it. */
+	onDayNoteCreated(file: TFile): void;
 	/** True when this date passes the journal's current visibility rules. */
 	isVisibleDay(day: DaySection): boolean;
 	/** True when this note passes the journal's filters on its own. */
@@ -222,8 +224,8 @@ export class DaySection implements EntryHost, DayFilesHost {
 
 	/**
 	 * What names a note beyond its date: the time its file name records, when
-	 * the date format has one, and any text after the date that a format
-	 * ending in `*` takes in. A note that is not the first shown in its day
+	 * the date format has one, and any text after the date when a day holds
+	 * several notes. A note that is not the first shown in its day
 	 * always needs a name, so it falls back to the file's own.
 	 */
 	private labelFor(entry: NoteEntry, required: boolean): string | null {
@@ -280,7 +282,8 @@ export class DaySection implements EntryHost, DayFilesHost {
 		this.syncFocusClasses();
 		this.actionsEl.empty();
 		setTooltip(this.titleEl, lead.path, { placement: "right" });
-		lead.renderActions(this.actionsEl);
+		const canAdd = lead.exists && this.host.plugin.settings.multipleNotesPerDay;
+		lead.renderActions(this.actionsEl, canAdd ? () => void this.addNote() : undefined);
 		const label = this.labelFor(lead, false);
 		this.noteLabelEl.setText(label ?? "");
 		this.noteLabelEl.hidden = label === null;
@@ -416,6 +419,30 @@ export class DaySection implements EntryHost, DayFilesHost {
 	 */
 	async prepare(): Promise<void> {
 		await Promise.all(this.entries.map((entry) => entry.prepare()));
+	}
+
+	/**
+	 * Adds another note to the day, named after the current time, and puts
+	 * the reader in it. The note is created straight away, from the template.
+	 */
+	private async addNote(): Promise<void> {
+		const daily = this.host.plugin.daily;
+		const at = daily.atCurrentTime(this.date);
+		const preferred = daily.addedNotePath(at);
+		let file: TFile;
+		try {
+			file = await daily.create(at, preferred, undefined, true);
+		} catch (error) {
+			console.error(`Journal View: could not create ${preferred}`, error);
+			new Notice(`Journal View: could not create ${preferred}`);
+			return;
+		}
+		if (this.destroyed) return;
+		this.host.onDayNoteCreated(file);
+		const entry = this.entryFor(file);
+		if (!entry) return;
+		await entry.reload();
+		if (!this.destroyed && this.entries.includes(entry)) this.focusEditor(true, entry);
 	}
 
 	/** Brings every note in the day up to date with its content on disk. */

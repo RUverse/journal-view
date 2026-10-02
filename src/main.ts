@@ -361,7 +361,7 @@ export default class JournalViewPlugin extends Plugin {
 			return;
 		}
 		this.settings = {
-			dateFormat: stringSetting(saved.dateFormat, DEFAULT_SETTINGS.dateFormat),
+			...dateFormatSettings(saved),
 			folder: stringSetting(saved.folder, DEFAULT_SETTINGS.folder),
 			templatePath: stringSetting(saved.templatePath, DEFAULT_SETTINGS.templatePath),
 			headerFormat: headerFormatSetting(saved.headerFormat, typeof saved.showMonthSeparators === "boolean"),
@@ -412,6 +412,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringSetting(value: unknown, fallback: string): string {
 	return typeof value === "string" ? value : fallback;
+}
+
+/**
+ * Reads the date format, and whether a day takes in several notes. Journal
+ * View 1.4.0 turned that on with a `*` at the end of the date format; such a
+ * format is migrated to the plain one with the setting on.
+ */
+function dateFormatSettings(
+	saved: Record<string, unknown>,
+): Pick<JournalViewSettings, "dateFormat" | "multipleNotesPerDay"> {
+	const format = stringSetting(saved.dateFormat, DEFAULT_SETTINGS.dateFormat).trim();
+	const wildcard = format.endsWith("*");
+	return {
+		dateFormat: wildcard ? format.slice(0, -1).trimEnd() : format,
+		multipleNotesPerDay: booleanSetting(
+			saved.multipleNotesPerDay,
+			wildcard || DEFAULT_SETTINGS.multipleNotesPerDay,
+		),
+	};
 }
 
 /** Migrates the interim header defaults once, while preserving later choices. */

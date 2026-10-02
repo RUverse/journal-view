@@ -539,8 +539,12 @@ export class NoteEntry {
 		this.refreshMetadata();
 	}
 
-	/** Adds the buttons that act on this note to `container`. */
-	renderActions(container: HTMLElement): void {
+	/**
+	 * Adds the buttons that act on this note to `container`, and - given
+	 * `onAddNote`, for the note under the day's header - one that adds another
+	 * note to the day.
+	 */
+	renderActions(container: HTMLElement, onAddNote?: () => void): void {
 		if (this.exists) {
 			const remove = container.createEl("button", {
 				cls: "clickable-icon journal-day-action journal-day-delete",
@@ -551,6 +555,18 @@ export class NoteEntry {
 				event.stopPropagation();
 				void this.deleteNote();
 			});
+
+			if (onAddNote) {
+				const add = container.createEl("button", {
+					cls: "clickable-icon journal-day-action journal-day-add",
+				});
+				setIcon(add, "file-plus");
+				setTooltip(add, "Add a note to this day");
+				add.addEventListener("click", (event) => {
+					event.stopPropagation();
+					onAddNote();
+				});
+			}
 
 			const open = container.createEl("button", { cls: "clickable-icon journal-day-action" });
 			setIcon(open, "file-text");

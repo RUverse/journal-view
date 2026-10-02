@@ -146,6 +146,12 @@ tags:
 ## Notes
 MARKDOWN
 
+# A note named with more after the date, which joins 2 August only while
+# Multiple notes per day is on.
+write "Journal/2026-08-02 Birthday.md" <<'MARKDOWN'
+A note with text after the date in its name.
+MARKDOWN
+
 # Files that are not daily notes, for File modification history. The article carries
 # the date it was written in a property, which falls on a day without a note.
 write Reading/Article.md <<'MARKDOWN'
@@ -270,6 +276,24 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 4. **A day that already has a note.** No template offered; content untouched.
 5. **A template that cannot be read.** Point `daily-notes.json` at a missing file:
    the day stays empty, a warning is logged, and `dev:errors` stays clean.
+
+## Multiple notes per day checks
+
+`Journal/2026-08-02 Birthday.md` has text after the date in its name.
+
+1. **Off by default.** No day header has an add button, and 2 August shows only
+   its plain note.
+2. **Turn it on** in Settings -> Journal View. The birthday note joins 2 August
+   under a divider labelled `Birthday`. A day with a note shows Delete, Add a
+   note to this day and Open note in a tab in its header; an empty day shows
+   only "Create note".
+3. **Add twice within a minute.** Creates `<date> HH-mm`, then `<date> HH-mm-1`,
+   under the day, each from the template, with the cursor in the new note.
+4. **Migration from 1.4.0.** Disable the plugin, set `"dateFormat": "YYYY-MM-DD*"`
+   in `.obsidian/plugins/journal-view/data.json`, enable it again: the Date
+   format field reads `YYYY-MM-DD` and the toggle is on.
+5. **A format with a time.** With the format `YYYY-MM-DD HHmm`, the button names
+   its note by the format at the current time, a minute later when that is taken.
 
 ## File modification history checks
 
