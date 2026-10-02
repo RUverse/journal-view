@@ -6,8 +6,13 @@ editable timeline. See [README.md](README.md) for behavior and installation.
 ## Development
 
 - Use TypeScript and Obsidian APIs; keep UI styling in `styles.css`.
-- Run `npm run typecheck` while developing and `npm run build` before handing
-  off changes. The build output, `main.js`, is intentionally ignored.
+- Run `npm run typecheck` while developing, and `npm run lint` and
+  `npm run build` before handing off changes. The build output, `main.js`, is
+  intentionally ignored.
+- `npm run lint` applies the rules of Obsidian's plugin review, and the `Check`
+  workflow runs it on every pull request. Keep `tsconfig.json` on `strict`:
+  looser compiler options turn some types into `any`, which hides warnings the
+  review would still raise.
 - Preserve user content: flush pending edits during teardown and handle vault
   writes, renames, and concurrent file creation defensively.
 - Obsidian's embedded Markdown editor is an internal API. Keep access isolated
@@ -33,7 +38,7 @@ Obsidian's own runtime. Verify changes in the throwaway vault instead of a real
 one, and say what you actually exercised rather than what should follow.
 
 ```bash
-npm run test-vault   # builds/repairs test-vault/, gitignored, plugin symlinked in
+npm run test-vault   # builds/repairs test-vault/, gitignored, build files symlinked in
 ```
 
 Add it in Obsidian once (vault switcher -> Manage vaults -> Open folder as vault),
@@ -59,7 +64,12 @@ Two traps, both of which look exactly like the feature being broken:
 
 - `src/main.ts`: plugin lifecycle, commands, and view registration
 - `src/view.ts` / `src/day.ts`: timeline virtualization and per-day UI
+- `src/entry.ts`: one note inside a day - editor or preview, properties, saving
+- `src/noteLabel.ts`: the label naming a note beyond its date, and renaming it
+  by its title
 - `src/dailyNotes.ts` / `src/noteIndex.ts`: note resolution and indexing
+- `src/dayFiles.ts` / `src/dayFilesList.ts`: the other files from each day, and
+  the list of them at the bottom of a day
 - `src/editor.ts` / `src/saveQueue.ts`: editing and durable writes
 
 The view delegates to four collaborators, each holding the view through a small
@@ -86,8 +96,9 @@ When the user asks to prepare a release:
   only the feature and fix pull requests intended for the release. Prepare the
   release on `dev`, not on a feature branch or `main`.
 - On `dev`, update all version files with
-  `npm version <version> --no-git-tag-version`. Run `npm run typecheck` and
-  `npm run build`, then commit and push the version bump to `dev`.
+  `npm version <version> --no-git-tag-version`. Run `npm run typecheck`,
+  `npm run lint`, and `npm run build`, then commit and push the version bump to
+  `dev`.
 - Open one pull request from `dev` into `main`. That release pull request must
   contain both the accumulated user-visible changes and their version bump.
   Describe the changes and include only verification that was actually

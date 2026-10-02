@@ -3,7 +3,7 @@ import { MAX_OFFSET } from "./dayWalk";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT } from "./noteIndex";
-import type { OrderedDayIndex } from "./noteIndex";
+import type { DaySequence } from "./noteIndex";
 
 /** Months built either side of the current one when the picker opens. */
 const INITIAL_MONTHS = 6;
@@ -15,8 +15,10 @@ const MAX_PER_PASS = 24;
 const MAX_MONTHS = 36;
 
 export interface DatePickerOptions {
-	/** Which days have a note, for the dots under the numbers. */
-	index: OrderedDayIndex;
+	/** The days the journal jumps between: those with a note, or with files. */
+	index: DaySequence;
+	/** Which of those have a note, for the solid dots under the numbers. */
+	notes: DaySequence;
 	/** Today, as the view measures it. */
 	today: Moment;
 	/** The day the journal is currently showing, if it has one. */
@@ -32,9 +34,10 @@ export interface DatePickerOptions {
 
 /**
  * A calendar column where each row is a week and a day with a note carries a dot
- * under its number. Months are consecutive inside the ordinary empty-day range;
- * beyond it, the column jumps between months with indexed notes just as the
- * filtered journal jumps between noted days.
+ * under its number - hollow for a day that only has files. Months are
+ * consecutive inside the ordinary empty-day range; beyond it, the column jumps
+ * between months with indexed days just as the filtered journal jumps between
+ * them.
  *
  * Months are built as the reader approaches either end. Building above them
  * moves the scroll position down by exactly the height that appeared, in the
@@ -307,7 +310,8 @@ export class DatePickerModal extends Modal {
 		});
 
 		const visible = this.options.isVisible(date);
-		if (this.options.index.has(key)) cell.addClass("has-note");
+		if (this.options.notes.has(key)) cell.addClass("has-note");
+		else if (this.options.index.has(key)) cell.addClass("has-files");
 		if (key === this.todayKey) {
 			cell.addClass("is-today");
 			cell.setAttribute("aria-current", "date");

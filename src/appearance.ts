@@ -1,5 +1,6 @@
 import { AbstractInputSuggest, App, Modal, Notice, Setting, setIcon } from "obsidian";
 import type JournalViewPlugin from "./main";
+import { YEAR_PROGRESS_OPTIONS, isYearProgressMode } from "./settings";
 
 interface AppearanceModalOptions {
 	onDismiss?(): void;
@@ -58,6 +59,40 @@ export class AppearanceModal extends Modal {
 		this.modalEl.addClass("journal-appearance-modal");
 		this.titleEl.setText("Customization");
 		this.knownProperties = this.discoverProperties();
+
+		const progressSetting = new Setting(this.contentEl)
+			.setName("Year progress")
+			.setDesc("Mark the month you are reading beside the journal, when the pane is wide enough.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions(YEAR_PROGRESS_OPTIONS)
+					.setValue(this.plugin.settings.yearProgress)
+					.onChange((value) => {
+						if (!isYearProgressMode(value)) return;
+						this.plugin.settings.yearProgress = value;
+						this.persist();
+					}),
+			);
+		progressSetting.nameEl.addClass("journal-appearance-setting-name");
+		const progressIcon = progressSetting.nameEl.createSpan({ cls: "journal-appearance-setting-icon" });
+		setIcon(progressIcon, "calendar-range");
+		progressIcon.setAttribute("aria-hidden", "true");
+		progressSetting.nameEl.prepend(progressIcon);
+
+		const filesSetting = new Setting(this.contentEl)
+			.setName("File modification history")
+			.setDesc("List the files created or last edited on each day at the bottom of the day.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showDayFiles).onChange((value) => {
+					this.plugin.settings.showDayFiles = value;
+					this.persist();
+				}),
+			);
+		filesSetting.nameEl.addClass("journal-appearance-setting-name");
+		const filesIcon = filesSetting.nameEl.createSpan({ cls: "journal-appearance-setting-icon" });
+		setIcon(filesIcon, "files");
+		filesIcon.setAttribute("aria-hidden", "true");
+		filesSetting.nameEl.prepend(filesIcon);
 
 		const tagsSetting = new Setting(this.contentEl)
 			.setName("Tags")

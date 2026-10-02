@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting, requireApiVersion } from "obsidian";
-import type { SettingDefinitionItem, ToggleComponent } from "obsidian";
+import type { SettingDefinition, SettingDefinitionItem, ToggleComponent } from "obsidian";
+import type { VaultDailyConfig } from "./dailyNotes";
 import type JournalViewPlugin from "./main";
 
 export const MIN_SAVE_DELAY = 200;
@@ -13,6 +14,13 @@ export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
 export type DailyHeaderStyle = "subtle" | "h1" | "hidden";
+/** Which of a file's dates puts it under a day. */
+export type DayFilesDate = "created" | "modified" | "both";
+/**
+ * Which side of the journal column the year's month lines sit on. The
+ * experimental mode puts them on the left and names the months.
+ */
+export type YearProgressMode = "left" | "right" | "experimental" | "hidden";
 export type JournalFilterMode = "include" | "exclude";
 export type JournalFilterValue = string | number | boolean;
 
@@ -32,6 +40,8 @@ export interface JournalViewSettings {
 	folder: string;
 	/** Overrides the daily-note template. Empty = inherit from the vault. */
 	templatePath: string;
+	/** Notes named with more after the date join that day, and each day can be given more. */
+	multipleNotesPerDay: boolean;
 	/** How the date is written in each day's header. */
 	headerFormat: string;
 	/** How prominently each day's date is displayed. */
@@ -40,6 +50,8 @@ export interface JournalViewSettings {
 	showMonthSeparators: boolean;
 	/** Group rendered days beneath year boundary headings. */
 	groupDaysByYear: boolean;
+	/** Where the year progress indicator sits beside the journal, when there is room. */
+	yearProgress: YearProgressMode;
 	/** Milliseconds of inactivity before an edited day is written to disk. */
 	saveDelay: number;
 	/** Target maximum number of day sections kept in the timeline. */
@@ -60,16 +72,28 @@ export interface JournalViewSettings {
 	displayProperties: string[];
 	/** Chronological direction in which days are laid out. */
 	daySortDirection: DaySortDirection;
+	/** List the files from each day at the bottom of the day. */
+	showDayFiles: boolean;
+	/** Which of a file's dates puts it under a day. */
+	dayFilesDate: DayFilesDate;
+	/** Note property holding the date a note was created, used instead of the file's. Empty = file dates. */
+	dayFilesProperty: string;
+	/** Also list attachments, not only notes, canvases and bases. */
+	dayFilesAttachments: boolean;
+	/** Comma-separated folders whose files are left out of the lists. */
+	dayFilesExcluded: string;
 }
 
 export const DEFAULT_SETTINGS: JournalViewSettings = {
 	dateFormat: "",
 	folder: "",
 	templatePath: "",
+	multipleNotesPerDay: false,
 	headerFormat: "dddd, D MMMM",
 	headerStyle: "subtle",
 	showMonthSeparators: false,
 	groupDaysByYear: true,
+	yearProgress: "left",
 	// Obsidian debounces its own `TextFileView.requestSave` by the same amount,
 	// so an edited day reaches disk as often as the note would in a normal pane.
 	saveDelay: 2000,
@@ -82,17 +106,37 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	showTags: false,
 	displayProperties: [],
 	daySortDirection: "ascending",
+	showDayFiles: false,
+	dayFilesDate: "created",
+	dayFilesProperty: "",
+	dayFilesAttachments: false,
+	dayFilesExcluded: "",
 };
 
+export const YEAR_PROGRESS_OPTIONS: Record<YearProgressMode, string> = {
+	left: "Left",
+	right: "Right",
+	experimental: "Experimental",
+	hidden: "Hidden",
+};
+
+export function isYearProgressMode(value: unknown): value is YearProgressMode {
+	return typeof value === "string" && Object.keys(YEAR_PROGRESS_OPTIONS).includes(value);
+}
+
 type SettingKey = keyof JournalViewSettings;
-type TextSettingKey = "dateFormat" | "folder" | "templatePath" | "headerFormat";
+type TextSettingKey = "headerFormat" | "dayFilesProperty" | "dayFilesExcluded";
+type InheritedSettingKey = "dateFormat" | "folder" | "templatePath";
 type ToggleSettingKey =
+	| "multipleNotesPerDay"
 	| "richEditor"
 	| "focusTodayOnOpen"
 	| "openJournalOnStartup"
 	| "hideEmptyDays"
 	| "showMonthSeparators"
-	| "groupDaysByYear";
+	| "groupDaysByYear"
+	| "showDayFiles"
+	| "dayFilesAttachments";
 
 interface JournalSettingBase {
 	name: string;
@@ -102,10 +146,24 @@ interface JournalSettingBase {
 
 interface JournalInfoSetting extends JournalSettingBase {
 	control?: never;
+	/** Works the text out as the row is drawn, so it never shows a stale value. */
+	describe?: () => string;
 }
 
 interface JournalTextSetting extends JournalSettingBase {
 	control: { type: "text"; key: TextSettingKey; placeholder: string };
+}
+
+/** A field that follows the vault's daily-note settings while it is left empty. */
+interface JournalInheritedSetting extends JournalSettingBase {
+	control: {
+		type: "inherited";
+		key: InheritedSettingKey;
+		/** The vault's value the field follows while empty. */
+		inherited: (vault: VaultDailyConfig) => string;
+		/** Placeholder when the vault has no value either. */
+		emptyLabel: string;
+	};
 }
 
 interface JournalToggleSetting extends JournalSettingBase {
@@ -132,6 +190,16 @@ type JournalDropdownControl =
 			type: "dropdown";
 			key: "headerStyle";
 			options: Record<DailyHeaderStyle, string>;
+	  }
+	| {
+			type: "dropdown";
+			key: "dayFilesDate";
+			options: Record<DayFilesDate, string>;
+	  }
+	| {
+			type: "dropdown";
+			key: "yearProgress";
+			options: Record<YearProgressMode, string>;
 	  };
 
 interface JournalDropdownSetting extends JournalSettingBase {
@@ -141,6 +209,7 @@ interface JournalDropdownSetting extends JournalSettingBase {
 type JournalSetting =
 	| JournalInfoSetting
 	| JournalTextSetting
+	| JournalInheritedSetting
 	| JournalToggleSetting
 	| JournalSliderSetting
 	| JournalDropdownSetting;
@@ -162,13 +231,37 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		super(app, plugin);
 	}
 
-	/** Declarative settings used for settings search in Obsidian 1.13+. */
+	/**
+	 * Declarative settings used in Obsidian 1.13+. Obsidian keeps these for as
+	 * long as the plugin is loaded, so rows showing the vault's daily-note
+	 * settings draw themselves, working those values out each time.
+	 */
 	getSettingDefinitions(): SettingDefinitionItem<SettingKey>[] {
-		return this.definitions();
+		return this.definitions().map((group) => ({
+			...group,
+			items: group.items.map((item) => this.toDefinition(item)),
+		}));
+	}
+
+	private toDefinition(item: JournalSetting): SettingDefinition<SettingKey> {
+		const { name, desc } = item;
+		if (isInheritedSetting(item)) {
+			const control = item.control;
+			return { name, desc, render: (setting) => this.renderInherited(setting.setName(name).setDesc(desc), control) };
+		}
+		const describe = !item.control ? item.describe : undefined;
+		if (describe) {
+			return {
+				name,
+				desc,
+				searchable: item.searchable,
+				render: (setting) => void setting.setName(name).setDesc(describe()),
+			};
+		}
+		return item;
 	}
 
 	private definitions(): JournalSettingGroup[] {
-		const resolved = this.plugin.daily.config();
 		return [
 			{
 				type: "group",
@@ -176,26 +269,49 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: "Current configuration",
-						desc:
-							`Leave the fields below empty to follow your vault's daily-note settings. ` +
-							`Currently resolving to: format "${resolved.format}", folder "${resolved.folder || "/"}"` +
-							(resolved.template ? `, template "${resolved.template}".` : "."),
+						desc: "Leave the fields below empty to follow your vault's daily-note settings.",
+						describe: () => this.describeConfiguration(),
 						searchable: false,
 					},
 					{
 						name: "Date format",
-						desc: "Moment.js format used for the file name of each day.",
-						control: { type: "text", key: "dateFormat", placeholder: resolved.format },
+						desc:
+							"Moment.js format used for the file name of each day. Include a time, such as " +
+							"YYYY-MM-DD HHmm, to keep several notes a day.",
+						control: {
+							type: "inherited",
+							key: "dateFormat",
+							inherited: (vault) => vault.format,
+							emptyLabel: "YYYY-MM-DD",
+						},
 					},
 					{
 						name: "Folder",
 						desc: "Folder that holds the daily notes.",
-						control: { type: "text", key: "folder", placeholder: resolved.folder || "vault root" },
+						control: {
+							type: "inherited",
+							key: "folder",
+							inherited: (vault) => vault.folder,
+							emptyLabel: "vault root",
+						},
 					},
 					{
 						name: "Template",
 						desc: "Applied to every note this view creates, including when you write in an empty day.",
-						control: { type: "text", key: "templatePath", placeholder: resolved.template || "none" },
+						control: {
+							type: "inherited",
+							key: "templatePath",
+							inherited: (vault) => vault.template,
+							emptyLabel: "none",
+						},
+					},
+					{
+						name: "Multiple notes per day",
+						desc:
+							"Also show notes named with more after the date, such as 2026-08-16 Birthday, under " +
+							"that day. Today gets a button that adds another note, and selecting the text after " +
+							"a note's date renames it.",
+						control: { type: "toggle", key: "multipleNotesPerDay" },
 					},
 				],
 			},
@@ -241,6 +357,18 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						control: { type: "toggle", key: "showMonthSeparators" },
 					},
 					{
+						name: "Year progress",
+						desc:
+							"Show twelve month lines beside the journal that mark the month you are reading, " +
+							"like a scrollbar for the year; select a month to go to its first note. Experimental " +
+							"puts them on the left with the months named. They appear only when the pane is wide enough.",
+						control: {
+							type: "dropdown",
+							key: "yearProgress",
+							options: YEAR_PROGRESS_OPTIONS,
+						},
+					},
+					{
 						name: "Focus today on open",
 						desc: "Automatically place the insertion point in today's note when the journal opens.",
 						control: { type: "toggle", key: "focusTodayOnOpen" },
@@ -248,9 +376,58 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					{
 						name: "Only show days that have a note",
 						desc:
-							"Days with no file are skipped entirely, so the journal jumps from one note to the next. " +
-							"Today is always shown. When off, every day appears, faded until you type in it.",
+							"Days with no note are skipped entirely, so the journal jumps from one note to the next. " +
+							"Today is always shown, and so are days with files while files from each day are shown. " +
+							"When off, every day appears, faded until you type in it.",
 						control: { type: "toggle", key: "hideEmptyDays" },
+					},
+				],
+			},
+			{
+				type: "group",
+				heading: "File modification history",
+				items: [
+					{
+						name: "Show file modification history",
+						desc:
+							"List the files created or last edited on each day at the bottom of the day, folded into " +
+							"one line until you open it. Days that only have files appear in the journal too, " +
+							"unless an include filter is active.",
+						control: { type: "toggle", key: "showDayFiles" },
+					},
+					{
+						name: "Date",
+						desc:
+							"Which of a file's dates puts it under a day. A file only keeps its last edit, so " +
+							"last edited moves it to the latest day it changed.",
+						control: {
+							type: "dropdown",
+							key: "dayFilesDate",
+							options: {
+								created: "Created",
+								modified: "Last edited",
+								both: "Created and last edited",
+							},
+						},
+					},
+					{
+						name: "Created date property",
+						desc:
+							"A note property holding the date the note was created, used instead of the file's " +
+							"own date, which Sync, git and copying a vault can reset. Leave empty to use file dates.",
+						control: { type: "text", key: "dayFilesProperty", placeholder: "created" },
+					},
+					{
+						name: "Include attachments",
+						desc: "Also list images, PDFs and other files. Notes, canvases and bases are always listed.",
+						control: { type: "toggle", key: "dayFilesAttachments" },
+					},
+					{
+						name: "Excluded folders",
+						desc:
+							"Folders whose files are left out, separated by commas. Daily notes, templates and " +
+							"Obsidian's excluded files are always left out.",
+						control: { type: "text", key: "dayFilesExcluded", placeholder: "Archive, Attachments" },
 					},
 				],
 			},
@@ -329,6 +506,19 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					changed = true;
 				}
 				break;
+			case "dayFilesProperty":
+			case "dayFilesExcluded":
+				if (typeof value === "string") {
+					this.plugin.settings[key] = value.trim();
+					changed = true;
+				}
+				break;
+			case "dayFilesDate":
+				if (value === "created" || value === "modified" || value === "both") {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
 			case "saveDelay":
 				if (typeof value === "number" && Number.isFinite(value)) {
 					this.plugin.settings[key] = clampSaveDelay(value);
@@ -353,12 +543,21 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					changed = true;
 				}
 				break;
+			case "yearProgress":
+				if (isYearProgressMode(value)) {
+					this.plugin.settings[key] = value;
+					changed = true;
+				}
+				break;
+			case "multipleNotesPerDay":
 			case "richEditor":
 			case "focusTodayOnOpen":
 			case "openJournalOnStartup":
 			case "hideEmptyDays":
 			case "showMonthSeparators":
 			case "groupDaysByYear":
+			case "showDayFiles":
+			case "dayFilesAttachments":
 				if (typeof value === "boolean") {
 					this.plugin.settings[key] = value;
 					changed = true;
@@ -378,11 +577,54 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		}
 	}
 
+	private describeConfiguration(): string {
+		const resolved = this.plugin.daily.config();
+		return (
+			`Leave the fields below empty to follow your vault's daily-note settings. ` +
+			`Currently resolving to: format "${resolved.format}", ` +
+			`folder "${resolved.folder || "/"}"` +
+			(resolved.template ? `, template "${resolved.template}".` : ".")
+		);
+	}
+
+	/**
+	 * A field that follows the vault's daily-note settings while it is empty.
+	 * Its placeholder shows the value it follows. Clicking into the empty field
+	 * fills that value in, ready to adjust; leaving it unchanged empties it
+	 * again, so it goes on following the vault rather than copying it.
+	 */
+	private renderInherited(setting: Setting, control: JournalInheritedSetting["control"]): void {
+		const inherited = control.inherited(this.plugin.daily.inherited());
+		setting.addText((text) => {
+			const input = text.inputEl;
+			let offered: string | null = null;
+			text
+				.setPlaceholder(inherited || control.emptyLabel)
+				.setValue(this.plugin.settings[control.key])
+				.onChange((value) => this.setControlValue(control.key, value));
+			input.addEventListener("focus", () => {
+				if (input.value || !inherited) return;
+				offered = inherited;
+				input.value = inherited;
+				input.setSelectionRange(inherited.length, inherited.length);
+			});
+			input.addEventListener("blur", () => {
+				const unchanged = offered !== null && input.value.trim() === offered;
+				offered = null;
+				if (!unchanged) return;
+				input.value = "";
+				// Edits that came back round to the vault's value would otherwise
+				// leave it saved as an override that no longer follows the vault.
+				if (this.plugin.settings[control.key]) void this.setControlValue(control.key, "");
+			});
+		});
+	}
+
 	private renderSetting(definition: JournalSetting): void {
 		if (!definition.control) {
 			this.containerEl.createEl("p", {
 				cls: "setting-item-description journal-settings-note",
-				text: definition.desc,
+				text: definition.describe?.() ?? definition.desc,
 			});
 			return;
 		}
@@ -390,6 +632,9 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		const setting = new Setting(this.containerEl).setName(definition.name).setDesc(definition.desc);
 		const control = definition.control;
 		switch (control.type) {
+			case "inherited":
+				this.renderInherited(setting, control);
+				break;
 			case "text":
 				setting.addText((text) =>
 					text
@@ -429,6 +674,10 @@ export class JournalViewSettingTab extends PluginSettingTab {
 	syncFilterControls(): void {
 		this.hideEmptyToggle?.setValue(this.plugin.settings.hideEmptyDays);
 	}
+}
+
+function isInheritedSetting(item: JournalSetting): item is JournalInheritedSetting {
+	return item.control?.type === "inherited";
 }
 
 function isSettingKey(key: string): key is keyof JournalViewSettings {

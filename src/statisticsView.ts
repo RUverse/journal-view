@@ -10,8 +10,23 @@ export const VIEW_TYPE_STATISTICS = "journal-statistics";
 interface DayTile {
 	date: Moment;
 	button: HTMLButtonElement;
-	file: TFile | null;
+	/** The day's notes, in journal order. */
+	files: TFile[];
+	/** One count per note; null while it is still being read. */
+	counts: (NoteStatistics | null)[];
+	/** The day as a whole: every note's words added up, once all are counted. */
 	result: NoteStatistics | null;
+}
+
+/** Adds up a day's note counts; any note that could not be read makes the day unreadable. */
+function combineCounts(counts: (NoteStatistics | null)[]): NoteStatistics | null {
+	let words = 0;
+	for (const count of counts) {
+		if (count === null) return null;
+		if (count.status === "error") return count;
+		words += count.words;
+	}
+	return { status: "ready", words };
 }
 
 export class StatisticsView extends ItemView {
@@ -88,7 +103,7 @@ export class StatisticsView extends ItemView {
 		this.openButton.hidden = true;
 		this.registerDomEvent(this.openButton, "click", () => {
 			const tile = this.selected;
-			if (!tile?.file || !this.plugin.daily.fileFor(tile.date)) return;
+			if (!tile?.files.length || !this.plugin.index.has(tile.date.format(DAY_KEY_FORMAT))) return;
 			void this.plugin.activateView(false, tile.date, false, true).catch((error: unknown) => {
 				console.error("Journal View: could not open statistics entry", error);
 				new Notice("Could not open this journal entry.");
@@ -97,7 +112,7 @@ export class StatisticsView extends ItemView {
 		this.register(this.plugin.statistics.subscribe((paths, folder) => {
 			const relevant = folder
 				? paths.some((path) => Array.from(this.paths).some((note) => note.startsWith(`${path}/`)))
-				: paths.some((path) => this.paths.has(path));
+				: paths.some((path) => this.paths.has(path) || this.isNoteInYear(path));
 			if (relevant) this.scheduleRefresh();
 		}));
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.onSettingsChanged()));
@@ -112,6 +127,11 @@ export class StatisticsView extends ItemView {
 		this.tiles = [];
 		this.paths.clear();
 		this.selected = null;
+	}
+
+	/** True for a daily-note path dated in the year on screen, e.g. a note just added to a day. */
+	private isNoteInYear(path: string): boolean {
+		return this.plugin.index.keyForPath(path)?.startsWith(`${String(this.year).padStart(4, "0")}-`) ?? false;
 	}
 
 	onSettingsChanged(): void {
@@ -161,7 +181,7 @@ export class StatisticsView extends ItemView {
 					attr: { "aria-label": `${cursor.format("LL")}: loading`, "data-date": key, tabindex: "-1" },
 				});
 				if (key === today) button.setAttribute("aria-current", "date");
-				const tile: DayTile = { date: cursor.clone(), button, file: null, result: null };
+				const tile: DayTile = { date: cursor.clone(), button, files: [], counts: [], result: null };
 				this.tiles.push(tile);
 				button.addEventListener("click", () => this.select(tile));
 				button.addEventListener("focus", () => this.select(tile));
@@ -194,19 +214,21 @@ export class StatisticsView extends ItemView {
 	}
 
 	private description(tile: DayTile): string {
-		const count = !tile.file ? "No note" : !tile.result ? "Counting…" :
-			tile.result.status === "error" ? "Could not read note" : `${tile.result.words.toLocaleString()} words`;
+		const notes = tile.files.length;
+		const count = !notes ? "No note" : !tile.result ? "Counting…" :
+			tile.result.status === "error" ? `Could not read ${notes === 1 ? "note" : "a note"}` :
+			`${tile.result.words.toLocaleString()} words${notes > 1 ? ` in ${notes} notes` : ""}`;
 		return `${tile.date.format("LL")}: ${count}`;
 	}
 
 	private updateDetail(): void {
 		if (!this.selected) return;
 		this.detail.setText(this.description(this.selected));
-		this.openButton.hidden = !this.selected.file;
+		this.openButton.hidden = !this.selected.files.length;
 	}
 
 	private updateTile(tile: DayTile): void {
-		const state = !tile.file ? "is-missing" : !tile.result ? "is-loading" :
+		const state = !tile.files.length ? "is-missing" : !tile.result ? "is-loading" :
 			tile.result.status === "error" ? "is-error" : `level-${wordCountLevel(tile.result.words)}`;
 		tile.button.className = `journal-statistics-tile ${state}${this.selected === tile ? " is-selected" : ""}`;
 		const description = this.description(tile);
@@ -227,26 +249,36 @@ export class StatisticsView extends ItemView {
 		const epoch = ++this.epoch;
 		const current = () => !this.closed && this.epoch === epoch;
 		this.configSignature = JSON.stringify(this.plugin.daily.config());
-		const pending: DayTile[] = [];
+		this.plugin.index.ensureCurrent();
+		const pending: { tile: DayTile; at: number }[] = [];
 		this.paths.clear();
 		for (const tile of this.tiles) {
 			this.paths.add(this.plugin.daily.pathFor(tile.date));
-			tile.file = this.plugin.daily.fileFor(tile.date);
-			tile.result = tile.file ? this.plugin.statistics.peek(tile.file) : null;
+			tile.files = this.plugin.index
+				.pathsFor(tile.date.format(DAY_KEY_FORMAT))
+				.map((path) => this.app.vault.getAbstractFileByPath(path))
+				.filter((file): file is TFile => file instanceof TFile);
+			tile.counts = tile.files.map((file) => this.plugin.statistics.peek(file));
+			tile.result = tile.files.length ? combineCounts(tile.counts) : null;
 			this.updateTile(tile);
-			if (tile.file && !tile.result) pending.push(tile);
+			for (const [at, file] of tile.files.entries()) {
+				this.paths.add(file.path);
+				if (!tile.counts[at]) pending.push({ tile, at });
+			}
 		}
 		this.grid.setAttribute("aria-busy", String(pending.length > 0));
 		this.status.setText(pending.length ? `Counting ${pending.length} notes…` : "");
 		let next = 0;
 		const worker = async () => {
 			while (current() && next < pending.length) {
-				const tile = pending[next++];
-				if (!tile.file) continue;
-				const result = await this.plugin.statistics.count(tile.file, current);
+				const { tile, at } = pending[next++];
+				const file = tile.files[at];
+				if (!file) continue;
+				const result = await this.plugin.statistics.count(file, current);
 				if (!current()) return;
 				if (result === null) { this.scheduleRefresh(); return; }
-				tile.result = result;
+				tile.counts[at] = result;
+				tile.result = combineCounts(tile.counts);
 				this.updateTile(tile);
 				// Cached reads may resolve immediately. Yield so progress can paint
 				// and navigation can cancel even a year of small, cached files.
@@ -256,7 +288,7 @@ export class StatisticsView extends ItemView {
 		await Promise.all([worker(), worker()]);
 		if (!current()) return;
 		this.grid.setAttribute("aria-busy", "false");
-		const notes = this.tiles.filter((tile) => tile.file).length;
+		const notes = this.tiles.reduce((total, tile) => total + tile.files.length, 0);
 		const failed = this.tiles.filter((tile) => tile.result?.status === "error").length;
 		this.status.setText(failed ? `${notes} notes · ${failed} could not be read. Reopen this year to retry.` :
 			`${notes} ${notes === 1 ? "note" : "notes"} in ${this.year}`);

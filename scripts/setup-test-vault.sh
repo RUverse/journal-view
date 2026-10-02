@@ -13,12 +13,28 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 vault="$root/test-vault"
 
-mkdir -p "$vault/.obsidian/plugins" "$vault/Journal" "$vault/Templates"
+mkdir -p "$vault/.obsidian/plugins" "$vault/Journal" "$vault/Templates" "$vault/Reading" "$vault/Projects"
 
-# The plugin folder is a link to the repository, so the vault always loads
+# The build artifacts are links into the repository, so the vault always loads
 # whatever `npm run build` last produced - there is nothing to copy after a
-# rebuild.
-ln -sfn ../../.. "$vault/.obsidian/plugins/journal-view"
+# rebuild. The folder itself is real, so the vault's settings (data.json) stay
+# inside the vault instead of landing in the repository root, where a copy of
+# the plugin folder would carry them into another vault.
+plugin="$vault/.obsidian/plugins/journal-view"
+if [ -L "$plugin" ]; then
+	# Older vaults linked the whole folder to the repository root; replace the
+	# link itself (never what it points to), keeping the settings written there.
+	rm "$plugin"
+	mkdir "$plugin"
+	if [ -f "$root/data.json" ]; then
+		mv "$root/data.json" "$plugin/data.json"
+		echo "  moved   data.json from the repository root into the test vault"
+	fi
+fi
+mkdir -p "$plugin"
+for artifact in main.js manifest.json styles.css; do
+	ln -sfn "../../../../$artifact" "$plugin/$artifact"
+done
 
 write() { # write <relative path> - from stdin, only when the file is missing
 	local path="$vault/$1"
@@ -130,6 +146,25 @@ tags:
 ## Notes
 MARKDOWN
 
+# A note named with more after the date, which joins 2 August only while
+# Multiple notes per day is on.
+write "Journal/2026-08-02 Birthday.md" <<'MARKDOWN'
+A note with text after the date in its name.
+MARKDOWN
+
+# Files that are not daily notes, for File modification history. The article carries
+# the date it was written in a property, which falls on a day without a note.
+write Reading/Article.md <<'MARKDOWN'
+---
+created: 2026-08-01T09:30
+---
+An article saved on a day without a daily note.
+MARKDOWN
+
+write Projects/Board.canvas <<'JSON'
+{"nodes":[],"edges":[]}
+JSON
+
 write_managed README-TESTING.md <<'MARKDOWN'
 # Journal View test vault
 
@@ -137,8 +172,10 @@ Throwaway vault for exercising the plugin by hand. Gitignored, so anything writt
 here stays local. Rebuild it any time with `npm run test-vault` from the repository
 root; files that already exist are kept.
 
-`.obsidian/plugins/journal-view` links to the repository root, so the vault loads
-whatever `npm run build` last produced.
+The plugin's `main.js`, `manifest.json` and `styles.css` in
+`.obsidian/plugins/journal-view` link to the repository root, so the vault loads
+whatever `npm run build` last produced. Its settings (`data.json`) stay in that
+folder, inside the vault, so test settings never travel with the plugin files.
 
 Daily notes resolve to folder `Journal`, format `YYYY-MM-DD`, template
 `Templates/Daily`. Journal View's own overrides are left empty, so those vault
@@ -198,7 +235,7 @@ to type into whatever holds focus.
 Desktop mobile emulation still runs Chromium, so use a physical iPhone or iPad
 for WebKit, touch and momentum-scrolling issues. This command builds the plugin,
 copies this test vault into Obsidian's iCloud container as `Journal View Test`,
-installs real plugin files instead of the repository symlink, and adds Journal
+installs real plugin files instead of the repository symlinks, and adds Journal
 View to the vault's enabled community plugins:
 
 ```bash
@@ -239,6 +276,45 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 4. **A day that already has a note.** No template offered; content untouched.
 5. **A template that cannot be read.** Point `daily-notes.json` at a missing file:
    the day stays empty, a warning is logged, and `dev:errors` stays clean.
+
+## Multiple notes per day checks
+
+`Journal/2026-08-02 Birthday.md` has text after the date in its name.
+
+1. **Off by default.** Today's card has no add button, and 2 August shows only
+   its plain note.
+2. **Turn it on** in Settings -> Journal View. The birthday note joins 2 August
+   under a divider labelled `Birthday`. Once today has a note, the bottom right
+   of its card shows Add a note to today; no other day has it, and day headers
+   keep only Delete and Open note in a tab.
+3. **Add twice within a minute.** Creates `<date> HH-mm`, then `<date> HH-mm-1`,
+   under today, each from the template, with the cursor in the new note.
+4. **Rename a note by its title.** Select `Birthday`, type `Party`, press Enter:
+   the file becomes `2026-08-02 Party.md` and stays under 2 August. Escape keeps
+   the name; a title with `/` or `#`, or one another note has, is refused with a
+   notice. A plain `2026-08-02.md` has no title to select.
+5. **Migration from 1.4.0.** Disable the plugin, set `"dateFormat": "YYYY-MM-DD*"`
+   in `.obsidian/plugins/journal-view/data.json`, enable it again: the Date
+   format field reads `YYYY-MM-DD` and the toggle is on.
+6. **A format with a time.** With the format `YYYY-MM-DD HHmm`, the button names
+   its note by the format at the current time, a minute later when that is taken.
+
+## File modification history checks
+
+`Reading/Article.md` and `Projects/Board.canvas` are ordinary files, not daily
+notes. Turn on **File modification history** in the toolbar's Customization menu.
+
+1. **Today's list.** Both files sit under the day they were created, folded into
+   one line. Opening the list shows them; folding it leaves only the count.
+2. **A created date property.** Set **Created date property** to `created`. The
+   article moves to 1 August, which has no note. With **Only show days that have
+   a note** on, that day stays hidden and disabled in **Go to date**. Turn the
+   option off: the day is available and the calendar marks it with a hollow dot.
+3. **Placement and filters.** History sits outside today’s highlighted note card.
+   A day with a filtered-out daily note stays hidden even if it has file history.
+4. **Live changes.** Create, rename and delete a file while its day is loaded.
+   A folded list only changes its count; the day's height stays the same.
+5. **Opening.** Select, Ctrl-select and right-click a file; Ctrl-hover previews it.
 
 ## Frontmatter preservation checks
 
