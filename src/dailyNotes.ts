@@ -192,8 +192,9 @@ export class DailyNoteResolver {
 	 * Creates a note for `date` from the configured template, at `preferred` or
 	 * the first free name after it (see `freePath`, which `numbered` is passed
 	 * on to), so a new note never lands in a file another note already has.
-	 * Pass a `creationMoment` so formats that record a time get the current
-	 * one. `claim` hears the chosen path before the file exists.
+	 * The template's title is the name the note gets. Pass a `creationMoment`
+	 * so formats that record a time get the current one. `claim` hears the
+	 * chosen path before the file exists.
 	 *
 	 * Callers that have body text of their own write it over the result, which
 	 * keeps the template's frontmatter without duplicating it.
@@ -204,7 +205,7 @@ export class DailyNoteResolver {
 		claim?: (path: string) => void,
 		numbered = false,
 	): Promise<TFile> {
-		const body = await this.templateContent(date, preferred.slice(preferred.lastIndexOf("/") + 1, -".md".length));
+		const template = await this.readTemplate();
 		// A name can be taken between choosing it and creating the file - by
 		// another view, or a sync client. Choose again when that happens.
 		for (let attempt = 0; attempt < 3; attempt++) {
@@ -215,6 +216,7 @@ export class DailyNoteResolver {
 			if (existing instanceof TFile) return existing;
 			claim?.(path);
 			await this.ensureFolder(path);
+			const body = this.fillTemplate(template, date, path.slice(path.lastIndexOf("/") + 1, -".md".length));
 			try {
 				return await this.app.vault.create(path, body);
 			} catch (error) {
@@ -250,6 +252,11 @@ export class DailyNoteResolver {
 	 * a day without a template is a working day, so this never rejects.
 	 */
 	async templateContent(date: Moment, title = this.basename(date)): Promise<string> {
+		return this.fillTemplate(await this.readTemplate(), date, title);
+	}
+
+	/** The configured template as written, or empty - see `templateContent`. */
+	private async readTemplate(): Promise<string> {
 		const { template } = this.config();
 		if (!template) return "";
 
@@ -260,17 +267,19 @@ export class DailyNoteResolver {
 			return "";
 		}
 
-		let raw: string;
 		try {
 			// The template can be deleted or renamed between the lookup above
 			// and the read - by the reader, or by Sync.
-			raw = await this.app.vault.cachedRead(file);
+			return await this.app.vault.cachedRead(file);
 		} catch (error) {
 			console.warn(`Journal View: could not read the template at "${path}"`, error);
 			return "";
 		}
+	}
 
-		return raw
+	/** `template` with its date placeholders filled in for `date`, and its title for a note named `title`. */
+	private fillTemplate(template: string, date: Moment, title: string): string {
+		return template
 			.replace(/{{\s*(date|time)\s*:\s*([^}]+)}}/gi, (_match, _kind: string, format: string) =>
 				date.format(format.trim()),
 			)

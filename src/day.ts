@@ -496,7 +496,13 @@ export class DaySection implements EntryHost, DayFilesHost {
 		const entry = this.entryFor(file);
 		if (!entry) return;
 		await entry.reload();
-		if (!this.destroyed && this.entries.includes(entry)) this.focusEditor(true, entry);
+		if (this.destroyed || !this.entries.includes(entry)) return;
+		// The journal's filters can leave the new note out, e.g. when its
+		// template lacks a tag they ask for. It shows while the reader is in
+		// it, as any note does, so show it for focus to land in.
+		entry.setHidden(false);
+		if (entry.focusEditor(true)) this.refreshVisibility(true);
+		else entry.setHidden(!this.host.isVisibleEntry(this, entry));
 	}
 
 	/** Brings every note in the day up to date with its content on disk. */
