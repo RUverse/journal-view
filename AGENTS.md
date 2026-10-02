@@ -65,6 +65,8 @@ Two traps, both of which look exactly like the feature being broken:
 - `src/main.ts`: plugin lifecycle, commands, and view registration
 - `src/view.ts` / `src/day.ts`: timeline virtualization and per-day UI
 - `src/entry.ts`: one note inside a day - editor or preview, properties, saving
+- `src/noteLabel.ts`: the label naming a note beyond its date, and renaming it
+  by its title
 - `src/dailyNotes.ts` / `src/noteIndex.ts`: note resolution and indexing
 - `src/dayFiles.ts` / `src/dayFilesList.ts`: the other files from each day, and
   the list of them at the bottom of a day

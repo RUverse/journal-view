@@ -468,6 +468,41 @@ button.journal-day-create:hover {
 	text-overflow: ellipsis;
 }
 
+/* The text after a note's date, which a click renames the note by. */
+.journal-note-title.is-editable {
+	cursor: text;
+	border-radius: var(--radius-s);
+}
+
+.journal-note-title.is-editable:hover {
+	color: var(--text-muted);
+	background-color: var(--background-modifier-hover);
+}
+
+.journal-day-header input.journal-note-title-input,
+.journal-entry-heading input.journal-note-title-input {
+	field-sizing: content;
+	min-width: 6ch;
+	max-width: 100%;
+	height: auto;
+	padding: 0 var(--size-2-1);
+	border-radius: var(--radius-s);
+	font: inherit;
+	color: var(--text-normal);
+}
+
+/* Today's button that adds another note sits in the room below its last
+   note, so the day is no taller for it. */
+.journal-day-add {
+	position: absolute;
+	right: var(--size-4-2);
+	bottom: var(--size-4-2);
+}
+
+.journal-day-add[hidden] {
+	display: none;
+}
+
 .journal-entry-rule {
 	flex: 1 1 auto;
 	height: 1px;

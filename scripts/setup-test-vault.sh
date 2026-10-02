@@ -281,18 +281,22 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 
 `Journal/2026-08-02 Birthday.md` has text after the date in its name.
 
-1. **Off by default.** No day header has an add button, and 2 August shows only
+1. **Off by default.** Today's card has no add button, and 2 August shows only
    its plain note.
 2. **Turn it on** in Settings -> Journal View. The birthday note joins 2 August
-   under a divider labelled `Birthday`. A day with a note shows Delete, Add a
-   note to this day and Open note in a tab in its header; an empty day shows
-   only "Create note".
+   under a divider labelled `Birthday`. Once today has a note, the bottom right
+   of its card shows Add a note to today; no other day has it, and day headers
+   keep only Delete and Open note in a tab.
 3. **Add twice within a minute.** Creates `<date> HH-mm`, then `<date> HH-mm-1`,
-   under the day, each from the template, with the cursor in the new note.
-4. **Migration from 1.4.0.** Disable the plugin, set `"dateFormat": "YYYY-MM-DD*"`
+   under today, each from the template, with the cursor in the new note.
+4. **Rename a note by its title.** Select `Birthday`, type `Party`, press Enter:
+   the file becomes `2026-08-02 Party.md` and stays under 2 August. Escape keeps
+   the name; a title with `/` or `#`, or one another note has, is refused with a
+   notice. A plain `2026-08-02.md` has no title to select.
+5. **Migration from 1.4.0.** Disable the plugin, set `"dateFormat": "YYYY-MM-DD*"`
    in `.obsidian/plugins/journal-view/data.json`, enable it again: the Date
    format field reads `YYYY-MM-DD` and the toggle is on.
-5. **A format with a time.** With the format `YYYY-MM-DD HHmm`, the button names
+6. **A format with a time.** With the format `YYYY-MM-DD HHmm`, the button names
    its note by the format at the current time, a minute later when that is taken.
 
 ## File modification history checks

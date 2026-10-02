@@ -1,10 +1,12 @@
-import { App, Notice, TFile, setTooltip } from "obsidian";
+import { App, Notice, TFile, normalizePath, setIcon, setTooltip } from "obsidian";
 import type { HoverParent, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { DayFilesHost, DayFilesList } from "./dayFilesList";
 import { EntryHost, NoteEntry } from "./entry";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
+import { INVALID_TITLE_CHARACTERS, renderNoteLabel } from "./noteLabel";
+import type { NoteLabel } from "./noteLabel";
 
 /** The bits of the journal view a day needs to talk to. Its page previews hang off the view. */
 export interface DayHost extends HoverParent {
@@ -59,6 +61,8 @@ export class DaySection implements EntryHost, DayFilesHost {
 	private noteLabelEl: HTMLElement;
 	private actionsEl: HTMLElement;
 	private entriesEl: HTMLElement;
+	/** Today's button that adds another note, while the day can hold several. */
+	private addNoteEl: HTMLElement | null = null;
 	/** The files from this date, while the journal lists them. */
 	private files: DayFilesList | null;
 	private destroyed = false;
@@ -108,6 +112,16 @@ export class DaySection implements EntryHost, DayFilesHost {
 		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 		this.entriesEl = this.cardEl.createDiv({ cls: "journal-day-entries" });
+		if (this.isToday && this.host.plugin.settings.multipleNotesPerDay) {
+			this.addNoteEl = this.cardEl.createDiv({ cls: "journal-day-add" });
+			const add = this.addNoteEl.createEl("button", { cls: "clickable-icon journal-day-add-button" });
+			setIcon(add, "file-plus");
+			setTooltip(add, "Add a note to today");
+			add.addEventListener("click", (event) => {
+				event.stopPropagation();
+				void this.addNote();
+			});
+		}
 		this.files = this.host.plugin.settings.showDayFiles ? new DayFilesList(this, this.el) : null;
 
 		this.el.addEventListener("focusout", () => {
@@ -228,16 +242,55 @@ export class DaySection implements EntryHost, DayFilesHost {
 	 * several notes. A note that is not the first shown in its day
 	 * always needs a name, so it falls back to the file's own.
 	 */
-	private labelFor(entry: NoteEntry, required: boolean): string | null {
+	private labelFor(entry: NoteEntry, required: boolean): NoteLabel | null {
 		const { daily, index } = this.host.plugin;
 		const location = entry.file ? index.locate(entry.file.path) : null;
-		const parts: string[] = [];
-		if (location && daily.recordsTime()) parts.push(createMoment(location.time).format("LT"));
-		if (location?.suffix) parts.push(location.suffix);
-		if (parts.length) return parts.join(" · ");
+		const text = location && daily.recordsTime() ? createMoment(location.time).format("LT") : null;
+		const title = location?.suffix || null;
+		if (text || title) return { text, title };
 		if (!required) return null;
-		if (!entry.file) return "New note";
-		return entry.file.basename;
+		return { text: entry.file ? entry.file.basename : "New note", title: null };
+	}
+
+	/**
+	 * Renames a note to `title` after its date, keeping the date and what sets
+	 * the title off from it as they were. Links to the note follow, as they do
+	 * for any rename in Obsidian.
+	 */
+	private async retitle(entry: NoteEntry, title: string): Promise<void> {
+		const { app, plugin } = this.host;
+		const file = entry.file;
+		const suffix = file ? plugin.index.locate(file.path)?.suffix : null;
+		if (!file || !suffix) return;
+		if (INVALID_TITLE_CHARACTERS.test(title)) {
+			new Notice(`Journal View: "${title}" holds a character a note's name cannot: \\ / : * ? " < > | # ^ [ ]`);
+			return;
+		}
+		const base = file.basename;
+		const kept = base.endsWith(suffix) ? base.slice(0, -suffix.length) : `${base} `;
+		const parent = file.parent && !file.parent.isRoot() ? `${file.parent.path}/` : "";
+		const path = normalizePath(`${parent}${kept}${title}.${file.extension}`);
+		if (path === file.path) return;
+		if (plugin.index.locate(path)?.key !== this.key) {
+			new Notice(`Journal View: "${title}" would move the note off this day`);
+			return;
+		}
+		if (app.vault.getAbstractFileByPath(path)) {
+			new Notice(`Journal View: ${path} already exists`);
+			return;
+		}
+		try {
+			await app.fileManager.renameFile(file, path);
+		} catch (error) {
+			console.error(`Journal View: could not rename ${file.path}`, error);
+			new Notice(`Journal View: could not rename ${file.path}`);
+		}
+	}
+
+	/** Lets the reader rename `entry` by its title, when it has one. */
+	private retitler(entry: NoteEntry): ((title: string) => void) | undefined {
+		if (!entry.file || !this.host.plugin.settings.multipleNotesPerDay) return undefined;
+		return (title) => void this.retitle(entry, title);
 	}
 
 	/** Re-applies the classes and header buttons that depend on the day's notes. */
@@ -245,6 +298,7 @@ export class DaySection implements EntryHost, DayFilesHost {
 		this.el.toggleClass("journal-day-today", this.isToday);
 		this.el.toggleClass("journal-day-empty", !this.exists);
 		this.el.toggleClass("journal-day-future", this.offset > 0);
+		if (this.addNoteEl) this.addNoteEl.hidden = !this.exists;
 		for (const entry of this.entries) entry.refreshState();
 		this.refreshVisibility(true);
 	}
@@ -282,13 +336,13 @@ export class DaySection implements EntryHost, DayFilesHost {
 		this.syncFocusClasses();
 		this.actionsEl.empty();
 		setTooltip(this.titleEl, lead.path, { placement: "right" });
-		const canAdd = lead.exists && this.host.plugin.settings.multipleNotesPerDay;
-		lead.renderActions(this.actionsEl, canAdd ? () => void this.addNote() : undefined);
+		lead.renderActions(this.actionsEl);
 		const label = this.labelFor(lead, false);
-		this.noteLabelEl.setText(label ?? "");
+		renderNoteLabel(this.noteLabelEl, label ?? { text: null, title: null }, this.retitler(lead));
 		this.noteLabelEl.hidden = label === null;
 		for (const entry of this.entries) {
-			entry.setHeading(entry === lead ? null : this.labelFor(entry, true));
+			if (entry === lead) entry.setHeading(null);
+			else entry.setHeading(this.labelFor(entry, true), this.retitler(entry));
 		}
 	}
 
