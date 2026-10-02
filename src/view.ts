@@ -193,6 +193,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	async onOpen(): Promise<void> {
 		this.containerEl.addClass("journal-view");
+		this.syncTodayBackground();
 		this.contentEl.empty();
 		this.contentEl.addClass("journal-content");
 
@@ -1580,7 +1581,12 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		});
 	}
 
+	private syncTodayBackground(): void {
+		this.containerEl.toggleClass("journal-today-background-hidden", this.plugin.settings.hideTodayBackground);
+	}
+
 	async onSettingsChanged(): Promise<void> {
+		this.syncTodayBackground();
 		this.plugin.filteredIndex.ensureCurrent();
 		this.syncWithIndex();
 		this.syncFilterButton();
