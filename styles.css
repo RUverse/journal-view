@@ -492,11 +492,20 @@ button.journal-day-create:hover {
 }
 
 /* Today's button that adds another note sits in the room below its last
-   note, so the day is no taller for it. */
+   note, so the day is no taller for it. Like a note's buttons, it shows only
+   while today is hovered or written in. */
 .journal-day-add {
 	position: absolute;
 	right: var(--size-4-2);
 	bottom: var(--size-4-2);
+	opacity: 0;
+	transition: opacity 120ms ease-in-out;
+}
+
+.journal-day:hover .journal-day-add,
+.journal-day-focused .journal-day-add,
+.journal-day-add:focus-within {
+	opacity: 1;
 }
 
 .journal-day-add[hidden] {
@@ -558,8 +567,8 @@ button.journal-day-create:hover {
 
 /* -------------------------------------------------------------- files --- */
 
-/* The files from a day sit under its notes as one quiet line, drawn like a
-   further note's divider, which opens into a list of plain links. */
+/* The files from a day sit under its notes as one quiet line, which opens
+   into a list of plain links. */
 .journal-day-files {
 	margin-top: var(--size-4-3);
 	margin-inline: var(--size-4-3);
@@ -585,7 +594,6 @@ button.journal-day-files-toggle {
 	flex: 0 1 auto;
 	min-width: 0;
 	height: auto;
-	margin-right: var(--size-4-2);
 	padding: 0;
 	border: none;
 	box-shadow: none;
@@ -619,12 +627,6 @@ button.journal-day-files-toggle:focus-visible {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-}
-
-.journal-day-files-rule {
-	flex: 1 1 auto;
-	height: 1px;
-	background-color: var(--background-modifier-border);
 }
 
 .journal-day-files-list,
