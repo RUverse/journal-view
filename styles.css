@@ -1581,6 +1581,7 @@ button.journal-appearance-settings-link:hover {
 	--journal-tile-size: 13px;
 	--journal-tile-gap: 3px;
 	--journal-weekday-width: 24px;
+	--journal-new-words-column: 32px;
 	padding: var(--size-4-6);
 	overflow: auto;
 }
@@ -1775,6 +1776,9 @@ button.journal-appearance-settings-link:hover {
 
 .journal-statistics-selection button[hidden] { display: none; }
 
+/* The earliest weeks or years, left out when the pane is too narrow for them. */
+.journal-statistics .is-clipped { display: none; }
+
 .journal-statistics-section-heading { margin: var(--size-4-8) 0 var(--size-4-4); }
 
 .journal-statistics-section-heading h3 {
@@ -1794,7 +1798,7 @@ button.journal-appearance-settings-link:hover {
 	display: grid;
 	grid-template-rows: auto repeat(12, var(--journal-tile-size));
 	grid-auto-flow: column;
-	grid-auto-columns: minmax(32px, 1fr);
+	grid-auto-columns: minmax(var(--journal-new-words-column), 1fr);
 	gap: var(--journal-tile-gap);
 	width: max-content;
 	/* The width of the year mosaic above, which the year columns stretch to fill:

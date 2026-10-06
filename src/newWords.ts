@@ -1,5 +1,6 @@
 import { Component, Notice, TFile } from "obsidian";
 import type JournalViewPlugin from "./main";
+import { columnsThatFit, cssPixels } from "./mosaicColumns";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT } from "./noteIndex";
@@ -103,7 +104,13 @@ export class NewWordsMosaic extends Component {
 	private selected: number | null = null;
 	private sort: "uses" | "alphabetical" = "uses";
 	private expanded = false;
+	private scroller!: HTMLElement;
 	private grid!: HTMLElement;
+	/** Each year's label and tiles, earliest first. */
+	private years: HTMLElement[][] = [];
+	private firstYear = 0;
+	/** The first month in a year that is not left out for want of room. */
+	private firstShown = 0;
 	private legend!: HTMLElement;
 	private status!: HTMLElement;
 	private detail!: HTMLElement;
@@ -116,8 +123,8 @@ export class NewWordsMosaic extends Component {
 		heading.createEl("h3", { text: "New words" });
 		heading.createEl("p", { text: "Each month, the words your journal had never used before." });
 		const card = this.parent.createDiv({ cls: "journal-statistics-card" });
-		const scroller = card.createDiv({ cls: "journal-statistics-scroll" });
-		this.grid = scroller.createDiv({
+		this.scroller = card.createDiv({ cls: "journal-statistics-scroll" });
+		this.grid = this.scroller.createDiv({
 			cls: "journal-new-words-grid",
 			attr: { role: "group", "aria-label": "New words by month" },
 		});
@@ -132,6 +139,9 @@ export class NewWordsMosaic extends Component {
 				: paths.some((path) => this.paths.has(path) || this.plugin.index.keyForPath(path) !== null);
 			if (relevant) this.scheduleRefresh();
 		}));
+		const resize = new ResizeObserver(() => this.fitYears());
+		resize.observe(this.scroller);
+		this.register(() => resize.disconnect());
 		void this.refresh();
 	}
 
@@ -142,6 +152,7 @@ export class NewWordsMosaic extends Component {
 		this.notes = [];
 		this.paths.clear();
 		this.tiles.clear();
+		this.years = [];
 	}
 
 	onSettingsChanged(): void {
@@ -266,6 +277,7 @@ export class NewWordsMosaic extends Component {
 		const refocus = focused instanceof HTMLElement && this.grid.contains(focused) ? Number(focused.dataset.month) : null;
 		this.grid.empty();
 		this.tiles.clear();
+		this.years = [];
 		// Laid out in columns, like the year mosaic: a column of month names,
 		// then one column per year, so later is always down or to the right.
 		// Every year through this one is shown, and empty years before the
@@ -273,17 +285,20 @@ export class NewWordsMosaic extends Component {
 		const thisMonth = monthOf(createMoment().format(DAY_KEY_FORMAT));
 		const lastYear = Math.max(Math.floor(thisMonth / 12), Math.floor((this.notes[this.notes.length - 1]?.month ?? 0) / 12));
 		const firstYear = Math.max(1, Math.min(Math.floor((this.notes[0]?.month ?? thisMonth) / 12), lastYear - MIN_YEARS + 1));
+		this.firstYear = firstYear;
 		this.grid.createSpan();
 		for (let month = 0; month < 12; month++) {
 			this.grid.createSpan({ cls: "journal-new-words-label is-month", text: monthMoment(month).format("MMM"), attr: { "aria-hidden": "true" } });
 		}
 		for (let year = firstYear; year <= lastYear; year++) {
-			this.grid.createSpan({ cls: "journal-new-words-label is-year", text: String(year), attr: { "aria-hidden": "true" } });
+			const column: HTMLElement[] = [this.grid.createSpan({ cls: "journal-new-words-label is-year", text: String(year), attr: { "aria-hidden": "true" } })];
+			this.years.push(column);
 			for (let month = year * 12; month < year * 12 + 12; month++) {
 				const button = this.grid.createEl("button", {
 					cls: "journal-statistics-tile is-loading",
 					attr: { "data-month": String(month), tabindex: "-1" },
 				});
+				column.push(button);
 				if (month === thisMonth) button.setAttribute("aria-current", "date");
 				const tile: MonthTile = { month, button, notes: 0, pending: 0, failed: 0, added: 0, total: 0 };
 				this.tiles.set(month, tile);
@@ -299,18 +314,42 @@ export class NewWordsMosaic extends Component {
 		if (this.selected !== null && !this.tiles.has(this.selected)) this.selected = null;
 		const roving = this.tiles.get(this.selected ?? this.notes[this.notes.length - 1]?.month ?? thisMonth);
 		if (roving) roving.button.tabIndex = 0;
+		this.fitYears();
 		if (refocus !== null) this.tiles.get(refocus)?.button.focus();
+	}
+
+	/**
+	 * Leaves out the earliest years when the pane is too narrow for all of
+	 * them, so the rest show without scrolling. The month names take one of
+	 * the columns.
+	 */
+	private fitYears(): void {
+		const column = cssPixels(this.grid, "--journal-new-words-column");
+		const fit = columnsThatFit(this.scroller, column, column + cssPixels(this.grid, "--journal-tile-gap"));
+		if (fit === null) return;
+		const hidden = Math.max(0, this.years.length - fit);
+		for (const [at, elements] of this.years.entries()) {
+			for (const element of elements) element.toggleClass("is-clipped", at < hidden);
+		}
+		this.firstShown = (this.firstYear + hidden) * 12;
+		// Keep the tile reached by Tab among those shown.
+		const roving = Array.from(this.tiles.values()).find((tile) => tile.button.tabIndex === 0);
+		if (!roving || roving.month < this.firstShown) {
+			if (roving) roving.button.tabIndex = -1;
+			const first = this.tiles.get(this.firstShown);
+			if (first) first.button.tabIndex = 0;
+		}
 	}
 
 	private navigateGrid(event: KeyboardEvent, month: number): void {
 		const months = Array.from(this.tiles.keys());
 		const destinations: Record<string, number> = {
 			ArrowLeft: month - 12, ArrowRight: month + 12, ArrowUp: month - 1, ArrowDown: month + 1,
-			Home: months[0], End: months[months.length - 1],
+			Home: this.firstShown, End: months[months.length - 1],
 		};
 		if (!(event.key in destinations)) return;
 		event.preventDefault();
-		this.tiles.get(destinations[event.key])?.button.focus();
+		if (destinations[event.key] >= this.firstShown) this.tiles.get(destinations[event.key])?.button.focus();
 	}
 
 	private select(month: number): void {

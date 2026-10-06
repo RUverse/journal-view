@@ -134,8 +134,9 @@ Each square represents one day. Missing notes are empty, and existing notes with
 zero words have an outline. A day with several notes counts all of them together. The four color levels represent **1–149**, **150–399**,
 **400–999**, and **1,000+** words. Hover or select a day to see its date and count,
 then choose **Open in journal** to visit an existing entry. Arrow keys move between
-days; Home and End move to the first and last day of the year. Narrow panes scroll
-horizontally to keep the tiles readable.
+days; Home and End move to the first and last day shown. A pane too narrow for the
+whole year leaves out its earliest weeks, so the tiles keep their size without
+scrolling.
 
 Statistics include all daily notes from your configured folder and date format,
 regardless of journal filters. Counts use the saved Markdown body, excluding YAML
@@ -156,7 +157,8 @@ count, but counting yields periodically so year navigation remains available.
 Below the year, **New words** shows the whole journal as one column of twelve
 months per year, so, as in the year mosaic, later is always down or to the right. It runs
 through the current year, and a journal younger than 24 years is padded with
-empty years before it, so the mosaic matches the width of the year above. Each month is colored by how many words appeared in your journal for the
+empty years before it, so the mosaic matches the width of the year above. A
+pane too narrow for every year leaves out the earliest ones. Each month is colored by how many words appeared in your journal for the
 first time in it, judged by note date, so a note added later for an earlier day
 counts toward that day's month. Colors rank the months that added words into four
 quarters, because the first months of a journal add far more words than the rest.
