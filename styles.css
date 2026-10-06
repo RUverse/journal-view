@@ -1791,7 +1791,6 @@ button.journal-appearance-settings-link:hover {
 /* A column of twelve month tiles per year, under its year, beside a column of
  * month names: like the year mosaic, later is always down or to the right. */
 .journal-new-words-grid {
-	--journal-tile-size: 18px;
 	display: grid;
 	grid-template-rows: auto repeat(12, var(--journal-tile-size));
 	grid-auto-flow: column;
@@ -1809,7 +1808,13 @@ button.journal-appearance-settings-link:hover {
 	white-space: nowrap;
 }
 
-.journal-new-words-label.is-month { padding-right: var(--size-4-2); }
+/* Month names match the year mosaic's weekday names. */
+.journal-new-words-label.is-month {
+	padding-right: var(--size-4-2);
+	font-size: 10px;
+	line-height: var(--journal-tile-size);
+	color: var(--text-faint);
+}
 
 .journal-new-words-label.is-year {
 	padding-bottom: var(--size-4-1);
