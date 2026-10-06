@@ -1,5 +1,5 @@
 import { App, Component, TAbstractFile, TFile, getFrontMatterInfo } from "obsidian";
-import { noteWords } from "./vocabulary";
+import { noteWords, stemWord } from "./vocabulary";
 
 const MAX_CACHED_NOTES = 2000;
 const COUNT_CHUNK_SIZE = 32768;
@@ -66,13 +66,17 @@ async function countWords(content: string, current: () => boolean): Promise<numb
  *
  * Counts are kept for a bounded number of recent notes. Vocabularies, which
  * only mean anything for the whole journal at once, are kept for every note
- * read, as compact id arrays into one shared, interned word list.
+ * read, as compact id arrays into one shared, interned word list, where each
+ * word also maps to the stem its other forms share.
  */
 export class JournalStatistics extends Component {
 	private cache = new Map<string, CountCache>();
 	private vocabularies = new Map<string, VocabularyCache>();
 	private ids = new Map<string, number>();
 	private words: string[] = [];
+	/** Per word id: the id of its stem, which every form of the word shares. */
+	private stems: number[] = [];
+	private stemIds = new Map<string, number>();
 	private revisions = new WeakMap<TFile, number>();
 	private listeners = new Set<(paths: string[], folder: boolean) => void>();
 	private running = 0;
@@ -101,6 +105,8 @@ export class JournalStatistics extends Component {
 		this.vocabularies.clear();
 		this.ids.clear();
 		this.words = [];
+		this.stems = [];
+		this.stemIds.clear();
 		this.listeners.clear();
 	}
 
@@ -127,14 +133,19 @@ export class JournalStatistics extends Component {
 		for (const listener of this.listeners) listener(paths, true);
 	}
 
-	/** One more than the largest id a vocabulary can hold so far. */
-	get vocabularySize(): number {
-		return this.words.length;
+	/** One more than the largest stem id handed out so far. */
+	get stemCount(): number {
+		return this.stemIds.size;
 	}
 
-	/** The word an id from a vocabulary stands for. */
+	/** The word an id from a vocabulary stands for, as it was written. */
 	word(id: number): string {
 		return this.words[id];
+	}
+
+	/** The stem id of a word id, shared by forms such as `portrait` and `portraits`. */
+	stemOf(id: number): number {
+		return this.stems[id];
 	}
 
 	private isFresh(cached: CountCache, file: TFile): boolean {
@@ -188,6 +199,13 @@ export class JournalStatistics extends Component {
 			id = this.words.length;
 			this.ids.set(word, id);
 			this.words.push(word);
+			const stem = stemWord(word);
+			let stemId = this.stemIds.get(stem);
+			if (stemId === undefined) {
+				stemId = this.stemIds.size;
+				this.stemIds.set(stem, stemId);
+			}
+			this.stems.push(stemId);
 		}
 		return id;
 	}

@@ -172,7 +172,13 @@ YAML properties, code, comments, links of every kind (including their text),
 URLs, email addresses, tags, HTML tags, callout types, and block IDs are left
 out, as are numbers without a letter. Words joined by an apostrophe or a
 zero-width non-joiner stay whole; hyphenated words count as their parts.
-Different forms of a word, such as *walk* and *walked*, are separate words.
+
+English forms of a word count as one word: plurals, possessives, and *-ed* and
+*-ing* forms, so *portraits*, *portrait's*, and *portrait* are the same word, as
+are *walk*, *walked*, and *walking*. A word is listed in the form it was first
+written, and hovering it shows its other forms. Irregular forms such as *made*,
+and words built on another, such as *happiness*, stay separate. Words in other
+scripts, or with accents, are not reduced.
 
 This reads every daily note, two at a time, the first time you open
 **Statistics** in a session; the months fill in from the earliest one. Later edits

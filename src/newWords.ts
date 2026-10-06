@@ -56,10 +56,15 @@ export class NewWordsMosaic extends Component {
 	private notes: JournalNote[] = [];
 	private paths = new Set<string>();
 	private tiles = new Map<number, MonthTile>();
-	/** Per word id: the index in `notes` of the first note using it, or -1. */
+	// Indexed by stem id, so every form of a word counts as that one word.
+	/** The index in `notes` of the first note using the word, or -1. */
 	private first = new Int32Array(0);
-	/** Per word id: how many notes use it, among those folded in so far. */
+	/** The word id of the form it was first written in. */
+	private form = new Int32Array(0);
+	/** How many notes use the word, among those folded in so far. */
 	private uses = new Uint32Array(0);
+	/** The last note counted in `uses`, so a note using two forms counts once. */
+	private seen = new Int32Array(0);
 	/** Notes before this index, all read, are folded into `first` and `uses`. */
 	private frontier = 0;
 	private epoch = 0;
@@ -139,7 +144,9 @@ export class NewWordsMosaic extends Component {
 			}
 		}
 		this.first = new Int32Array(0);
+		this.form = new Int32Array(0);
 		this.uses = new Uint32Array(0);
+		this.seen = new Int32Array(0);
 		this.frontier = 0;
 		this.renderGrid();
 		this.advance();
@@ -183,7 +190,8 @@ export class NewWordsMosaic extends Component {
 	/** Folds in every note read, up to the first one still being read, and repaints the tiles. */
 	private advance(): void {
 		const start = this.frontier;
-		this.reserve(this.plugin.statistics.vocabularySize);
+		const { statistics } = this.plugin;
+		this.reserve(statistics.stemCount);
 		for (; this.frontier < this.notes.length; this.frontier++) {
 			const note = this.notes[this.frontier];
 			if (!note.vocabulary) break;
@@ -193,12 +201,19 @@ export class NewWordsMosaic extends Component {
 				if (tile) tile.failed++;
 				continue;
 			}
+			// A note's words come in the order it first writes them, so the form
+			// kept is the one written first.
 			for (const id of note.vocabulary.ids) {
-				if (this.first[id] < 0) {
-					this.first[id] = this.frontier;
+				const stem = statistics.stemOf(id);
+				if (this.first[stem] < 0) {
+					this.first[stem] = this.frontier;
+					this.form[stem] = id;
 					if (tile) tile.added++;
 				}
-				this.uses[id]++;
+				if (this.seen[stem] !== this.frontier) {
+					this.seen[stem] = this.frontier;
+					this.uses[stem]++;
+				}
 			}
 		}
 		if (this.frontier !== start || start === 0) this.updateTiles();
@@ -207,12 +222,14 @@ export class NewWordsMosaic extends Component {
 	private reserve(size: number): void {
 		if (size <= this.first.length) return;
 		const length = Math.max(size, this.first.length * 2, 1024);
-		const first = new Int32Array(length).fill(-1);
-		first.set(this.first);
-		const uses = new Uint32Array(length);
-		uses.set(this.uses);
-		this.first = first;
-		this.uses = uses;
+		const grow = <T extends Int32Array | Uint32Array>(old: T, next: T): T => {
+			next.set(old);
+			return next;
+		};
+		this.first = grow(this.first, new Int32Array(length).fill(-1));
+		this.form = grow(this.form, new Int32Array(length));
+		this.uses = grow(this.uses, new Uint32Array(length));
+		this.seen = grow(this.seen, new Int32Array(length).fill(-1));
 	}
 
 	private renderGrid(): void {
@@ -359,15 +376,18 @@ export class NewWordsMosaic extends Component {
 			this.words.createDiv({ cls: "journal-new-words-note", text: "The words appear once the whole journal has been read." });
 			return;
 		}
-		const ids: number[] = [];
-		for (let id = 0; id < this.first.length; id++) {
-			if (this.first[id] >= 0 && this.notes[this.first[id]].month === tile.month) ids.push(id);
+		const stems: number[] = [];
+		for (let stem = 0; stem < this.first.length; stem++) {
+			if (this.first[stem] >= 0 && this.notes[this.first[stem]].month === tile.month) stems.push(stem);
 		}
-		if (!ids.length) return;
+		if (!stems.length) return;
 		const { statistics } = this.plugin;
-		ids.sort(this.sort === "uses"
-			? (left, right) => this.uses[right] - this.uses[left] || wordOrder.compare(statistics.word(left), statistics.word(right))
-			: (left, right) => wordOrder.compare(statistics.word(left), statistics.word(right)));
+		const shownAs = (stem: number) => statistics.word(this.form[stem]);
+		stems.sort(this.sort === "uses"
+			? (left, right) => this.uses[right] - this.uses[left] || wordOrder.compare(shownAs(left), shownAs(right))
+			: (left, right) => wordOrder.compare(shownAs(left), shownAs(right)));
+		const shown = this.expanded ? stems : stems.slice(0, WORDS_SHOWN);
+		const forms = this.otherForms(new Set(shown));
 
 		const header = this.words.createDiv({ cls: "journal-new-words-header" });
 		header.createSpan({ text: "Click a word to open the note that first used it." });
@@ -381,24 +401,42 @@ export class NewWordsMosaic extends Component {
 		});
 
 		const list = this.words.createDiv({ cls: "journal-new-words-words" });
-		const shown = this.expanded ? ids : ids.slice(0, WORDS_SHOWN);
-		for (const id of shown) {
-			const word = statistics.word(id);
-			const note = this.notes[this.first[id]];
+		for (const stem of shown) {
+			const word = shownAs(stem);
+			const note = this.notes[this.first[stem]];
 			const date = createMoment(note.key, DAY_KEY_FORMAT, true);
-			const uses = this.uses[id];
-			const label = `${word}: first used on ${date.format("LL")}, in ${uses.toLocaleString()} ${uses === 1 ? "note" : "notes"}`;
+			const uses = this.uses[stem];
+			const also = forms.get(stem);
+			const label = `${word}${also ? ` (also ${Array.from(also).sort((left, right) => wordOrder.compare(left, right)).join(", ")})` : ""}: ` +
+				`first used on ${date.format("LL")}, in ${uses.toLocaleString()} ${uses === 1 ? "note" : "notes"}`;
 			const button = list.createEl("button", { cls: "journal-new-words-word", text: word, attr: { "aria-label": label } });
 			button.title = label;
 			button.addEventListener("click", () => this.open(note.key, note.path));
 		}
-		if (shown.length < ids.length) {
-			const more = this.words.createEl("button", { cls: "journal-new-words-more", text: `Show all ${ids.length.toLocaleString()} words` });
+		if (shown.length < stems.length) {
+			const more = this.words.createEl("button", { cls: "journal-new-words-more", text: `Show all ${stems.length.toLocaleString()} words` });
 			more.addEventListener("click", () => {
 				this.expanded = true;
 				this.renderWords();
 			});
 		}
+	}
+
+	/** The forms of each of `stems` used anywhere in the journal, beyond the one shown. */
+	private otherForms(stems: Set<number>): Map<number, Set<string>> {
+		const { statistics } = this.plugin;
+		const forms = new Map<number, Set<string>>();
+		for (const note of this.notes) {
+			if (note.vocabulary?.status !== "ready") continue;
+			for (const id of note.vocabulary.ids) {
+				const stem = statistics.stemOf(id);
+				if (!stems.has(stem) || id === this.form[stem]) continue;
+				let set = forms.get(stem);
+				if (!set) forms.set(stem, set = new Set());
+				set.add(statistics.word(id));
+			}
+		}
+		return forms;
 	}
 
 	private open(key: string, path: string): void {
