@@ -159,8 +159,9 @@ through the current year, and a journal younger than 24 years is padded with
 empty years before it, so the mosaic matches the width of the year above. Each month is colored by how many words appeared in your journal for the
 first time in it, judged by note date, so a note added later for an earlier day
 counts toward that day's month. Colors rank the months that added words into four
-quarters, and the legend shows each quarter's range: the first months of a journal
-add far more words than the rest. Hover or select a month to see its new words and
+quarters, because the first months of a journal add far more words than the rest.
+Each quarter's boundary is rounded to a round number, such as 80, 100, or 200,
+and the legend shows the resulting ranges. Hover or select a month to see its new words and
 the size of your vocabulary so far; up and down move by month, left and right by
 year.
 

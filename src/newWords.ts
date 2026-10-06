@@ -46,6 +46,35 @@ function monthMoment(month: number): Moment {
 	return createMoment(`${year}-${String((month % 12) + 1).padStart(2, "0")}-01`, DAY_KEY_FORMAT, true);
 }
 
+/** Round numbers a color level can start at: 1 to 9, then 10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, and so on. */
+function roundSteps(max: number): number[] {
+	const steps = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+	for (let scale = 10; steps[steps.length - 1] < max; scale *= 10) {
+		for (const step of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8]) steps.push(step * scale);
+	}
+	return steps;
+}
+
+/**
+ * Where color levels 2, 3, and 4 begin, given the sorted counts of the months
+ * that added words: the points splitting them into quarters, each moved to the
+ * nearest round number above the one before.
+ */
+export function levelThresholds(counts: readonly number[]): number[] {
+	if (!counts.length) return [];
+	const steps = roundSteps(2 * counts[counts.length - 1]);
+	const thresholds: number[] = [];
+	let previous = 1;
+	for (let quarter = 1; quarter < 4; quarter++) {
+		const split = counts[Math.floor((quarter * counts.length) / 4)];
+		let nearest = steps.reduce((best, step) => Math.abs(step - split) < Math.abs(best - split) ? step : best);
+		if (nearest <= previous) nearest = steps.find((step) => step > previous) ?? previous + 1;
+		thresholds.push(nearest);
+		previous = nearest;
+	}
+	return thresholds;
+}
+
 /**
  * The statistics page's journal-wide mosaic: one tile per month, colored by how
  * many words were used for the first time in it, by note date. Whether a word
@@ -310,9 +339,10 @@ export class NewWordsMosaic extends Component {
 	}
 
 	/**
-	 * Colors each finished month by its rank among the months that added any
-	 * words, in quarters. The first months of a journal add far more than the
-	 * rest, and a fixed scale would leave every later month the same pale shade.
+	 * Colors each finished month by how it ranks among the months that added
+	 * any words, in quarters with round boundaries. The first months of a
+	 * journal add far more than the rest, and a fixed scale would leave every
+	 * later month the same pale shade.
 	 */
 	private updateTiles(): void {
 		const counts: number[] = [];
@@ -324,17 +354,9 @@ export class NewWordsMosaic extends Component {
 			if (tile.added) counts.push(tile.added);
 		}
 		counts.sort((left, right) => left - right);
-		const level = (added: number): number => {
-			if (!added) return 0;
-			let low = 0;
-			let high = counts.length;
-			while (low < high) {
-				const mid = (low + high) >> 1;
-				if (counts[mid] <= added) low = mid + 1;
-				else high = mid;
-			}
-			return Math.max(1, Math.ceil((4 * low) / counts.length));
-		};
+		const thresholds = levelThresholds(counts);
+		const level = (added: number): number =>
+			added ? 1 + thresholds.filter((threshold) => added >= threshold).length : 0;
 		for (const tile of this.tiles.values()) {
 			const state = !tile.notes ? "is-missing" : tile.pending ? "is-loading" :
 				tile.failed ? "is-error" : `level-${level(tile.added)}`;
@@ -345,19 +367,14 @@ export class NewWordsMosaic extends Component {
 		}
 		this.updateDetail();
 
-		const ranges: { min: number; max: number }[] = [];
-		for (const added of counts) {
-			const range = ranges[level(added)] ??= { min: added, max: added };
-			range.max = added;
-		}
 		this.legend.empty();
 		this.legendItem(0, "No note / no new words");
-		for (let at = 1; at < ranges.length; at++) {
-			const range = ranges[at];
-			if (!range) continue;
-			const { min, max } = range;
-			this.legendItem(at, at === ranges.length - 1 ? `${min.toLocaleString()}+` :
-				min === max ? min.toLocaleString() : `${min.toLocaleString()}–${max.toLocaleString()}`);
+		if (!counts.length) return;
+		const starts = [1, ...thresholds];
+		for (const [at, start] of starts.entries()) {
+			const end = (starts[at + 1] ?? Infinity) - 1;
+			this.legendItem(at + 1, end === Infinity ? `${start.toLocaleString()}+` :
+				start === end ? start.toLocaleString() : `${start.toLocaleString()}–${end.toLocaleString()}`);
 		}
 	}
 
