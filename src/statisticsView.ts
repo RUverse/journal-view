@@ -227,6 +227,7 @@ export class StatisticsView extends ItemView {
 			if (at < hidden) this.firstShown += week.querySelectorAll("button").length;
 		}
 		this.contentEl.setCssProps({ "--journal-statistics-weeks": String(this.weeks.length - hidden) });
+		this.newWords?.fitYears();
 		// Keep the tile reached by Tab among those shown.
 		if (this.tiles.findIndex((tile) => tile.button.tabIndex === 0) < this.firstShown) {
 			for (const [at, tile] of this.tiles.entries()) tile.button.tabIndex = at === this.firstShown ? 0 : -1;

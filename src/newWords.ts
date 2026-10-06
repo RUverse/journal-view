@@ -139,9 +139,6 @@ export class NewWordsMosaic extends Component {
 				: paths.some((path) => this.paths.has(path) || this.plugin.index.keyForPath(path) !== null);
 			if (relevant) this.scheduleRefresh();
 		}));
-		const resize = new ResizeObserver(() => this.fitYears());
-		resize.observe(this.scroller);
-		this.register(() => resize.disconnect());
 		void this.refresh();
 	}
 
@@ -319,13 +316,18 @@ export class NewWordsMosaic extends Component {
 	}
 
 	/**
-	 * Leaves out the earliest years when the pane is too narrow for all of
-	 * them, so the rest show without scrolling. The month names take one of
-	 * the columns.
+	 * Leaves out the earliest years that do not fit in the width of the year
+	 * mosaic above, which itself leaves out weeks to fit the pane, so the rest
+	 * show without scrolling and both mosaics stay one width. The month names
+	 * take one of the columns. The statistics view calls this whenever the
+	 * year mosaic is fitted again.
 	 */
-	private fitYears(): void {
+	fitYears(): void {
 		const column = cssPixels(this.grid, "--journal-new-words-column");
-		const fit = columnsThatFit(this.scroller, column, column + cssPixels(this.grid, "--journal-tile-gap"));
+		const gap = cssPixels(this.grid, "--journal-tile-gap");
+		const weeks = cssPixels(this.grid, "--journal-statistics-weeks") || 53;
+		const width = cssPixels(this.grid, "--journal-weekday-width") + weeks * (cssPixels(this.grid, "--journal-tile-size") + gap);
+		const fit = columnsThatFit(this.scroller, column, column + gap, width);
 		if (fit === null) return;
 		const hidden = Math.max(0, this.years.length - fit);
 		for (const [at, elements] of this.years.entries()) {
@@ -399,7 +401,8 @@ export class NewWordsMosaic extends Component {
 		for (const tile of this.tiles.values()) {
 			const state = !tile.notes ? "is-missing" : tile.pending ? "is-loading" :
 				tile.failed ? "is-error" : `level-${level(tile.added)}`;
-			tile.button.className = `journal-statistics-tile ${state}${this.selected === tile.month ? " is-selected" : ""}`;
+			tile.button.className = `journal-statistics-tile ${state}${this.selected === tile.month ? " is-selected" : ""}` +
+				(tile.month < this.firstShown ? " is-clipped" : "");
 			const description = this.description(tile);
 			tile.button.setAttribute("aria-label", description);
 			tile.button.title = description;
