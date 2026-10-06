@@ -226,12 +226,14 @@ export class NewWordsMosaic extends Component {
 		}
 		const firstMonth = this.notes[0].month;
 		const lastMonth = this.notes[this.notes.length - 1].month;
+		// Laid out in columns, like the year mosaic: a column of month names,
+		// then one column per year, so later is always down or to the right.
 		this.grid.createSpan();
 		for (let month = 0; month < 12; month++) {
-			this.grid.createSpan({ cls: "journal-new-words-label", text: monthMoment(month).format("MMM"), attr: { "aria-hidden": "true" } });
+			this.grid.createSpan({ cls: "journal-new-words-label is-month", text: monthMoment(month).format("MMM"), attr: { "aria-hidden": "true" } });
 		}
 		for (let year = Math.floor(firstMonth / 12); year <= Math.floor(lastMonth / 12); year++) {
-			this.grid.createSpan({ cls: "journal-new-words-label", text: String(year), attr: { "aria-hidden": "true" } });
+			this.grid.createSpan({ cls: "journal-new-words-label is-year", text: String(year), attr: { "aria-hidden": "true" } });
 			for (let month = year * 12; month < year * 12 + 12; month++) {
 				if (month < firstMonth || month > lastMonth) {
 					this.grid.createSpan({ cls: "journal-statistics-padding" });
@@ -261,7 +263,7 @@ export class NewWordsMosaic extends Component {
 	private navigateGrid(event: KeyboardEvent, month: number): void {
 		const months = Array.from(this.tiles.keys());
 		const destinations: Record<string, number> = {
-			ArrowLeft: month - 1, ArrowRight: month + 1, ArrowUp: month - 12, ArrowDown: month + 12,
+			ArrowLeft: month - 12, ArrowRight: month + 12, ArrowUp: month - 1, ArrowDown: month + 1,
 			Home: months[0], End: months[months.length - 1],
 		};
 		if (!(event.key in destinations)) return;

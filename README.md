@@ -153,13 +153,14 @@ count, but counting yields periodically so year navigation remains available.
 
 ### New words
 
-Below the year, **New words** shows the whole journal as one row of twelve months
-per year. Each month is colored by how many words appeared in your journal for the
+Below the year, **New words** shows the whole journal as one column of twelve
+months per year, so, as in the year mosaic, later is always down or to the right. Each month is colored by how many words appeared in your journal for the
 first time in it, judged by note date, so a note added later for an earlier day
 counts toward that day's month. Colors rank the months that added words into four
 quarters, and the legend shows each quarter's range: the first months of a journal
 add far more words than the rest. Hover or select a month to see its new words and
-the size of your vocabulary so far; arrow keys move by month and by year.
+the size of your vocabulary so far; up and down move by month, left and right by
+year.
 
 Once the whole journal has been read, selecting a month lists its new words, most
 used first or alphabetically. Choose a word to open the note that first used it.
