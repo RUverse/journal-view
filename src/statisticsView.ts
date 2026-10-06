@@ -194,6 +194,8 @@ export class StatisticsView extends ItemView {
 				button.addEventListener("keydown", (event) => this.navigateGrid(event, tile));
 			}
 		}
+		// The new-words mosaic below matches the width of this year's weeks.
+		this.contentEl.setCssProps({ "--journal-statistics-weeks": String(this.grid.querySelectorAll(".journal-statistics-week").length) });
 		const initial = this.tiles.find((tile) => tile.date.format(DAY_KEY_FORMAT) === today) ?? this.tiles[0];
 		if (initial) initial.button.tabIndex = 0;
 		void this.refreshCounts();

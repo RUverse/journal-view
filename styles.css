@@ -1794,9 +1794,15 @@ button.journal-appearance-settings-link:hover {
 	display: grid;
 	grid-template-rows: auto repeat(12, var(--journal-tile-size));
 	grid-auto-flow: column;
-	grid-auto-columns: minmax(32px, max-content);
+	grid-auto-columns: minmax(32px, 1fr);
 	gap: var(--journal-tile-gap);
 	width: max-content;
+	/* The width of the year mosaic above, which the year columns stretch to fill:
+	 * its weekday names, then each week column and the gap before it. */
+	min-width: calc(
+		var(--journal-weekday-width)
+		+ var(--journal-statistics-weeks, 53) * (var(--journal-tile-size) + var(--journal-tile-gap))
+	);
 	margin-inline: auto;
 	align-items: center;
 }

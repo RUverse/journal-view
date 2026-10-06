@@ -7,6 +7,8 @@ import type { NoteVocabulary } from "./statistics";
 
 /** Words listed for a month before the rest wait behind a button. */
 const WORDS_SHOWN = 300;
+/** Years always shown, so the mosaic is about as wide as the year mosaic above it. */
+const MIN_YEARS = 24;
 /** The longest a scan runs between yields to the UI, in milliseconds. */
 const YIELD_AFTER = 12;
 
@@ -218,31 +220,25 @@ export class NewWordsMosaic extends Component {
 		const refocus = focused instanceof HTMLElement && this.grid.contains(focused) ? Number(focused.dataset.month) : null;
 		this.grid.empty();
 		this.tiles.clear();
-		if (!this.notes.length) {
-			this.selected = null;
-			this.detail.setText("Select a month to see the words it added.");
-			this.words.empty();
-			return;
-		}
-		const firstMonth = this.notes[0].month;
-		const lastMonth = this.notes[this.notes.length - 1].month;
 		// Laid out in columns, like the year mosaic: a column of month names,
 		// then one column per year, so later is always down or to the right.
+		// Every year through this one is shown, and empty years before the
+		// journal pad a short one out to the year mosaic's width.
+		const thisMonth = monthOf(createMoment().format(DAY_KEY_FORMAT));
+		const lastYear = Math.max(Math.floor(thisMonth / 12), Math.floor((this.notes[this.notes.length - 1]?.month ?? 0) / 12));
+		const firstYear = Math.max(1, Math.min(Math.floor((this.notes[0]?.month ?? thisMonth) / 12), lastYear - MIN_YEARS + 1));
 		this.grid.createSpan();
 		for (let month = 0; month < 12; month++) {
 			this.grid.createSpan({ cls: "journal-new-words-label is-month", text: monthMoment(month).format("MMM"), attr: { "aria-hidden": "true" } });
 		}
-		for (let year = Math.floor(firstMonth / 12); year <= Math.floor(lastMonth / 12); year++) {
+		for (let year = firstYear; year <= lastYear; year++) {
 			this.grid.createSpan({ cls: "journal-new-words-label is-year", text: String(year), attr: { "aria-hidden": "true" } });
 			for (let month = year * 12; month < year * 12 + 12; month++) {
-				if (month < firstMonth || month > lastMonth) {
-					this.grid.createSpan({ cls: "journal-statistics-padding" });
-					continue;
-				}
 				const button = this.grid.createEl("button", {
 					cls: "journal-statistics-tile is-loading",
 					attr: { "data-month": String(month), tabindex: "-1" },
 				});
+				if (month === thisMonth) button.setAttribute("aria-current", "date");
 				const tile: MonthTile = { month, button, notes: 0, pending: 0, failed: 0, added: 0, total: 0 };
 				this.tiles.set(month, tile);
 				button.addEventListener("click", () => this.select(month));
@@ -255,7 +251,7 @@ export class NewWordsMosaic extends Component {
 			if (tile) { tile.notes++; tile.pending++; }
 		}
 		if (this.selected !== null && !this.tiles.has(this.selected)) this.selected = null;
-		const roving = this.tiles.get(this.selected ?? lastMonth);
+		const roving = this.tiles.get(this.selected ?? this.notes[this.notes.length - 1]?.month ?? thisMonth);
 		if (roving) roving.button.tabIndex = 0;
 		if (refocus !== null) this.tiles.get(refocus)?.button.focus();
 	}
