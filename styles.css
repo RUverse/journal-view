@@ -1775,6 +1775,74 @@ button.journal-appearance-settings-link:hover {
 
 .journal-statistics-selection button[hidden] { display: none; }
 
+.journal-statistics-section-heading { margin: var(--size-4-8) 0 var(--size-4-4); }
+
+.journal-statistics-section-heading h3 {
+	margin: 0 0 var(--size-4-1);
+	font-size: var(--h3-size);
+}
+
+.journal-statistics-section-heading p {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+/* A row of twelve month tiles per year, under a row of month names. */
+.journal-new-words-grid {
+	--journal-tile-size: 22px;
+	display: grid;
+	grid-template-columns: auto repeat(12, minmax(var(--journal-tile-size), 36px));
+	gap: var(--journal-tile-gap);
+	width: max-content;
+	margin-inline: auto;
+	align-items: center;
+}
+
+.journal-new-words-label {
+	padding-right: var(--size-4-2);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.journal-new-words-list:empty { display: none; }
+
+.journal-new-words-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	margin: var(--size-4-3) 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.journal-new-words-note {
+	margin-top: var(--size-4-3);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.journal-new-words-words {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-1);
+}
+
+.journal-statistics button.journal-new-words-word {
+	height: auto;
+	padding: 2px var(--size-4-2);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	font-size: var(--font-ui-small);
+	box-shadow: none;
+}
+
+.journal-new-words-more { margin-top: var(--size-4-3); }
+
 /* ------------------------------------------------------- year progress --- */
 
 /* Twelve month lines beside the journal column. The view places the strip at

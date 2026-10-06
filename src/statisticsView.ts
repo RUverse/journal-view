@@ -2,6 +2,7 @@ import { ItemView, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from
 import type JournalViewPlugin from "./main";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
+import { NewWordsMosaic } from "./newWords";
 import { DAY_KEY_FORMAT } from "./noteIndex";
 import { NoteStatistics, wordCountLevel } from "./statistics";
 
@@ -45,6 +46,7 @@ export class StatisticsView extends ItemView {
 	private detail!: HTMLElement;
 	private openButton!: HTMLButtonElement;
 	private selected: DayTile | null = null;
+	private newWords: NewWordsMosaic | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: JournalViewPlugin) { super(leaf); }
 
@@ -115,6 +117,7 @@ export class StatisticsView extends ItemView {
 				: paths.some((path) => this.paths.has(path) || this.isNoteInYear(path));
 			if (relevant) this.scheduleRefresh();
 		}));
+		this.newWords = this.addChild(new NewWordsMosaic(page, this.plugin));
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.onSettingsChanged()));
 		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.onSettingsChanged()));
 		this.renderYear();
@@ -124,6 +127,8 @@ export class StatisticsView extends ItemView {
 		this.closed = true;
 		this.epoch++;
 		window.clearTimeout(this.refreshTimer);
+		if (this.newWords) this.removeChild(this.newWords);
+		this.newWords = null;
 		this.tiles = [];
 		this.paths.clear();
 		this.selected = null;
@@ -135,6 +140,7 @@ export class StatisticsView extends ItemView {
 	}
 
 	onSettingsChanged(): void {
+		this.newWords?.onSettingsChanged();
 		if (!this.closed && this.configSignature !== JSON.stringify(this.plugin.daily.config())) this.scheduleRefresh();
 	}
 
