@@ -169,14 +169,16 @@ Once the whole journal has been read, selecting a month lists its new words, mos
 used first or alphabetically. Choose a word to open the note that first used it.
 
 Words are counted once each, ignoring case and accents typed in different forms.
-YAML properties, code, comments, links of every kind (including their text),
-URLs, email addresses, tags, HTML tags, callout types, and block IDs are left
-out, as are numbers without a letter. Words joined by an apostrophe or a
+YAML properties, code (fenced, indented, inline, and inside quotes), comments,
+links of every kind (including their text, reference links, and their
+definitions), footnote markers, URLs, anything with an @ such as email addresses,
+tags, HTML tags, callout types, and block IDs are left out, as are numbers
+without a letter. Words joined by an apostrophe or a
 zero-width non-joiner stay whole; hyphenated words count as their parts.
 
 English forms of a word count as one word: plurals, possessives, and *-ed* and
 *-ing* forms, so *portraits*, *portrait's*, and *portrait* are the same word, as
-are *walk*, *walked*, and *walking*. A word is listed in the form it was first
+are *walk*, *walked*, and *walking*, and *dance*, *danced*, and *dancing*. A word is listed in the form it was first
 written, and hovering it shows its other forms. Irregular forms such as *made*,
 and words built on another, such as *happiness*, stay separate. Words in other
 scripts, or with accents, are not reduced.

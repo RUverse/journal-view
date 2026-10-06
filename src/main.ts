@@ -277,7 +277,7 @@ export default class JournalViewPlugin extends Plugin {
 		}
 		await workspace.revealLeaf(leaf);
 		if (date && !created && leaf.view instanceof JournalView) {
-			if (revealThroughFilters) leaf.view.goToCommandDate(date, true);
+			if (revealThroughFilters) leaf.view.goToCommandDate(date, true, path);
 			else leaf.view.goToDate(date, true, path);
 		}
 	}
