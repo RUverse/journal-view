@@ -1581,6 +1581,7 @@ button.journal-appearance-settings-link:hover {
 	--journal-tile-size: 13px;
 	--journal-tile-gap: 3px;
 	--journal-weekday-width: 24px;
+	--journal-new-words-column: 32px;
 	padding: var(--size-4-6);
 	overflow: auto;
 }
@@ -1774,6 +1775,97 @@ button.journal-appearance-settings-link:hover {
 }
 
 .journal-statistics-selection button[hidden] { display: none; }
+
+/* The earliest weeks or years, left out when the pane is too narrow for them. */
+.journal-statistics .is-clipped { display: none; }
+
+.journal-statistics-section-heading { margin: var(--size-4-8) 0 var(--size-4-4); }
+
+.journal-statistics-section-heading h3 {
+	margin: 0 0 var(--size-4-1);
+	font-size: var(--h3-size);
+}
+
+.journal-statistics-section-heading p {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+/* A column of twelve month tiles per year, under its year, beside a column of
+ * month names: like the year mosaic, later is always down or to the right. */
+.journal-new-words-grid {
+	display: grid;
+	grid-template-rows: auto repeat(12, var(--journal-tile-size));
+	grid-auto-flow: column;
+	grid-auto-columns: minmax(var(--journal-new-words-column), 1fr);
+	gap: var(--journal-tile-gap);
+	width: max-content;
+	/* The width of the year mosaic above, which the year columns stretch to fill:
+	 * its weekday names, then each week column and the gap before it. */
+	min-width: calc(
+		var(--journal-weekday-width)
+		+ var(--journal-statistics-weeks, 53) * (var(--journal-tile-size) + var(--journal-tile-gap))
+	);
+	margin-inline: auto;
+	align-items: center;
+}
+
+.journal-new-words-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* Month names match the year mosaic's weekday names. */
+.journal-new-words-label.is-month {
+	padding-right: var(--size-4-2);
+	font-size: 10px;
+	line-height: var(--journal-tile-size);
+	color: var(--text-faint);
+}
+
+.journal-new-words-label.is-year {
+	padding-bottom: var(--size-4-1);
+	text-align: center;
+}
+
+.journal-new-words-list:empty { display: none; }
+
+.journal-new-words-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	margin: var(--size-4-3) 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.journal-new-words-note {
+	margin-top: var(--size-4-3);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.journal-new-words-words {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-1);
+}
+
+.journal-statistics button.journal-new-words-word {
+	height: auto;
+	padding: 2px var(--size-4-2);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+	font-size: var(--font-ui-small);
+	box-shadow: none;
+}
+
+.journal-new-words-more { margin-top: var(--size-4-3); }
 
 /* ------------------------------------------------------- year progress --- */
 

@@ -86,6 +86,11 @@ host interface it implements:
 
 Pure scroll geometry lives separately in `src/scroll.ts`.
 
+`src/statistics.ts` is the shared, lazy read cache behind the statistics tab:
+word counts and, through `src/vocabulary.ts`, each note's distinct words.
+`src/statisticsView.ts` draws the year mosaic and hosts `src/newWords.ts`, the
+journal-wide mosaic of words used for the first time each month.
+
 `src/datePicker.ts` is the toolbar's calendar: a scrolling column of months that
 hangs off the view rather than being part of it, and moves the journal by date.
 

@@ -134,8 +134,9 @@ Each square represents one day. Missing notes are empty, and existing notes with
 zero words have an outline. A day with several notes counts all of them together. The four color levels represent **1–149**, **150–399**,
 **400–999**, and **1,000+** words. Hover or select a day to see its date and count,
 then choose **Open in journal** to visit an existing entry. Arrow keys move between
-days; Home and End move to the first and last day of the year. Narrow panes scroll
-horizontally to keep the tiles readable.
+days; Home and End move to the first and last day shown. A pane too narrow for the
+whole year leaves out its earliest weeks, so the tiles keep their size without
+scrolling.
 
 Statistics include all daily notes from your configured folder and date format,
 regardless of journal filters. Counts use the saved Markdown body, excluding YAML
@@ -150,6 +151,44 @@ progressive updates. A bounded memory cache keeps counts for recently visited
 years; closing Obsidian clears it. Missing notes, counts still loading, and read
 failures have distinct appearances. Large individual notes may take longer to
 count, but counting yields periodically so year navigation remains available.
+
+### New words
+
+Below the year, **New words** shows the whole journal as one column of twelve
+months per year, so, as in the year mosaic, later is always down or to the right. It runs
+through the current year, and a journal younger than 24 years is padded with
+empty years before it, so the mosaic matches the width of the year above. A
+pane too narrow for every year leaves out the earliest ones. Each month is colored by how many words appeared in your journal for the
+first time in it, judged by note date, so a note added later for an earlier day
+counts toward that day's month. Colors rank the months that added words into four
+quarters, because the first months of a journal add far more words than the rest.
+Each quarter's boundary is rounded to a round number, such as 80, 100, or 200,
+and the legend shows the resulting ranges. Hover or select a month to see its new words and
+the size of your vocabulary so far; up and down move by month, left and right by
+year.
+
+Once the whole journal has been read, selecting a month lists its new words, most
+used first or alphabetically. Choose a word to open the note that first used it.
+
+Words are counted once each, ignoring case and accents typed in different forms.
+YAML properties, code (fenced, indented, inline, and inside quotes), comments,
+links of every kind (including their text, reference links, and their
+definitions), footnote markers, URLs, anything with an @ such as email addresses,
+tags, HTML tags, callout types, and block IDs are left out, as are numbers
+without a letter. Words joined by an apostrophe or a
+zero-width non-joiner stay whole; hyphenated words count as their parts.
+
+English forms of a word count as one word: plurals, possessives, and *-ed* and
+*-ing* forms, so *portraits*, *portrait's*, and *portrait* are the same word, as
+are *walk*, *walked*, and *walking*, and *dance*, *danced*, and *dancing*. A word is listed in the form it was first
+written, and hovering it shows its other forms. Irregular forms such as *made*,
+and words built on another, such as *happiness*, stay separate. Words in other
+scripts, or with accents, are not reduced.
+
+This reads every daily note, two at a time, the first time you open
+**Statistics** in a session; the months fill in from the earliest one. Later edits
+re-read only the changed note. The words are kept in memory until Obsidian closes,
+and reading them also counts each note, so every year's mosaic opens instantly.
 
 ## Startup
 
