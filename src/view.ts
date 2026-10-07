@@ -1047,9 +1047,12 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.centerSection(section, focus, true);
 	}
 
-	/** Command navigation that keeps the same near-scroll and far-snap behavior as Today. */
-	goToCommandDate(date: Moment, focus = true): void {
-		this.navigateToDate(date, focus, true, true);
+	/**
+	 * Command navigation that keeps the same near-scroll and far-snap behavior
+	 * as Today, aimed at the note at `path` when given.
+	 */
+	goToCommandDate(date: Moment, focus = true, path?: string): void {
+		this.navigateToDate(date, focus, true, true, path);
 	}
 
 	/** Opens the calendar, on the day the reader is currently looking at. */

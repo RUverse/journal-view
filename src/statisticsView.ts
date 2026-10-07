@@ -2,6 +2,8 @@ import { ItemView, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from
 import type JournalViewPlugin from "./main";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
+import { columnsThatFit, cssPixels } from "./mosaicColumns";
+import { NewWordsMosaic } from "./newWords";
 import { DAY_KEY_FORMAT } from "./noteIndex";
 import { NoteStatistics, wordCountLevel } from "./statistics";
 
@@ -40,11 +42,16 @@ export class StatisticsView extends ItemView {
 	private yearInput!: HTMLInputElement;
 	private previous!: HTMLButtonElement;
 	private next!: HTMLButtonElement;
+	private scroller!: HTMLElement;
 	private grid!: HTMLElement;
+	private weeks: HTMLElement[] = [];
+	/** The first tile in a week that is not left out for want of room. */
+	private firstShown = 0;
 	private status!: HTMLElement;
 	private detail!: HTMLElement;
 	private openButton!: HTMLButtonElement;
 	private selected: DayTile | null = null;
+	private newWords: NewWordsMosaic | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: JournalViewPlugin) { super(leaf); }
 
@@ -88,8 +95,8 @@ export class StatisticsView extends ItemView {
 		this.registerDomEvent(this.yearInput, "change", () => this.changeYear(Number(this.yearInput.value)));
 
 		const card = page.createDiv({ cls: "journal-statistics-card" });
-		const scroller = card.createDiv({ cls: "journal-statistics-scroll" });
-		this.grid = scroller.createDiv({ cls: "journal-statistics-grid", attr: { role: "group", "aria-label": "Daily note word counts" } });
+		this.scroller = card.createDiv({ cls: "journal-statistics-scroll" });
+		this.grid = this.scroller.createDiv({ cls: "journal-statistics-grid", attr: { role: "group", "aria-label": "Daily note word counts" } });
 		const legend = card.createDiv({ cls: "journal-statistics-legend" });
 		for (const [level, label] of ["No note / 0 words", "1–149", "150–399", "400–999", "1,000+"].entries()) {
 			const item = legend.createSpan();
@@ -115,6 +122,10 @@ export class StatisticsView extends ItemView {
 				: paths.some((path) => this.paths.has(path) || this.isNoteInYear(path));
 			if (relevant) this.scheduleRefresh();
 		}));
+		const resize = new ResizeObserver(() => this.fitWeeks());
+		resize.observe(this.scroller);
+		this.register(() => resize.disconnect());
+		this.newWords = this.addChild(new NewWordsMosaic(page, this.plugin));
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.onSettingsChanged()));
 		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.onSettingsChanged()));
 		this.renderYear();
@@ -124,7 +135,10 @@ export class StatisticsView extends ItemView {
 		this.closed = true;
 		this.epoch++;
 		window.clearTimeout(this.refreshTimer);
+		if (this.newWords) this.removeChild(this.newWords);
+		this.newWords = null;
 		this.tiles = [];
+		this.weeks = [];
 		this.paths.clear();
 		this.selected = null;
 	}
@@ -135,6 +149,7 @@ export class StatisticsView extends ItemView {
 	}
 
 	onSettingsChanged(): void {
+		this.newWords?.onSettingsChanged();
 		if (!this.closed && this.configSignature !== JSON.stringify(this.plugin.daily.config())) this.scheduleRefresh();
 	}
 
@@ -153,6 +168,7 @@ export class StatisticsView extends ItemView {
 		window.clearTimeout(this.refreshTimer);
 		this.grid.empty();
 		this.tiles = [];
+		this.weeks = [];
 		this.selected = null;
 		this.detail.setText("Select a day to see its word count.");
 		this.openButton.hidden = true;
@@ -168,6 +184,7 @@ export class StatisticsView extends ItemView {
 		const today = createMoment().format(DAY_KEY_FORMAT);
 		while (!cursor.isAfter(last)) {
 			const week = this.grid.createDiv({ cls: "journal-statistics-week" });
+			this.weeks.push(week);
 			const month = week.createSpan({ cls: "journal-statistics-month", attr: { "aria-hidden": "true" } });
 			for (let day = 0; day < 7; day++, cursor.add(1, "day")) {
 				if (cursor.isBefore(first) || cursor.isAfter(last)) {
@@ -190,18 +207,42 @@ export class StatisticsView extends ItemView {
 		}
 		const initial = this.tiles.find((tile) => tile.date.format(DAY_KEY_FORMAT) === today) ?? this.tiles[0];
 		if (initial) initial.button.tabIndex = 0;
+		this.fitWeeks();
 		void this.refreshCounts();
+	}
+
+	/**
+	 * Leaves out the earliest weeks when the pane is too narrow for the whole
+	 * year, so the rest shows without scrolling, and has the new-words mosaic
+	 * below match the width of the weeks shown.
+	 */
+	private fitWeeks(): void {
+		const fit = columnsThatFit(this.scroller, cssPixels(this.contentEl, "--journal-weekday-width"),
+			cssPixels(this.contentEl, "--journal-tile-size") + cssPixels(this.contentEl, "--journal-tile-gap"));
+		if (fit === null) return;
+		const hidden = Math.max(0, this.weeks.length - fit);
+		this.firstShown = 0;
+		for (const [at, week] of this.weeks.entries()) {
+			week.toggleClass("is-clipped", at < hidden);
+			if (at < hidden) this.firstShown += week.querySelectorAll("button").length;
+		}
+		this.contentEl.setCssProps({ "--journal-statistics-weeks": String(this.weeks.length - hidden) });
+		this.newWords?.fitYears();
+		// Keep the tile reached by Tab among those shown.
+		if (this.tiles.findIndex((tile) => tile.button.tabIndex === 0) < this.firstShown) {
+			for (const [at, tile] of this.tiles.entries()) tile.button.tabIndex = at === this.firstShown ? 0 : -1;
+		}
 	}
 
 	private navigateGrid(event: KeyboardEvent, tile: DayTile): void {
 		const index = this.tiles.indexOf(tile);
 		const destinations: Record<string, number> = {
 			ArrowLeft: index - 7, ArrowRight: index + 7, ArrowUp: index - 1, ArrowDown: index + 1,
-			Home: 0, End: this.tiles.length - 1,
+			Home: this.firstShown, End: this.tiles.length - 1,
 		};
 		if (!(event.key in destinations)) return;
 		event.preventDefault();
-		this.tiles[Math.max(0, Math.min(this.tiles.length - 1, destinations[event.key]))]?.button.focus();
+		this.tiles[Math.max(this.firstShown, Math.min(this.tiles.length - 1, destinations[event.key]))]?.button.focus();
 	}
 
 	private select(tile: DayTile): void {

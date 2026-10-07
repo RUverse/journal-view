@@ -250,6 +250,11 @@ export class DailyNoteIndex implements OrderedDayIndex {
 		return this.days.size;
 	}
 
+	/** Every indexed day, in date order. */
+	keys(): readonly string[] {
+		return this.list();
+	}
+
 	/** The first and last indexed day, or null when the vault has no daily notes. */
 	range(): { first: string; last: string } | null {
 		const list = this.list();

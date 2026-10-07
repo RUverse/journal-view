@@ -105,7 +105,6 @@ export class DayFilesList {
 		});
 		applyIcon(this.toggleEl.createSpan({ cls: "journal-day-files-chevron" }), "chevron-right");
 		this.summaryEl = this.toggleEl.createSpan({ cls: "journal-day-files-summary" });
-		heading.createSpan({ cls: "journal-day-files-rule" });
 		this.listEl = this.el.createDiv({ cls: "journal-day-files-list" });
 		this.listEl.hidden = true;
 		this.rowsEl = this.listEl.createDiv({ cls: "journal-day-files-rows" });
