@@ -64,6 +64,9 @@ const noteNames = new Intl.Collator(undefined, { numeric: true });
 const SUFFIX_START = /^[\s\p{P}\p{S}]/u;
 const SUFFIX_SEPARATOR = /^[\s\p{P}\p{S}]+/u;
 
+/** How many notes added or removed the index remembers; an index built on it that falls further behind scans again. */
+const CHANGE_LOG_LENGTH = 256;
+
 /** What every date written in a format has in common, used to pass over other names cheaply. */
 interface DateShape {
 	/** The shortest and longest the written date can be. */
@@ -159,6 +162,9 @@ export class DailyNoteIndex implements OrderedDayIndex {
 	private sorted: string[] = [];
 	private sortedDirty = true;
 	private signature = "";
+	/** The note each version since `changesFrom` added or removed. */
+	private changes: string[] = [];
+	private changesFrom = 0;
 
 	/** Bumped on every change, so views can tell when to look again. */
 	version = 0;
@@ -178,6 +184,8 @@ export class DailyNoteIndex implements OrderedDayIndex {
 		this.signature = JSON.stringify(config);
 		this.sortedDirty = true;
 		this.version++;
+		this.changes = [];
+		this.changesFrom = this.version;
 	}
 
 	/** Rebuilds only if the daily-note configuration moved since the last scan. */
@@ -221,7 +229,7 @@ export class DailyNoteIndex implements OrderedDayIndex {
 		const location = this.locate(file.path);
 		if (!location || this.days.get(location.key)?.some((note) => note.path === file.path)) return false;
 		this.add({ path: file.path, ...location });
-		this.version++;
+		this.changed(file.path);
 		return true;
 	}
 
@@ -237,8 +245,17 @@ export class DailyNoteIndex implements OrderedDayIndex {
 			this.days.delete(key);
 			this.sortedDirty = true;
 		}
-		this.version++;
+		this.changed(path);
 		return true;
+	}
+
+	/**
+	 * The notes added or removed since `version`, so an index built on this one
+	 * can follow them instead of scanning every note; null when it has to scan.
+	 */
+	changedSince(version: number): readonly string[] | null {
+		if (version < this.changesFrom || version > this.version) return null;
+		return this.changes.slice(version - this.changesFrom);
 	}
 
 	has(key: string): boolean {
@@ -299,6 +316,15 @@ export class DailyNoteIndex implements OrderedDayIndex {
 		let at = notes.findIndex((other) => compareNotes(note, other) < 0);
 		if (at < 0) at = notes.length;
 		notes.splice(at, 0, note);
+	}
+
+	private changed(path: string): void {
+		this.version++;
+		this.changes.push(path);
+		if (this.changes.length > CHANGE_LOG_LENGTH) {
+			this.changes.shift();
+			this.changesFrom++;
+		}
 	}
 
 	private list(): string[] {
