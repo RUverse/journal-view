@@ -29,6 +29,10 @@ function applyIcon(el: HTMLElement, ...names: string[]): void {
 	}
 }
 
+function sameReach(left: FindPass["reach"], right: FindPass["reach"]): boolean {
+	return left === right || (!!left && !!right && left.first === right.first && left.last === right.last);
+}
+
 /** A note of a loaded day, searched in the text its editor holds right now. */
 interface LiveNote {
 	section: DaySection;
@@ -247,10 +251,12 @@ export class JournalFind {
 		} else if (
 			pass.indexVersion !== plugin.index.version ||
 			pass.filterVersion !== plugin.filteredIndex.version ||
-			pass.step !== this.host.sortStep()
+			pass.step !== this.host.sortStep() ||
+			!sameReach(pass.reach, this.reach())
 		) {
-			// Notes came or went, the filters let in others, or the timeline
-			// turned around: count the journal again, keeping the selection.
+			// Notes came or went, the filters let in others, the timeline
+			// turned around, or a different span of it is in reach: count the
+			// journal again, keeping the selection.
 			this.start(false);
 		} else {
 			if (live) this.syncLive();
@@ -475,7 +481,13 @@ export class JournalFind {
 				if (pass.reads.has(path) || this.live.has(path) || !plugin.filteredIndex.matchesPath(path)) continue;
 				const file = app.vault.getAbstractFileByPath(path);
 				if (!(file instanceof TFile) || corpus.peek(file) !== null) continue;
-				pass.reads.set(path, corpus.read(file));
+				const read = corpus.read(file);
+				pass.reads.set(path, read);
+				// A finished read is in the cache, where the walk will find it;
+				// only reads still under way hold one of the slots.
+				void read.finally(() => {
+					if (pass.reads.get(path) === read) pass.reads.delete(path);
+				});
 			}
 		}
 	}
@@ -699,12 +711,17 @@ export class JournalFind {
 		this.navigate(event.shiftKey ? -1 : 1);
 	}
 
-	/** The count is announced, so it is written at most once a frame, and only when it reads differently. */
+	/**
+	 * The count is announced, so it is written at most once a frame, and only
+	 * when it reads differently. The arrows go with it: an edit can bring the
+	 * first match into a search that had none, or take the last one away.
+	 */
 	private scheduleCount(): void {
 		if (this.countFrame) return;
 		this.countFrame = window.requestAnimationFrame(() => {
 			this.countFrame = 0;
 			this.updateCount();
+			this.updateButtons();
 		});
 	}
 
