@@ -124,19 +124,26 @@ const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script
 /** The platform's dictionary-based word breaker, where it has one. */
 const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "word" }) : null;
 
+/** A character a run can be cut before: not a mark, and not the second half of a surrogate pair. */
+const CUT = /^[^\p{M}\udc00-\udfff]/u;
+
 /**
- * The words in a run matched by `WORD`. A run holding a script written without
- * spaces is a whole phrase, so the segmenter splits it into words; any other
- * run is a word already, and is left alone so spaced languages keep their words.
+ * A run matched by `WORD`, in pieces the segmenter can take one at a time. The
+ * segmenter reads a whole run before giving its first word, so a run in a
+ * script written without spaces is cut every `CHUNK_SIZE` characters or so.
+ * Only a run with no punctuation at all gets that long, and a cut splits at
+ * most one word in it.
  */
-function* wordsOf(run: string): Generator<string> {
-	if (!segmenter || !UNSPACED.test(run)) {
-		yield run;
-		return;
+function piecesOf(run: string): string[] {
+	if (!segmenter || run.length <= CHUNK_SIZE || !UNSPACED.test(run)) return [run];
+	const pieces: string[] = [];
+	for (let start = 0; start < run.length;) {
+		let end = Math.min(run.length, start + CHUNK_SIZE);
+		while (end < run.length && !CUT.test(run.slice(end, end + 2))) end++;
+		pieces.push(run.slice(start, end));
+		start = end;
 	}
-	for (const part of segmenter.segment(run)) {
-		if (part.isWordLike) yield part.segment;
-	}
+	return pieces;
 }
 
 /** One spelling for a word however it was typed: composed, lowercase, straight apostrophe. */
@@ -166,24 +173,48 @@ export function proseOf(content: string): string {
 
 /**
  * The distinct words of a note's prose, normalized. A word needs a letter, so
- * plain numbers are left out. Matching runs in bounded slices cut at
- * whitespace, yielding between them so a very large note does not block the UI.
+ * plain numbers are left out.
+ *
+ * A run holding a script written without spaces is a whole phrase, so the
+ * segmenter splits it into words; any other run is a word already, and is left
+ * alone so spaced languages keep their words. The segmenter takes a slice's
+ * runs in one call, a line break apart, since it always breaks there.
+ *
+ * Matching yields every `CHUNK_SIZE` characters or so, wherever the text has
+ * got to, so a very large note does not block the UI, even one long paragraph
+ * without spaces.
  */
 export async function noteWords(content: string, current: () => boolean): Promise<Set<string> | null> {
 	const text = proseOf(content);
 	const words = new Set<string>();
-	for (let offset = 0; offset < text.length;) {
-		if (!current()) return null;
-		let end = Math.min(text.length, offset + CHUNK_SIZE);
-		while (end < text.length && !/\s/.test(text[end])) end++;
-		for (const match of text.slice(offset, end).matchAll(WORD)) {
-			for (const word of wordsOf(match[0])) {
-				if (LETTER.test(word)) words.add(normalizeWord(word));
+	const add = (word: string) => {
+		if (LETTER.test(word)) words.add(normalizeWord(word));
+	};
+	let unspaced: string[] = [];
+	const segment = () => {
+		if (!segmenter || !unspaced.length) return;
+		for (const part of segmenter.segment(unspaced.join("\n"))) {
+			if (part.isWordLike) add(part.segment);
+		}
+		unspaced = [];
+	};
+	if (!current()) return null;
+	let paused = 0;
+	for (const match of text.matchAll(WORD)) {
+		let end = match.index ?? 0;
+		for (const piece of piecesOf(match[0])) {
+			if (segmenter && UNSPACED.test(piece)) unspaced.push(piece);
+			else add(piece);
+			end += piece.length;
+			if (end - paused >= CHUNK_SIZE && end < text.length) {
+				segment();
+				await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+				if (!current()) return null;
+				paused = end;
 			}
 		}
-		offset = end;
-		if (offset < text.length) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 	}
+	segment();
 	return words;
 }
 
