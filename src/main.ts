@@ -21,6 +21,7 @@ import {
 import type { DailyHeaderStyle, DayFilesDate, DaySortDirection, YearProgressMode } from "./settings";
 import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 import { JournalStatistics } from "./statistics";
+import { FindCorpus } from "./findCorpus";
 import { StatisticsView, VIEW_TYPE_STATISTICS } from "./statisticsView";
 
 type EntryDirection = -1 | 0 | 1;
@@ -43,6 +44,8 @@ export default class JournalViewPlugin extends Plugin {
 	/** The days the journal shows while empty days are hidden. */
 	shownDays!: ShownDays;
 	statistics!: JournalStatistics;
+	/** Note bodies journal-wide find has read, shared by every view. */
+	findCorpus!: FindCorpus;
 	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
 	private settingsTab: JournalViewSettingTab | null = null;
@@ -95,6 +98,7 @@ export default class JournalViewPlugin extends Plugin {
 		await this.loadSettings();
 		this.daily = new DailyNoteResolver(this.app, () => this.settings);
 		this.statistics = this.addChild(new JournalStatistics(this.app));
+		this.findCorpus = this.addChild(new FindCorpus(this.app));
 		this.index = new DailyNoteIndex(this.app, this.daily);
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
 		this.dayFiles = new DayFileIndex(this.app, this.index, this.daily, () => this.settings);

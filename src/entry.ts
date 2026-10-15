@@ -19,6 +19,7 @@ import type { Moment } from "./moment";
 import { renderNoteLabel } from "./noteLabel";
 import type { NoteLabel } from "./noteLabel";
 import { SaveQueue } from "./saveQueue";
+import { editorBody, noteBody } from "./noteBody";
 import { findLiteralRanges } from "./findText";
 import type { FindRange } from "./findText";
 import { listenForReaderScrollIntent } from "./readerInput";
@@ -121,19 +122,6 @@ export interface EntryHost {
 	onEntryFocusSettled(entry: NoteEntry): void;
 	/** Opens the journal-wide find UI from an embedded editor command. */
 	showFind(): void;
-}
-
-/**
- * The journal edits only the note body. Obsidian's parser locates frontmatter
- * so it can be preserved exactly rather than parsed and serialized again.
- */
-function noteBody(content: string): string {
-	return content.slice(getFrontMatterInfo(content).contentStart);
-}
-
-/** CodeMirror stores every line break as `\n`, regardless of the file's EOL. */
-function editorBody(content: string): string {
-	return noteBody(content).replace(/\r\n?/g, "\n");
 }
 
 function replaceNoteBody(content: string, body: string): string {
