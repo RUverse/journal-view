@@ -64,6 +64,8 @@ export interface JournalViewSettings {
 	openJournalOnStartup: boolean;
 	/** Show only days that have a note (today always shows). */
 	hideEmptyDays: boolean;
+	/** Highlight today with its title colour instead of a shaded card. */
+	hideTodayBackground: boolean;
 	/** Tag and property rules that decide which existing notes are visible. */
 	filterRules: JournalFilterRule[];
 	/** Show frontmatter tags above each existing note's body. */
@@ -102,6 +104,7 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	focusTodayOnOpen: true,
 	openJournalOnStartup: false,
 	hideEmptyDays: true,
+	hideTodayBackground: false,
 	filterRules: [],
 	showTags: false,
 	displayProperties: [],
@@ -133,6 +136,7 @@ type ToggleSettingKey =
 	| "focusTodayOnOpen"
 	| "openJournalOnStartup"
 	| "hideEmptyDays"
+	| "hideTodayBackground"
 	| "showMonthSeparators"
 	| "groupDaysByYear"
 	| "showDayFiles"
@@ -347,6 +351,11 @@ export class JournalViewSettingTab extends PluginSettingTab {
 						},
 					},
 					{
+						name: "Hide today's background",
+						desc: "Remove the shaded box around today and use your theme's bold or italic text colour for its date heading.",
+						control: { type: "toggle", key: "hideTodayBackground" },
+					},
+					{
 						name: "Group days by year",
 						desc: "Show a centered year heading when consecutive visible days cross a year boundary.",
 						control: { type: "toggle", key: "groupDaysByYear" },
@@ -554,6 +563,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "focusTodayOnOpen":
 			case "openJournalOnStartup":
 			case "hideEmptyDays":
+			case "hideTodayBackground":
 			case "showMonthSeparators":
 			case "groupDaysByYear":
 			case "showDayFiles":

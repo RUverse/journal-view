@@ -42,6 +42,7 @@ Some Customization is only visible in the customization menu accessible from the
 | Day order | Oldest to newest | Reverses the complete timeline when set to newest to oldest |
 | Daily header format | `dddd, D MMMM` | Controls how each daily header displays its date |
 | Daily header style | Subtle | Shows each date subtly, as an H1, or hides the date display |
+| Hide today's background | Off | Replaces today's shaded box with a date heading in the theme's emphasis colour |
 | Group days by year | On | Marks year boundaries between consecutive visible daily entries |
 | Group days by month | Off | Groups daily entries beneath compact month and year headings |
 | Year progress | Left | Shows twelve month lines beside the journal that mark the month you are reading, like a scrollbar for the year; select a month to go to its first note. Choose left, right, hidden, or experimental, which puts them on the left with every month named. Appears only when the pane is at least 120 px wider than the journal |
