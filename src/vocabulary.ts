@@ -119,6 +119,25 @@ function blankInlineCode(line: string): string {
  */
 const WORD = /[\p{L}\p{M}\p{N}]+(?:['’‌][\p{L}\p{M}\p{N}]+)*/gu;
 const LETTER = /\p{L}/u;
+/** Scripts written without spaces between words, such as Chinese, Japanese, and Thai. */
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+/** The platform's dictionary-based word breaker, where it has one. */
+const segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "word" }) : null;
+
+/**
+ * The words in a run matched by `WORD`. A run holding a script written without
+ * spaces is a whole phrase, so the segmenter splits it into words; any other
+ * run is a word already, and is left alone so spaced languages keep their words.
+ */
+function* wordsOf(run: string): Generator<string> {
+	if (!segmenter || !UNSPACED.test(run)) {
+		yield run;
+		return;
+	}
+	for (const part of segmenter.segment(run)) {
+		if (part.isWordLike) yield part.segment;
+	}
+}
 
 /** One spelling for a word however it was typed: composed, lowercase, straight apostrophe. */
 export function normalizeWord(word: string): string {
@@ -158,7 +177,9 @@ export async function noteWords(content: string, current: () => boolean): Promis
 		let end = Math.min(text.length, offset + CHUNK_SIZE);
 		while (end < text.length && !/\s/.test(text[end])) end++;
 		for (const match of text.slice(offset, end).matchAll(WORD)) {
-			if (LETTER.test(match[0])) words.add(normalizeWord(match[0]));
+			for (const word of wordsOf(match[0])) {
+				if (LETTER.test(word)) words.add(normalizeWord(word));
+			}
 		}
 		offset = end;
 		if (offset < text.length) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
