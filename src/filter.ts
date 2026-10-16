@@ -245,6 +245,11 @@ export class FilteredDailyNoteIndex implements OrderedDayIndex {
 		return keyBefore(this.list(), key);
 	}
 
+	/** Every included day strictly before `key`, in date order. */
+	keysBefore(key: string): string[] {
+		return this.list().filter((candidate) => candidate < key);
+	}
+
 	keysFrom(key: string, direction: -1 | 1): string[] {
 		const list = this.list();
 		if (direction > 0) {
