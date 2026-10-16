@@ -167,22 +167,35 @@ export class FilteredDailyNoteIndex implements OrderedDayIndex {
 
 	ensureCurrent(): void {
 		this.base.ensureCurrent();
-		if (this.base.version !== this.baseVersion || JSON.stringify(this.getRules()) !== this.signature) {
+		// The vault reports every file it loads as created, one at a time, and a
+		// sync can bring in thousands more: follow just the notes that came or
+		// went, rather than scanning every note again for each.
+		const changed = this.base.changedSince(this.baseVersion);
+		if (!changed || JSON.stringify(this.getRules()) !== this.signature) {
 			this.rebuild();
+			return;
 		}
+		this.baseVersion = this.base.version;
+		for (const path of changed) this.place(path);
 	}
 
 	/** Re-evaluates one note after Obsidian has refreshed its metadata cache. */
 	handleMetadataChange(file: TFile): boolean {
 		this.ensureCurrent();
-		const key = this.base.keyForPath(file.path);
-		const previousKey = this.pathKeys.get(file.path);
+		return this.place(file.path);
+	}
+
+	/** Re-evaluates one note: the day it is under while it is a daily note, and whether it passes. */
+	private place(path: string): boolean {
+		const file = this.app.vault.getAbstractFileByPath(path);
+		const key = file instanceof TFile ? this.base.keyForPath(path) : null;
+		const previousKey = this.pathKeys.get(path);
 		let membershipChanged = false;
 		if (previousKey && previousKey !== key) {
-			membershipChanged = this.removeMatchingPath(file.path, previousKey);
+			membershipChanged = this.removeMatchingPath(path, previousKey);
 		}
-		if (!key) {
-			this.pathKeys.delete(file.path);
+		if (!(file instanceof TFile) || !key) {
+			this.pathKeys.delete(path);
 			if (membershipChanged) {
 				this.sortedDirty = true;
 				this.version++;
@@ -190,13 +203,13 @@ export class FilteredDailyNoteIndex implements OrderedDayIndex {
 			return membershipChanged;
 		}
 
-		this.pathKeys.set(file.path, key);
-		const wasMatching = this.matchingPaths.has(file.path);
+		this.pathKeys.set(path, key);
+		const wasMatching = this.matchingPaths.has(path);
 		const matches = matchesFilterRules(this.app.metadataCache.getFileCache(file), this.getRules());
 		if (matches === wasMatching && previousKey === key) return false;
-		if (wasMatching) membershipChanged = this.removeMatchingPath(file.path, previousKey ?? key) || membershipChanged;
+		if (wasMatching) membershipChanged = this.removeMatchingPath(path, previousKey ?? key) || membershipChanged;
 		if (matches) {
-			this.addMatchingPath(file.path, key);
+			this.addMatchingPath(path, key);
 			membershipChanged = true;
 		}
 		if (membershipChanged) {
@@ -230,6 +243,11 @@ export class FilteredDailyNoteIndex implements OrderedDayIndex {
 
 	prev(key: string): string | null {
 		return keyBefore(this.list(), key);
+	}
+
+	/** Every included day strictly before `key`, in date order. */
+	keysBefore(key: string): string[] {
+		return this.list().filter((candidate) => candidate < key);
 	}
 
 	keysFrom(key: string, direction: -1 | 1): string[] {
