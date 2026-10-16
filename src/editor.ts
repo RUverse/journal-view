@@ -272,6 +272,10 @@ function notifyFileOpen(workspace: WorkspaceEditorHost, file: TFile | null): voi
  * through its guarded preview handler. A day without a file always does:
  * `getActiveFile()` falls back to the last real file, so Word Count rejects a
  * null preview and retains that file's count.
+ *
+ * Either way Word Count is shown again. Every edit and cursor move first runs
+ * its selection handler, which hides it because a journal is not a file view;
+ * restoring it in the same task keeps that hide from ever being painted.
  */
 function publishWorkspaceContent(
 	app: App,
@@ -282,25 +286,32 @@ function publishWorkspaceContent(
 	try {
 		const workspace = app.workspace as unknown as WorkspaceEditorHost;
 		if (workspace.activeEditor !== owner) return;
+		const wordCount = wordCountPlugin(app);
 		if (changed && owner.file) {
 			const content = read();
-			if (content !== null) workspace.trigger("quick-preview", owner.file, content);
+			if (content === null) return;
+			workspace.trigger("quick-preview", owner.file, content);
+			wordCount?.statusBarEl?.toggle?.(true);
 			return;
 		}
 
-		const internalPlugins = app.internalPlugins as unknown as InternalPluginHost | undefined;
-		const plugin = internalPlugins?.getPluginById("word-count");
-		const instance = plugin?.instance;
-		if (!plugin?.enabled || typeof instance?.onQuickPreview !== "function") return;
+		if (!wordCount) return;
 		const content = read();
 		if (content === null) return;
-		plugin.statusBarEl?.toggle?.(true);
+		wordCount.statusBarEl?.toggle?.(true);
 		// The handler strips frontmatter and Markdown syntax before counting. Its
 		// file argument is only an identity check against the current active file.
-		instance.onQuickPreview(workspace.getActiveFile(), content);
+		wordCount.instance?.onQuickPreview?.(workspace.getActiveFile(), content);
 	} catch (error) {
 		console.warn("Journal View: could not publish the active editor content", error);
 	}
+}
+
+/** Word Count, when it is enabled and still has the preview handler used here. */
+function wordCountPlugin(app: App): InternalWordCountPlugin | null {
+	const internalPlugins = app.internalPlugins as unknown as InternalPluginHost | undefined;
+	const plugin = internalPlugins?.getPluginById("word-count");
+	return plugin?.enabled && typeof plugin.instance?.onQuickPreview === "function" ? plugin : null;
 }
 
 type EditorCtor = new (app: App, container: HTMLElement, owner: InternalEditorOwner) => InternalEditorInstance;
