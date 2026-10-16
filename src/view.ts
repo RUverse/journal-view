@@ -182,7 +182,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	onPaneMenu(menu: Menu, source: string): void {
 		super.onPaneMenu(menu, source);
-		menu.addItem((item) => item.setTitle("Go to random date").setIcon("dice")
+		menu.addItem((item) => item.setTitle("Random entry").setIcon("dice")
 			.onClick(() => this.goToRandomDate()));
 		menu.addItem((item) => item.setTitle("Statistics").setIcon("chart-no-axes-column-increasing")
 			.onClick(() => void this.plugin.openStatistics().catch((error: unknown) => {

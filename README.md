@@ -12,7 +12,7 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
 - **Use the daily notes you already have.** Journal View works with your existing notes and daily-note
   settings—no plugin-specific formats, duplicate files, or lock-in.
 - **Navigate through time with ease.** Scroll through your journal, jump to any date with the calendar,
-  return to today in one click, revisit a random past day with **Go to random date** in the pane's
+  return to today in one click, revisit a random past day with **Random entry** in the pane's
   top-right **More options** menu, or open a daily note right where it sits in the journal from the
   notebook button on it.
 - **Edit directly in the timeline.** Read and write without switching between files, views, or editing
@@ -121,7 +121,7 @@ boolean values, and a list property matches when one of its items equals the con
 Every include filter must match. A note matching any exclude filter is hidden, even if it satisfies
 all includes. On a day with several notes, the day appears when any of them matches, and the notes
 that do not match are hidden within it. The funnel uses the accent color whenever a tag or property filter is active; the
-note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, **Go to random date** picks
+note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, **Random entry** picks
 only from the notes currently included, and **Find in journal** searches only those notes.
 
 ## Statistics
