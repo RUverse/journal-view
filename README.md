@@ -32,7 +32,6 @@ The [guide](https://github.com/RUverse/journal-view/blob/main/docs/guide.md) cov
 - [File modification history](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#file-modification-history): the files listed under each day
 - [Filters](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#filters): tag and property rules
 - [Statistics](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#statistics): the year mosaic and new words
-- [Startup](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#startup): opening the journal when Obsidian starts
 
 ## Privacy
 

@@ -8,7 +8,6 @@ How Journal View works in detail. For an overview, see the [README](../README.md
 - [File modification history](#file-modification-history)
 - [Filters](#filters)
 - [Statistics](#statistics)
-- [Startup](#startup)
 
 ## Navigation
 
@@ -46,7 +45,7 @@ Some options are only available in the customization menu, opened from the journ
 | Group days by month | Off | Groups daily entries beneath compact month and year headings |
 | Year progress | Left | Shows twelve month lines beside the journal that mark the month you are reading, like a scrollbar for the year; select a month to go to its first note. Choose left, right, hidden, or experimental, which puts them on the left with every month named. Appears only when the pane is at least 120 px wider than the journal |
 | Focus today on open | On | Opens the journal at today's note and places the cursor there |
-| Open journal on startup | Off | Opens or reveals Journal View after Obsidian restores the workspace |
+| Open journal on startup | Off | Opens or reveals Journal View after Obsidian restores the workspace. The Homepage plugin cannot select Journal View, so use this instead; if you use both, let only one of them open content at startup |
 | Only show days that have a note | On | Skips empty days while always keeping today visible; turn it off to show every day |
 | Show file modification history | Off | Lists the files created or last edited on each day at the bottom of the day; see [File modification history](#file-modification-history) |
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
@@ -189,9 +188,3 @@ This reads every daily note, two at a time, the first time you open
 **Statistics** in a session; the months fill in from the earliest one. Later edits
 re-read only the changed note. The words are kept in memory until Obsidian closes,
 and reading them also counts each note, so every year's mosaic opens instantly.
-
-## Startup
-
-Journal View is a custom view, so the Homepage plugin cannot select it as a homepage note. Enable
-**Open journal on startup** in Journal View instead. If you also use Homepage, configure only one of
-the two plugins to open content at startup so they do not compete for the active tab.
