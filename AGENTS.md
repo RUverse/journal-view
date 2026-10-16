@@ -74,6 +74,11 @@ Two traps, both of which look exactly like the feature being broken:
 - `src/dayFiles.ts` / `src/dayFilesList.ts`: the other files from each day, and
   the list of them at the bottom of a day
 - `src/editor.ts` / `src/saveQueue.ts`: editing and durable writes
+- `src/find.ts`: the find bar, and its search of the whole journal - loaded
+  days in their editors' text, every other note through `src/findCorpus.ts`, a
+  shared cache of note bodies, with the counts kept in `src/findResults.ts`
+- `src/noteBody.ts`: a note's body as an editor holds it, shared by editing
+  and find so offsets agree
 
 The view delegates to four collaborators, each holding the view through a small
 host interface it implements:
