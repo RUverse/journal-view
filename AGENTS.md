@@ -1,7 +1,8 @@
 # Journal View contributor guide
 
 Journal View is an Obsidian plugin that presents daily notes as one continuous,
-editable timeline. See [README.md](README.md) for behavior and installation.
+editable timeline. See [README.md](README.md) for an overview and
+[docs/guide.md](docs/guide.md) for behavior in detail.
 
 ## Development
 
