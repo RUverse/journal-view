@@ -182,6 +182,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 
 	onPaneMenu(menu: Menu, source: string): void {
 		super.onPaneMenu(menu, source);
+		menu.addItem((item) => item.setTitle("Go to random date").setIcon("dice")
+			.onClick(() => this.goToRandomDate()));
 		menu.addItem((item) => item.setTitle("Statistics").setIcon("chart-no-axes-column-increasing")
 			.onClick(() => void this.plugin.openStatistics().catch((error: unknown) => {
 				console.error("Journal View: could not open statistics", error);
@@ -1077,6 +1079,21 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		});
 		this.picker = picker;
 		picker.open();
+	}
+
+	/** Moves the journal to a random earlier day with a note the filters include. */
+	private goToRandomDate(): void {
+		this.plugin.filteredIndex.ensureCurrent();
+		const past = this.plugin.filteredIndex.keysBefore(createMoment().format(DAY_KEY_FORMAT));
+		// Leave out the day being read, so every pick moves the journal.
+		const current = this.visibleDate()?.format(DAY_KEY_FORMAT);
+		const candidates = past.length > 1 ? past.filter((key) => key !== current) : past;
+		if (!candidates.length) {
+			new Notice("There are no earlier notes to go to.");
+			return;
+		}
+		const key = candidates[Math.floor(Math.random() * candidates.length)];
+		this.goToDate(createMoment(key, DAY_KEY_FORMAT, true), false);
 	}
 
 	/** Opens the global journal visibility controls. */
