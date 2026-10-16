@@ -11,22 +11,33 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
 
 - **Use the daily notes you already have.** Journal View works with your existing notes and daily-note
   settings—no plugin-specific formats, duplicate files, or lock-in.
-- **Navigate through time with ease.** Scroll through your journal, jump to any date with the calendar,
-  return to today in one click, revisit a random past day with **Random entry** in the pane's
-  top-right **More options** menu, or open a daily note right where it sits in the journal from the
-  notebook button on it.
-- **Edit directly in the timeline.** Read and write without switching between files, views, or editing
-  modes.
-- **Write only when there is something to say.** Start typing on an empty day and Journal View creates
-  the daily note only when you need it.
-- **Rediscover past entries.** Search across your journal to quickly find notes, ideas, and memories
-  from any day.
-- **Focus the timeline.** Filter daily notes by tags or exact property values, with include and
-  exclude rules that also carry through to calendar navigation and journal search.
-- **See what else each day held.** Optionally list the files you created or last edited on each
-  day at the bottom of that day, as links that stay out of the way until you open them.
+- **Navigate and edit in one place.** Scroll through your journal, jump to any date, or return to
+  today in one click, and read and write without switching between files, views, or editing modes.
+- **Rediscover past entries.** Search across your journal to find notes, ideas, and memories from any
+  day, revisit a random past day, and see how much you have written over the years in statistics.
+- **Focus the timeline.** Filter daily notes by tags or property values, with include and exclude
+  rules.
+- **See what else each day held.** Optionally list the files you created or edited on each day,
+  alongside that day's note.
 - **Stay responsive across years of notes.** Journal View keeps the days around you ready to edit
   while efficiently handling the rest of your timeline.
+
+## Navigation
+
+- Select the calendar button in the journal toolbar to **Go to date**.
+- Choose **Random entry** in the journal pane's top-right **More options** menu to jump to a random
+  past day.
+- Select the notebook button on an open daily note to show that day in the journal.
+
+Three commands move to a nearby day:
+
+- **Go to today** opens the journal when needed, then focuses today's entry.
+- **Go to yesterday** opens or reveals the journal, then focuses yesterday's entry.
+- **Go to tomorrow** opens or reveals the journal, then focuses tomorrow's entry.
+
+Yesterday and tomorrow are shown while focused even when the note-only toggle or a metadata filter
+would normally hide them. All three commands scroll when the target is nearby and snap when it is
+more than two view heights away.
 
 ## Settings
 
@@ -34,7 +45,7 @@ Journal View uses your existing daily-note configuration by default. You can ove
 format, folder, and template in **Settings → Journal View** without changing how the rest of your
 vault handles daily notes.
 
-Some Customization is only visible in the customization menu accessible from the view's toolbar.
+Some options are only available in the customization menu, opened from the journal toolbar.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -196,16 +207,6 @@ and reading them also counts each note, so every year's mosaic opens instantly.
 Journal View is a custom view, so the Homepage plugin cannot select it as a homepage note. Enable
 **Open journal on startup** in Journal View instead. If you also use Homepage, configure only one of
 the two plugins to open content at startup so they do not compete for the active tab.
-
-## Date commands
-
-- **Go to today** opens the journal when needed, then focuses today's entry.
-- **Go to yesterday** opens or reveals the journal, then focuses yesterday's entry.
-- **Go to tomorrow** opens or reveals the journal, then focuses tomorrow's entry.
-
-Yesterday and tomorrow are shown while focused even when the note-only toggle or a metadata filter
-would normally hide them. All three commands scroll when the target is nearby and snap when it is
-more than two view heights away.
 
 ## Privacy
 
