@@ -7,7 +7,7 @@ import { countMatches, literalExpression, rangesOf } from "./findText";
 import type { FindRange } from "./findText";
 import { FindResults } from "./findResults";
 import type { FindPosition } from "./findResults";
-import { DAY_KEY_FORMAT } from "./noteIndex";
+import { DAY_KEY_FORMAT, daysApart } from "./noteIndex";
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 
@@ -575,15 +575,17 @@ export class JournalFind {
 		if (!nearest) {
 			const below = this.results.nextKey(anchor.key, step);
 			const above = this.results.nextKey(anchor.key, (-step) as -1 | 1);
-			// The walk reaches days nearest first, so the nearer one ranks first.
-			if (below && (!above || this.rank(pass, below) <= this.rank(pass, above))) nearest = this.results.first(below);
+			// Measured from the anchor as it is now: Enter after a finished
+			// walk moves it without walking again. Ties go below, as the walk's do.
+			const belowNearer = below && (!above || daysApart(below, anchor.key) <= daysApart(above, anchor.key));
+			if (belowNearer) nearest = this.results.first(below);
 			else if (above) nearest = this.results.last(above);
 		}
 		if (!nearest) return pass.done ? null : undefined;
 		return this.settled(pass, nearest) ? nearest : undefined;
 	}
 
-	/** Where `key` falls in the pass's walk. */
+	/** Where `key` falls in the pass's walk, which is ordered around its first anchor. */
 	private rank(pass: FindPass, key: string): number {
 		return pass.ranks.get(key) ?? Infinity;
 	}

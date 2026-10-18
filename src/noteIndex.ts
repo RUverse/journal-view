@@ -50,6 +50,11 @@ function dayNumber(key: string): number {
 	return Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10))) / 86400000;
 }
 
+/** How many days apart two `YYYY-MM-DD` keys are, either way. */
+export function daysApart(left: string, right: string): number {
+	return Math.abs(dayNumber(left) - dayNumber(right));
+}
+
 /**
  * Every one of the sorted `keys` but `key` itself, nearest it first, so a
  * walk through them spreads out from `key` both ways. Of two days equally
