@@ -54,15 +54,16 @@ interface FindAnchor {
 }
 
 /**
- * One search of the whole journal for one query. It walks every day once, in
- * a circle down the timeline from the anchor, so the first match after the
- * reader is settled as soon as the walk reaches it, and stays settled.
+ * One search of the whole journal for one query. It walks every day once,
+ * outward from the anchor and nearest days first, so the match nearest the
+ * reader is settled as soon as the walk reaches it, and stays settled. The
+ * days it has counted always run unbroken around the anchor.
  */
 interface FindPass {
 	query: string;
 	expression: RegExp;
 	step: -1 | 1;
-	/** The anchor's day, then every other day with notes the filters let in, in walk order. */
+	/** The anchor's day, then every other day with notes the filters let in, nearest first. */
 	keys: string[];
 	ranks: Map<string, number>;
 	/** How many of `keys` have been counted. */
@@ -70,7 +71,7 @@ interface FindPass {
 	done: boolean;
 	generation: number;
 	anchor: FindAnchor;
-	/** Still to pick the first match after the anchor, and whether to bring it into view. */
+	/** Still to pick the match nearest the anchor, and whether to bring it into view. */
 	choosing: boolean;
 	reveal: boolean;
 	/** Dates outside these are out of the view's reach; null when every date is in it. */
@@ -87,7 +88,7 @@ export interface JournalFindHost {
 	readonly sections: DaySection[];
 	sortStep(): -1 | 1;
 	setFindMode(open: boolean): void;
-	findAnchorSection(): DaySection | null;
+	findAnchorSection(previous?: DaySection | null): DaySection | null;
 	revealFindMatch(section: DaySection, entry: NoteEntry, range: FindRange): void;
 	loadFindDate(date: Moment): Promise<void>;
 	isFindReady(): boolean;
@@ -130,6 +131,8 @@ export class JournalFind {
 	private navigationToken = 0;
 	/** True while the view loads the day of the match being travelled to. */
 	private travelling = false;
+	/** The day focus last came to the find bar from, so a search starts where the reader was. */
+	private cameFrom: DaySection | null = null;
 	private releaseCorpus: (() => void) | null = null;
 	private unsubscribe: (() => void) | null = null;
 	private destroyed = false;
@@ -150,6 +153,7 @@ export class JournalFind {
 		this.caseButton = this.iconButton(["case-sensitive", "type"], "Match case", () => this.toggleCase());
 		this.closeButton = this.iconButton(["x"], "Close find", () => this.close());
 
+		this.input.addEventListener("focus", (event) => this.focusCameFrom(event.relatedTarget as Node | null));
 		this.input.addEventListener("input", () => this.queryChanged());
 		this.input.addEventListener("keydown", (event) => this.onInputKeydown(event));
 		this.updateButtons();
@@ -206,6 +210,11 @@ export class JournalFind {
 	focusInput(select = false): void {
 		this.input.focus({ preventScroll: true });
 		if (select) this.input.select();
+	}
+
+	private focusCameFrom(from: Node | null): void {
+		const section = this.host.sections.find((candidate) => candidate.el.contains(from));
+		if (section) this.cameFrom = section;
 	}
 
 	/** Searches the loaded days again after they, or what they hold, changed. */
@@ -268,7 +277,7 @@ export class JournalFind {
 
 	/**
 	 * Starts a walk of the journal. A `fresh` one is for a new query: it drops
-	 * the old results and picks the first match after the reader. Otherwise
+	 * the old results and picks the match nearest the reader. Otherwise
 	 * every note is counted again in place, so the count does not blink.
 	 */
 	private start(fresh: boolean): void {
@@ -303,7 +312,7 @@ export class JournalFind {
 		}
 
 		const step = this.host.sortStep();
-		const keys = [anchor.key, ...plugin.filteredIndex.keysFrom(anchor.key, step)];
+		const keys = [anchor.key, ...plugin.filteredIndex.keysAround(anchor.key, step)];
 		const pass: FindPass = {
 			query,
 			expression,
@@ -337,7 +346,7 @@ export class JournalFind {
 
 	/** The start of the day the reader is on. */
 	private readerAnchor(): FindAnchor {
-		const section = this.host.findAnchorSection();
+		const section = this.host.findAnchorSection(this.cameFrom);
 		return { key: section?.key ?? createMoment().format(DAY_KEY_FORMAT), order: -1, from: 0 };
 	}
 
@@ -522,70 +531,71 @@ export class JournalFind {
 		this.scheduleCount();
 	}
 
-	/** Selects the first match after the anchor once the walk has settled which one it is. */
+	/** Selects the match nearest the anchor once the walk has settled which one it is. */
 	private choose(pass: FindPass): void {
-		const first = this.firstAfterAnchor(pass);
-		if (first === undefined) return;
+		const nearest = this.nearestToAnchor(pass);
+		if (nearest === undefined) return;
 		pass.choosing = false;
-		if (!first) {
+		if (!nearest) {
 			this.select(null, false);
 			return;
 		}
-		const note = this.live.get(first.path);
+		const note = this.live.get(nearest.path);
 		if (note) {
-			this.select(this.selectionIn(note, first.index), pass.reveal);
+			this.select(this.selectionIn(note, nearest.index), pass.reveal);
 			return;
 		}
-		this.select({ ...first, from: -1, to: -1 }, false);
+		this.select({ ...nearest, from: -1, to: -1 }, false);
 		if (pass.reveal) this.scheduleJump();
 	}
 
-	/** The first match at or after the anchor, wrapping; null when there is none, undefined until settled. */
-	private firstAfterAnchor(pass: FindPass): FindPosition | null | undefined {
+	/**
+	 * The match nearest the anchor: on its own day, the first from the anchor
+	 * on, or else the last before it; otherwise the closest match on the
+	 * nearest day with any, on either side. Null when there is none, undefined
+	 * until settled.
+	 */
+	private nearestToAnchor(pass: FindPass): FindPosition | null | undefined {
 		const { anchor, step } = pass;
-		// The anchor's day is loaded, so its matches past the anchor are known already.
+		// The anchor's day is loaded, so its matches are known already.
+		let earlier: FindPosition | null = null;
 		for (const note of this.live.values()) {
-			if (note.key !== anchor.key || note.order < anchor.order) continue;
+			if (note.key !== anchor.key || !note.ranges.length) continue;
 			const index =
 				note.order === anchor.order
 					? note.ranges.findIndex((range) => range.from >= anchor.from)
-					: note.ranges.length
+					: note.order > anchor.order
 						? 0
 						: -1;
 			if (index >= 0) return { key: anchor.key, path: note.entry.path, index };
+			earlier = { key: anchor.key, path: note.entry.path, index: note.ranges.length - 1 };
 		}
-		const key = this.results.nextKey(anchor.key, step) ?? this.results.firstKey(step);
-		const first = key ? this.results.first(key) : null;
-		if (!first) return pass.done ? null : undefined;
-		return this.settled(pass, first) ? first : undefined;
+		if (earlier) return earlier;
+		let nearest = this.results.first(anchor.key);
+		if (!nearest) {
+			const below = this.results.nextKey(anchor.key, step);
+			const above = this.results.nextKey(anchor.key, (-step) as -1 | 1);
+			// The walk reaches days nearest first, so the nearer one ranks first.
+			if (below && (!above || this.rank(pass, below) <= this.rank(pass, above))) nearest = this.results.first(below);
+			else if (above) nearest = this.results.last(above);
+		}
+		if (!nearest) return pass.done ? null : undefined;
+		return this.settled(pass, nearest) ? nearest : undefined;
 	}
 
-	/**
-	 * Where `at` falls in the pass's walk. The anchor's day comes first, but
-	 * only from the anchor on: its matches before the anchor come last.
-	 */
-	private rank(pass: FindPass, at: FindPosition): number {
-		if (at.key !== pass.anchor.key) return pass.ranks.get(at.key) ?? Infinity;
-		const note = this.live.get(at.path);
-		const order = note?.order ?? this.results.note(at.path)?.order ?? 0;
-		const before =
-			order !== pass.anchor.order
-				? order < pass.anchor.order
-				: (note?.ranges[at.index]?.from ?? 0) < pass.anchor.from;
-		return before ? Infinity : 0;
+	/** Where `key` falls in the pass's walk. */
+	private rank(pass: FindPass, key: string): number {
+		return pass.ranks.get(key) ?? Infinity;
 	}
 
-	/** True once the walk has counted everything from the anchor down to `at`. */
+	/** True once the walk has counted `at`'s day, and every day nearer the anchor. */
 	private settled(pass: FindPass, at: FindPosition): boolean {
-		return pass.done || this.rank(pass, at) < pass.frontier;
+		return pass.done || this.rank(pass, at.key) < pass.frontier;
 	}
 
-	/** Orders two matches by where they fall in the pass's walk. */
-	private compareInWalk(pass: FindPass, left: FindPosition, right: FindPosition): number {
-		const leftRank = this.rank(pass, left);
-		const rightRank = this.rank(pass, right);
-		if (leftRank !== rightRank) return leftRank < rightRank ? -1 : 1;
-		if (left.key !== right.key) return 0;
+	/** Orders two matches down the timeline. */
+	private compareInTimeline(step: -1 | 1, left: FindPosition, right: FindPosition): number {
+		if (left.key !== right.key) return (left.key < right.key ? -1 : 1) * step;
 		const order = (path: string) => this.live.get(path)?.order ?? this.results.note(path)?.order ?? 0;
 		return order(left.path) - order(right.path) || left.index - right.index;
 	}
@@ -606,7 +616,7 @@ export class JournalFind {
 		if (!pass || !direction || this.travelling) return;
 		const selected = this.selected && this.results.indexOf(this.selected, pass.step) >= 0 ? this.selected : null;
 		if (!selected) {
-			// Nothing selected: Enter goes to the first match after the reader.
+			// Nothing selected: Enter goes to the match nearest the reader.
 			if (!pass.choosing) {
 				// A finished walk can start over from anywhere; one under way
 				// has its order fixed by where it started.
@@ -623,9 +633,11 @@ export class JournalFind {
 		const next = direction > 0 ? this.results.after(selected, pass.step) : this.results.before(selected, pass.step);
 		if (!next) return;
 		if (!pass.done) {
-			const ahead = this.compareInWalk(pass, next, selected) > 0;
-			const known = direction > 0 ? ahead && this.settled(pass, next) : !ahead && this.settled(pass, selected);
-			if (!known) return;
+			// Once the walk has counted both days, it has counted every day
+			// between them. A step that wraps around the end of the timeline
+			// waits for the whole journal.
+			const onward = this.compareInTimeline(pass.step, next, selected) * direction > 0;
+			if (!onward || !this.settled(pass, selected) || !this.settled(pass, next)) return;
 		}
 		this.navigation = 0;
 		void this.goTo(next);
@@ -771,6 +783,7 @@ export class JournalFind {
 		this.live.clear();
 		this.liveKeys.clear();
 		this.selected = null;
+		this.cameFrom = null;
 		this.unsubscribe?.();
 		this.unsubscribe = null;
 		this.releaseCorpus?.();

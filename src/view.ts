@@ -823,9 +823,15 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		return this.ready;
 	}
 
-	findAnchorSection(): DaySection | null {
+	/**
+	 * The day the reader is on: the one with focus, else `previous` - the day
+	 * focus left for the find bar - while it is still on screen, else the day
+	 * the scroll position is pinned to.
+	 */
+	findAnchorSection(previous: DaySection | null = null): DaySection | null {
 		const focused = this.sections.find((section) => section.hasFocus);
 		if (focused) return focused;
+		if (previous && this.sections.includes(previous) && !this.isOffScreen(previous.el)) return previous;
 		if (!this.ready || !this.scrollEl || this.scrollEl.clientHeight === 0) return this.anchoring.section;
 		return this.anchoring.sectionNear(this.scrollEl.scrollTop) ?? this.anchoring.section;
 	}
