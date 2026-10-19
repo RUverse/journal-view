@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting, requireApiVersion } from "obsidian";
-import type { SettingDefinition, SettingDefinitionItem, ToggleComponent } from "obsidian";
+import type { DropdownComponent, SettingDefinition, SettingDefinitionItem, ToggleComponent } from "obsidian";
+import { NO_MODELS_MESSAGE, describeProviderError } from "./reflection/provider";
 import type { VaultDailyConfig } from "./dailyNotes";
 import type JournalViewPlugin from "./main";
 
@@ -10,6 +11,10 @@ export const MIN_LOADED_DAYS = 20;
 export const MAX_LOADED_DAYS = 120;
 const LOADED_DAYS_STEP = 5;
 export const MONTH_SEPARATOR_DAY_FORMAT = "dddd, D";
+export const DEFAULT_REFLECTION_SERVER = "http://127.0.0.1:11434";
+export const MIN_REFLECTION_CONTEXT = 4096;
+export const MAX_REFLECTION_CONTEXT = 131072;
+const REFLECTION_CONTEXT_STEP = 4096;
 export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
@@ -82,6 +87,16 @@ export interface JournalViewSettings {
 	dayFilesAttachments: boolean;
 	/** Comma-separated folders whose files are left out of the lists. */
 	dayFilesExcluded: string;
+	/** Where Ollama answers, which reflections send the notes they read to. */
+	reflectionServer: string;
+	/** The model reflections use. Empty = the first installed one. */
+	reflectionModel: string;
+	/** Folder that holds the reflection notes. */
+	reflectionFolder: string;
+	/** The most context a reflection asks a model for, in tokens. */
+	reflectionMaxContext: number;
+	/** Show the Reflect button under today, on desktop. */
+	showReflectButton: boolean;
 }
 
 export const DEFAULT_SETTINGS: JournalViewSettings = {
@@ -111,6 +126,11 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	dayFilesProperty: "",
 	dayFilesAttachments: false,
 	dayFilesExcluded: "",
+	reflectionServer: DEFAULT_REFLECTION_SERVER,
+	reflectionModel: "",
+	reflectionFolder: "Reflections",
+	reflectionMaxContext: 32768,
+	showReflectButton: true,
 };
 
 export const YEAR_PROGRESS_OPTIONS: Record<YearProgressMode, string> = {
@@ -125,7 +145,12 @@ export function isYearProgressMode(value: unknown): value is YearProgressMode {
 }
 
 type SettingKey = keyof JournalViewSettings;
-type TextSettingKey = "headerFormat" | "dayFilesProperty" | "dayFilesExcluded";
+type TextSettingKey =
+	| "headerFormat"
+	| "dayFilesProperty"
+	| "dayFilesExcluded"
+	| "reflectionServer"
+	| "reflectionFolder";
 type InheritedSettingKey = "dateFormat" | "folder" | "templatePath";
 type ToggleSettingKey =
 	| "multipleNotesPerDay"
@@ -136,7 +161,8 @@ type ToggleSettingKey =
 	| "showMonthSeparators"
 	| "groupDaysByYear"
 	| "showDayFiles"
-	| "dayFilesAttachments";
+	| "dayFilesAttachments"
+	| "showReflectButton";
 
 interface JournalSettingBase {
 	name: string;
@@ -173,7 +199,7 @@ interface JournalToggleSetting extends JournalSettingBase {
 interface JournalSliderSetting extends JournalSettingBase {
 	control: {
 		type: "slider";
-		key: "saveDelay" | "maxLoadedDays";
+		key: "saveDelay" | "maxLoadedDays" | "reflectionMaxContext";
 		min: number;
 		max: number;
 		step: number;
@@ -206,7 +232,13 @@ interface JournalDropdownSetting extends JournalSettingBase {
 	control: JournalDropdownControl;
 }
 
+/** A row that draws its own controls, such as one filled from the model server. */
+interface JournalCustomSetting extends JournalSettingBase {
+	control: { type: "custom"; render: (setting: Setting) => void };
+}
+
 type JournalSetting =
+	| JournalCustomSetting
 	| JournalInfoSetting
 	| JournalTextSetting
 	| JournalInheritedSetting
@@ -245,6 +277,10 @@ export class JournalViewSettingTab extends PluginSettingTab {
 
 	private toDefinition(item: JournalSetting): SettingDefinition<SettingKey> {
 		const { name, desc } = item;
+		if (isCustomSetting(item)) {
+			const render = item.control.render;
+			return { name, desc, render: (setting) => render(setting.setName(name).setDesc(desc)) };
+		}
 		if (isInheritedSetting(item)) {
 			const control = item.control;
 			return { name, desc, render: (setting) => this.renderInherited(setting.setName(name).setDesc(desc), control) };
@@ -433,6 +469,49 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
+				heading: "Reflections",
+				items: [
+					{
+						name: "Show Reflect button",
+						desc:
+							"A button under today that asks a model on your computer to reflect on your notes, " +
+							"saved as a note of its own. Desktop only.",
+						control: { type: "toggle", key: "showReflectButton" },
+					},
+					{
+						name: "Server",
+						desc:
+							"The Ollama server a reflection sends the notes it reads to. The default is on this " +
+							"computer; nothing is sent anywhere else.",
+						control: { type: "text", key: "reflectionServer", placeholder: DEFAULT_REFLECTION_SERVER },
+					},
+					{
+						name: "Model",
+						desc: "Gemma 4 26B suits 32 GB of memory or more; Gemma 4 E4B suits 16 GB.",
+						control: { type: "custom", render: (setting) => this.renderModel(setting) },
+					},
+					{
+						name: "Folder",
+						desc: "Folder for reflection notes. It cannot be the daily-note folder.",
+						control: { type: "text", key: "reflectionFolder", placeholder: "Reflections" },
+					},
+					{
+						name: "Maximum context",
+						desc:
+							"The most a reflection asks the model to hold, in tokens. Larger reads more notes " +
+							"before leaving some out, and uses more memory.",
+						control: {
+							type: "slider",
+							key: "reflectionMaxContext",
+							min: MIN_REFLECTION_CONTEXT,
+							max: MAX_REFLECTION_CONTEXT,
+							step: REFLECTION_CONTEXT_STEP,
+						},
+					},
+				],
+			},
+			{
+				type: "group",
 				heading: "Startup",
 				items: [
 					{
@@ -508,8 +587,27 @@ export class JournalViewSettingTab extends PluginSettingTab {
 				break;
 			case "dayFilesProperty":
 			case "dayFilesExcluded":
+			case "reflectionModel":
 				if (typeof value === "string") {
 					this.plugin.settings[key] = value.trim();
+					changed = true;
+				}
+				break;
+			case "reflectionServer":
+				if (typeof value === "string") {
+					this.plugin.settings[key] = value.trim().replace(/\/+$/, "") || DEFAULT_REFLECTION_SERVER;
+					changed = true;
+				}
+				break;
+			case "reflectionFolder":
+				if (typeof value === "string") {
+					this.plugin.settings[key] = reflectionFolderSetting(value);
+					changed = true;
+				}
+				break;
+			case "reflectionMaxContext":
+				if (typeof value === "number" && Number.isFinite(value)) {
+					this.plugin.settings[key] = clampReflectionContext(value);
 					changed = true;
 				}
 				break;
@@ -558,6 +656,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "groupDaysByYear":
 			case "showDayFiles":
 			case "dayFilesAttachments":
+			case "showReflectButton":
 				if (typeof value === "boolean") {
 					this.plugin.settings[key] = value;
 					changed = true;
@@ -632,6 +731,9 @@ export class JournalViewSettingTab extends PluginSettingTab {
 		const setting = new Setting(this.containerEl).setName(definition.name).setDesc(definition.desc);
 		const control = definition.control;
 		switch (control.type) {
+			case "custom":
+				control.render(setting);
+				break;
 			case "inherited":
 				this.renderInherited(setting, control);
 				break;
@@ -674,6 +776,52 @@ export class JournalViewSettingTab extends PluginSettingTab {
 	syncFilterControls(): void {
 		this.hideEmptyToggle?.setValue(this.plugin.settings.hideEmptyDays);
 	}
+
+	/**
+	 * The installed models, asked of the server each time the row is drawn,
+	 * with a line saying whether it answered. An empty choice means the first
+	 * installed model, so the setting keeps working when that one changes.
+	 */
+	private renderModel(setting: Setting): void {
+		const status = setting.descEl.createDiv({ cls: "journal-settings-reflection-status" });
+		let dropdown: DropdownComponent | null = null;
+		setting.addDropdown((component) => {
+			dropdown = component;
+			component.onChange((value) => void this.setControlValue("reflectionModel", value));
+		});
+		const load = async (): Promise<void> => {
+			const select = dropdown;
+			if (!select) return;
+			status.setText("Connecting…");
+			select.selectEl.empty();
+			select.setDisabled(true);
+			try {
+				const models = await this.plugin.reflectionProvider().listModels();
+				if (!models.length) {
+					status.setText(NO_MODELS_MESSAGE);
+					return;
+				}
+				for (const model of models) select.addOption(model.name, model.name);
+				const current = this.plugin.settings.reflectionModel;
+				select.setValue(models.some((model) => model.name === current) ? current : models[0].name);
+				select.setDisabled(false);
+				status.setText(`Connected · ${models.length} ${models.length === 1 ? "model" : "models"}`);
+			} catch (error) {
+				status.setText(describeProviderError(error));
+			}
+		};
+		setting.addExtraButton((button) =>
+			button
+				.setIcon("refresh-cw")
+				.setTooltip("Check the connection again")
+				.onClick(() => void load()),
+		);
+		void load();
+	}
+}
+
+function isCustomSetting(item: JournalSetting): item is JournalCustomSetting {
+	return item.control?.type === "custom";
 }
 
 function isInheritedSetting(item: JournalSetting): item is JournalInheritedSetting {
@@ -686,6 +834,16 @@ function isSettingKey(key: string): key is keyof JournalViewSettings {
 
 export function clampSaveDelay(value: number): number {
 	return Math.max(MIN_SAVE_DELAY, Math.min(MAX_SAVE_DELAY, value));
+}
+
+export function clampReflectionContext(value: number): number {
+	const clamped = Math.max(MIN_REFLECTION_CONTEXT, Math.min(MAX_REFLECTION_CONTEXT, value));
+	return Math.round(clamped / REFLECTION_CONTEXT_STEP) * REFLECTION_CONTEXT_STEP;
+}
+
+/** A folder path without leading or trailing slashes, `Reflections` when left empty. */
+export function reflectionFolderSetting(value: string): string {
+	return value.trim().replace(/^\/+|\/+$/g, "") || DEFAULT_SETTINGS.reflectionFolder;
 }
 
 export function clampLoadedDays(value: number): number {

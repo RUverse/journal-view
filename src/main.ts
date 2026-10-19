@@ -1,4 +1,4 @@
-import { MarkdownView, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
 import { DayFileIndex } from "./dayFiles";
 import { FILES_HOVER_SOURCE } from "./dayFilesList";
@@ -14,8 +14,11 @@ import {
 	JournalViewSettings,
 	LEGACY_FULL_HEADER_FORMAT,
 	MONTH_SEPARATOR_DAY_FORMAT,
+	DEFAULT_REFLECTION_SERVER,
 	clampLoadedDays,
+	clampReflectionContext,
 	clampSaveDelay,
+	reflectionFolderSetting,
 	isYearProgressMode,
 } from "./settings";
 import type { DailyHeaderStyle, DayFilesDate, DaySortDirection, YearProgressMode } from "./settings";
@@ -23,6 +26,11 @@ import { JournalView, VIEW_TYPE_JOURNAL } from "./view";
 import { JournalStatistics } from "./statistics";
 import { FindCorpus } from "./findCorpus";
 import { StatisticsView, VIEW_TYPE_STATISTICS } from "./statisticsView";
+import { OllamaProvider } from "./reflection/ollama";
+import type { ReflectionProvider } from "./reflection/provider";
+import { ReflectionRunner } from "./reflection/runner";
+import { ReflectionStore } from "./reflection/store";
+import { ReflectionPresetModal } from "./reflection/presetModal";
 
 type EntryDirection = -1 | 0 | 1;
 
@@ -46,6 +54,10 @@ export default class JournalViewPlugin extends Plugin {
 	statistics!: JournalStatistics;
 	/** Note bodies journal-wide find has read, shared by every view. */
 	findCorpus!: FindCorpus;
+	/** The reflection notes, by the day they were made. */
+	reflections!: ReflectionStore;
+	/** Reflections being written. */
+	reflectionRuns!: ReflectionRunner;
 	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
 	private settingsTab: JournalViewSettingTab | null = null;
@@ -100,6 +112,9 @@ export default class JournalViewPlugin extends Plugin {
 		this.statistics = this.addChild(new JournalStatistics(this.app));
 		this.findCorpus = this.addChild(new FindCorpus(this.app));
 		this.index = new DailyNoteIndex(this.app, this.daily);
+		// After the index, which it asks so a daily note is never taken for a reflection.
+		this.reflections = this.addChild(new ReflectionStore(this.app, this));
+		this.reflectionRuns = this.addChild(new ReflectionRunner(this));
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
 		this.dayFiles = new DayFileIndex(this.app, this.index, this.daily, () => this.settings);
 		// File history never makes an empty day eligible in note-only mode.
@@ -201,6 +216,12 @@ export default class JournalViewPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "create-reflection",
+			name: "Create reflection",
+			callback: () => this.createReflection(),
+		});
+
+		this.addCommand({
 			id: "go-to-today",
 			name: "Go to today",
 			callback: () => void this.openJournalEntry(0),
@@ -233,6 +254,32 @@ export default class JournalViewPlugin extends Plugin {
 		void Promise.all(flushes).catch((error: unknown) => {
 			console.error("Journal View: could not flush all pending edits during unload", error);
 		});
+	}
+
+	/** The model server reflections talk to, as currently configured. */
+	reflectionProvider(): ReflectionProvider {
+		return new OllamaProvider(this.settings.reflectionServer);
+	}
+
+	/** Picks a preset and writes its reflection under today, in the journal. */
+	private createReflection(): void {
+		new ReflectionPresetModal(this.app, (preset) => {
+			this.reflectionRuns.start(preset);
+			void this.openJournalEntry(0);
+		}).open();
+	}
+
+	/** Opens Obsidian's settings on this plugin's tab. */
+	openSettingsTab(): void {
+		// Not in Obsidian's typings.
+		const setting = (this.app as typeof this.app & { setting?: { open(): void; openTabById(id: string): void } })
+			.setting;
+		if (!setting) {
+			new Notice("Journal view: could not open the plugin settings");
+			return;
+		}
+		setting.open();
+		setting.openTabById(this.manifest.id);
 	}
 
 	async openStatistics(): Promise<void> {
@@ -401,6 +448,16 @@ export default class JournalViewPlugin extends Plugin {
 			dayFilesProperty: stringSetting(saved.dayFilesProperty, DEFAULT_SETTINGS.dayFilesProperty).trim(),
 			dayFilesAttachments: booleanSetting(saved.dayFilesAttachments, DEFAULT_SETTINGS.dayFilesAttachments),
 			dayFilesExcluded: stringSetting(saved.dayFilesExcluded, DEFAULT_SETTINGS.dayFilesExcluded),
+			reflectionServer:
+				stringSetting(saved.reflectionServer, DEFAULT_REFLECTION_SERVER).trim().replace(/\/+$/, "") ||
+				DEFAULT_REFLECTION_SERVER,
+			reflectionModel: stringSetting(saved.reflectionModel, DEFAULT_SETTINGS.reflectionModel).trim(),
+			reflectionFolder: reflectionFolderSetting(stringSetting(saved.reflectionFolder, DEFAULT_SETTINGS.reflectionFolder)),
+			reflectionMaxContext:
+				typeof saved.reflectionMaxContext === "number" && Number.isFinite(saved.reflectionMaxContext)
+					? clampReflectionContext(saved.reflectionMaxContext)
+					: DEFAULT_SETTINGS.reflectionMaxContext,
+			showReflectButton: booleanSetting(saved.showReflectButton, DEFAULT_SETTINGS.showReflectButton),
 		};
 	}
 
@@ -423,6 +480,7 @@ export default class JournalViewPlugin extends Plugin {
 		await this.saveData(this.settings);
 		this.filteredIndex?.ensureCurrent();
 		this.dayFiles?.ensureCurrent();
+		this.reflections?.ensureCurrent();
 		this.syncDailyNoteActions();
 		if (scheduleViewUpdate) this.notifyViews();
 	}

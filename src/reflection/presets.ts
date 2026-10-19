@@ -100,8 +100,8 @@ export const BUILT_IN_PRESETS: readonly ReflectionPreset[] = [
 	},
 ];
 
-/** How a preset's range reads in its menu item: "14 days", "earlier years". */
+/** How a preset's range reads in its menu item: "14 days". Empty for a date over the years, which its name says. */
 export function scopeLabel(scope: ReflectionScope): string {
-	if (scope.kind === "this-day") return "earlier years";
+	if (scope.kind === "this-day") return "";
 	return scope.beforeToday ? `${scope.days} days before today` : `${scope.days} days`;
 }

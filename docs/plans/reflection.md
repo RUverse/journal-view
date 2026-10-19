@@ -329,6 +329,7 @@ can move a score by about a point, so the last round used two samples per model.
 | Model | Memory once loaded | Short presets, last round | *Open loops* and *Recurring themes* | Time per preset | Verdict |
 | --- | --- | --- | --- | --- | --- |
 | `gemma4:26b` | ~18 GB resident | 4.4 | Open loops 5 in both samples; Recurring themes 3 | 1–9 s | Suggest with 32 GB or more |
+| `qwen3.8:27b-mlx` | 23 GB | 3.75 | Open loops 5 in both samples; Recurring themes 4, the best | 3–25 s | The best at long ranges, wordier elsewhere; Apple silicon only |
 | `gemma4:12b` | 15 GB | 4.75 | Files one open plan as followed up; Recurring themes 2–4 | 1–11 s | Only with 24 GB or more; little gain over 26b's memory |
 | `gemma4:e4b` | 10 GB | 3.25 | Open loops 2–3, or 4–5 with thinking (6–8 s); Recurring themes 2 | 1–5 s | Suggest with 16 GB |
 | `qwen3:8b` | 6 GB | 2.75 | 1.5; usable on Open loops only with thinking (25–29 s) | 2–9 s | Not suggested |
@@ -356,8 +357,9 @@ By preset, with the final wording:
   and each plan under one heading, was checked by hand in two samples per Gemma 4 model rather than
   graded: right every time on `gemma4:26b`, while `gemma4:12b` and `gemma4:e4b` still filed the
   bookshelf under **Followed up** unless `gemma4:e4b` was thinking.
-- **Recurring themes:** the weakest preset, 3 at best. Models read a walk on 13 October as the runs
-  resuming, and rarely say a worry faded. Writing the cut-off date into the prompt helped a little,
+- **Recurring themes:** the weakest preset: 3 at best for every model but `qwen3.8:27b-mlx`, which
+  scored 4 in both samples. The others read a walk on 13 October as the runs resuming, and rarely
+  say a worry faded. Writing the cut-off date into the prompt helped a little,
   since models cannot count back from today. The two-pass digest scored no better for any model at
   five times the time, because its first pass dropped details such as the worry's last mention; it
   is not planned.
@@ -441,8 +443,12 @@ the plugin has to be disabled and re-enabled to load a new build.
 ## Risks
 
 - **`fetch` in the review.** The Obsidian lint config warns on `fetch` and suggests `requestUrl`, which
-  cannot stream. Use `fetch` only for the streaming chat call, in `ollama.ts`, with a scoped disable
-  explaining why. Everything else uses `requestUrl`.
+  cannot stream, and it treats disabling that rule as an error of its own. `ollama.ts` calls
+  `window.fetch` for the streaming chat call only, with a comment saying why; everything else uses
+  `requestUrl`.
+- **`num_ctx` on MLX models.** Ollama's MLX runner ignored `num_ctx` in testing and evaluated the whole
+  prompt anyway, so on those models the budget does not cap what is read; dropping notes that do not
+  fit is what keeps a prompt in bounds.
 - **Ollama blocking requests from Obsidian.** Ollama allows `app://*` origins by default: checked on
   2026-10-19 with Ollama 0.40.6, where a `GET /api/tags` and a JSON `POST /api/chat` from the test
   vault both got through, preflight included. Other versions or a custom `OLLAMA_ORIGINS` may differ;

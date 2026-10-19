@@ -226,6 +226,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerDomEvent(this.containerEl, "keydown", (event) => this.onKeydown(event), { capture: true });
 		this.registerVaultEvents();
 		this.register(this.plugin.dayFiles.onChanged((keys) => this.onDayFilesChanged(keys)));
+		this.register(this.plugin.reflections.onChanged((keys) => this.onReflectionsChanged(keys)));
+		this.register(this.plugin.reflectionRuns.onChanged((key) => this.onReflectionsChanged([key])));
 
 		const initialTarget = this.initialTarget;
 		this.initialTarget = undefined;
@@ -1414,6 +1416,26 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	}
 
 	/**
+	 * Reflections on some days came, changed or went (every day's, for null),
+	 * or one is being written. Only loaded days draw them; the resize anchor
+	 * absorbs a card growing above the reader.
+	 */
+	private onReflectionsChanged(keys: string[] | null): void {
+		if (!this.ready) return;
+		const wanted = keys === null ? null : new Set(keys);
+		for (const section of this.sections) {
+			if (!wanted || wanted.has(section.key)) section.refreshReflections();
+		}
+	}
+
+	/** Moves the journal to a note a reflection cites, on its day. */
+	revealNote(path: string): void {
+		const key = this.plugin.index.keyForPath(path);
+		if (!key) return;
+		this.goToCommandDate(createMoment(key, DAY_KEY_FORMAT, true), false, path);
+	}
+
+	/**
 	 * Files from some days came or went (every day's, for null). A sync can
 	 * bring in thousands of files one event at a time, so the days are listed
 	 * again once a frame rather than once a file.
@@ -1627,7 +1649,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// Appearance settings do not change the editor or the day window. Repaint
 		// their small metadata strips in place and let the resize anchor absorb
 		// any height change without moving the reader.
-		for (const section of this.sections) section.refreshMetadata();
+		for (const section of this.sections) {
+			section.refreshMetadata();
+			section.refreshReflections();
+		}
 		const signature = this.rebuildSettingsSignature();
 		if (signature === this.appliedSettingsSignature) {
 			const previousMax = this.appliedMaxLoadedDays;

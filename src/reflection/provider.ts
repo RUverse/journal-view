@@ -60,3 +60,21 @@ export interface ReflectionProvider {
 	/** Streams one answer. Throws `ProviderError("aborted")` when the signal fires. */
 	chat(request: ChatRequest): Promise<ChatResult>;
 }
+
+/** What to tell the reader when the server answers but has nothing to run. */
+export const NO_MODELS_MESSAGE = "Ollama answers, but no model is installed yet (try: ollama pull gemma4:e4b)";
+
+/** What to tell the reader when a request to the model server fails. */
+export function describeProviderError(error: unknown): string {
+	if (error instanceof ProviderError) {
+		switch (error.kind) {
+			case "unreachable":
+				return "Ollama is not answering. Install it from ollama.com and start it, then try again.";
+			case "aborted":
+				return "Stopped.";
+			default:
+				return error.message;
+		}
+	}
+	return error instanceof Error ? error.message : String(error);
+}
