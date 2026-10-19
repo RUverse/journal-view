@@ -18,7 +18,7 @@ export interface DaySequence {
 export interface OrderedDayIndex extends DaySequence {
 	readonly version: number;
 	readonly size: number;
-	keysFrom(key: string, direction: -1 | 1): string[];
+	keysAround(key: string, direction: -1 | 1): string[];
 }
 
 /** The first of the sorted `keys` strictly after `key`. */
@@ -43,6 +43,42 @@ export function keyBefore(keys: readonly string[], key: string): string | null {
 		else high = mid;
 	}
 	return low > 0 ? keys[low - 1] : null;
+}
+
+/** Days since 1970 for a `YYYY-MM-DD` key. */
+function dayNumber(key: string): number {
+	return Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10))) / 86400000;
+}
+
+/** How many days apart two `YYYY-MM-DD` keys are, either way. */
+export function daysApart(left: string, right: string): number {
+	return Math.abs(dayNumber(left) - dayNumber(right));
+}
+
+/**
+ * Every one of the sorted `keys` but `key` itself, nearest it first, so a
+ * walk through them spreads out from `key` both ways. Of two days equally
+ * far either side, the one in `direction` comes first.
+ */
+export function keysAround(keys: readonly string[], key: string, direction: -1 | 1): string[] {
+	// Daily-note keys are YYYY-MM-DD, so lexical and chronological order agree.
+	let later = 0;
+	let high = keys.length;
+	while (later < high) {
+		const mid = (later + high) >> 1;
+		if (keys[mid] <= key) later = mid + 1;
+		else high = mid;
+	}
+	let earlier = keys[later - 1] === key ? later - 2 : later - 1;
+	const origin = dayNumber(key);
+	const around: string[] = [];
+	while (earlier >= 0 || later < keys.length) {
+		const back = earlier >= 0 ? origin - dayNumber(keys[earlier]) : Infinity;
+		const ahead = later < keys.length ? dayNumber(keys[later]) - origin : Infinity;
+		if (back < ahead || (back === ahead && direction < 0)) around.push(keys[earlier--]);
+		else around.push(keys[later++]);
+	}
+	return around;
 }
 
 /** Where a path sits in the journal: the day it belongs to, and when in that day. */
@@ -290,20 +326,11 @@ export class DailyNoteIndex implements OrderedDayIndex {
 	}
 
 	/**
-	 * Every indexed day after `key` in `direction`, wrapping once at the end.
-	 * The starting key itself is omitted. Find uses this to scan outward without
-	 * materialising empty calendar days.
+	 * Every indexed day but `key`, nearest it first. Find uses this to search
+	 * outward from the reader without materialising empty calendar days.
 	 */
-	keysFrom(key: string, direction: -1 | 1): string[] {
-		// Daily-note keys are YYYY-MM-DD, so lexical and chronological order agree.
-		const list = this.list();
-		if (direction > 0) {
-			return [...list.filter((candidate) => candidate > key), ...list.filter((candidate) => candidate < key)];
-		}
-		return [
-			...list.filter((candidate) => candidate < key).reverse(),
-			...list.filter((candidate) => candidate > key).reverse(),
-		];
+	keysAround(key: string, direction: -1 | 1): string[] {
+		return keysAround(this.list(), key, direction);
 	}
 
 	private add(note: IndexedNote): void {
