@@ -8,9 +8,9 @@ learned over the last two weeks, what this date looked like in past years, plans
 The reflection is saved as a note and shown on the day it was made, inside a bordered card that sets
 it apart from what you wrote yourself.
 
-The repository's [AGENTS.md](../../AGENTS.md) still applies: branch from the latest `dev`, open
-each step below as its own pull request into `dev`, run `npm run typecheck`, `npm run lint` and
-`npm run build`, and verify in the test vault.
+The repository's [AGENTS.md](../../AGENTS.md) still applies: the work happens on the
+`feature/reflection` branch and lands through its one pull request into `dev`. Run
+`npm run typecheck`, `npm run lint` and `npm run build`, and verify in the test vault.
 
 ## Contents
 
@@ -243,9 +243,9 @@ rather than adding another cache.
 
 ## Order of work
 
-Each step is its own pull request into `dev`, branched from the latest `dev` (or stacked on the
-previous step while that one waits for review). Don't cut a release from `dev` between steps 2 and 4:
-until the button lands, the settings would describe a feature nobody can reach.
+All steps land on `feature/reflection`, one or more commits each, and reach `dev` together through
+the feature's single pull request. Merge the latest `dev` into the branch when it falls behind. Keep
+the build passing after every step, so the branch can be tested at any point.
 
 ### 0. Spike: judge the reflections before building the UI
 
@@ -337,12 +337,17 @@ the plugin has to be disabled and re-enabled to load a new build.
 - **`fetch` in the review.** The Obsidian lint config warns on `fetch` and suggests `requestUrl`, which
   cannot stream. Use `fetch` only for the streaming chat call, in `ollama.ts`, with a scoped disable
   explaining why. Everything else uses `requestUrl`.
-- **Ollama blocking requests from Obsidian.** Ollama is believed to allow `app://*` origins by
-  default; check it first (see the testing section above). The fallback keeps the feature working
-  either way.
+- **Ollama blocking requests from Obsidian.** Ollama allows `app://*` origins by default: checked on
+  2026-10-19 with Ollama 0.40.6, where a `GET /api/tags` and a JSON `POST /api/chat` from the test
+  vault both got through, preflight included. Other versions or a custom `OLLAMA_ORIGINS` may differ;
+  the fallback keeps the feature working either way.
 - **Tool calling.** Small models often skip tools or call them with bad arguments. Validate arguments,
   return clear errors the model can recover from, and fall back to the range picker when a model has
   no tool support.
+- **Thinking models.** `qwen3`, and on the test Mac `qwen3.8` and `gemma4`, report the `thinking`
+  capability and by default reason before answering, in a separate `message.thinking` field. That
+  text must not stream into the card or be saved, and it uses up context. Send `think: false` for
+  presets, or keep the thinking apart and show `Thinking…` in the status line; decide in the spike.
 - **Speed.** On a machine without a GPU, a 90-day preset can take minutes. The menu shows the size
   up front, and Stop always works.
 - **Scroll position.** Text streaming into a card above the reader (newest first) must not move what
