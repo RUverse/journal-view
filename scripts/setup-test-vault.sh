@@ -111,11 +111,23 @@ tags:
 ## Notes
 MARKDOWN
 
+# The journal itself: fictional notes dated relative to today, for reading the
+# timeline and judging reflections. `npm run sample-journal` moves it up to
+# today later, so it is only written here the first time.
+if [ -f "$vault/.sample-journal.json" ]; then
+	echo "  kept    the sample journal (npm run sample-journal moves it up to today)"
+else
+	node "$root/scripts/sample-journal.mjs"
+fi
+
+# The notes below sit in May 2026, before the sample journal's 90 days, so the
+# two never share a day.
+
 # A note that already exists, to check that days with content are left alone.
-write Journal/2026-08-02.md <<'MARKDOWN'
+write Journal/2026-05-17.md <<'MARKDOWN'
 ---
 type: daily
-date: 2026-08-02
+date: 2026-05-17
 weekday: Sunday
 mood: steady
 tags:
@@ -129,10 +141,10 @@ tags:
 ## Notes
 MARKDOWN
 
-write Journal/2026-07-30.md <<'MARKDOWN'
+write Journal/2026-05-14.md <<'MARKDOWN'
 ---
 type: daily
-date: 2026-07-30
+date: 2026-05-14
 weekday: Thursday
 mood: quiet
 tags:
@@ -146,9 +158,9 @@ tags:
 ## Notes
 MARKDOWN
 
-# A note named with more after the date, which joins 2 August only while
+# A note named with more after the date, which joins 17 May only while
 # Multiple notes per day is on.
-write "Journal/2026-08-02 Birthday.md" <<'MARKDOWN'
+write "Journal/2026-05-17 Birthday.md" <<'MARKDOWN'
 A note with text after the date in its name.
 MARKDOWN
 
@@ -156,7 +168,7 @@ MARKDOWN
 # the date it was written in a property, which falls on a day without a note.
 write Reading/Article.md <<'MARKDOWN'
 ---
-created: 2026-08-01T09:30
+created: 2026-05-16T09:30
 ---
 An article saved on a day without a daily note.
 MARKDOWN
@@ -279,20 +291,20 @@ device, open this vault, and select Obsidian under **Develop -> [device]**.
 
 ## Multiple notes per day checks
 
-`Journal/2026-08-02 Birthday.md` has text after the date in its name.
+`Journal/2026-05-17 Birthday.md` has text after the date in its name.
 
-1. **Off by default.** Today's card has no add button, and 2 August shows only
+1. **Off by default.** Today's card has no add button, and 17 May shows only
    its plain note.
-2. **Turn it on** in Settings -> Journal View. The birthday note joins 2 August
+2. **Turn it on** in Settings -> Journal View. The birthday note joins 17 May
    under a divider labelled `Birthday`. Once today has a note, the bottom right
    of its card shows Add a note to today; no other day has it, and day headers
    keep only Delete and Open note in a tab.
 3. **Add twice within a minute.** Creates `<date> HH-mm`, then `<date> HH-mm-1`,
    under today, each from the template, with the cursor in the new note.
 4. **Rename a note by its title.** Select `Birthday`, type `Party`, press Enter:
-   the file becomes `2026-08-02 Party.md` and stays under 2 August. Escape keeps
+   the file becomes `2026-05-17 Party.md` and stays under 17 May. Escape keeps
    the name; a title with `/` or `#`, or one another note has, is refused with a
-   notice. A plain `2026-08-02.md` has no title to select.
+   notice. A plain `2026-05-17.md` has no title to select.
 5. **Migration from 1.4.0.** Disable the plugin, set `"dateFormat": "YYYY-MM-DD*"`
    in `.obsidian/plugins/journal-view/data.json`, enable it again: the Date
    format field reads `YYYY-MM-DD` and the toggle is on.
@@ -307,7 +319,7 @@ notes. Turn on **File modification history** in the toolbar's Customization menu
 1. **Today's list.** Both files sit under the day they were created, folded into
    one line. Opening the list shows them; folding it leaves only the count.
 2. **A created date property.** Set **Created date property** to `created`. The
-   article moves to 1 August, which has no note. With **Only show days that have
+   article moves to 16 May, which has no note. With **Only show days that have
    a note** on, that day stays hidden and disabled in **Go to date**. Turn the
    option off: the day is available and the calendar marks it with a hollow dot.
 3. **Placement and filters.** History sits outside today’s highlighted note card.
@@ -373,6 +385,28 @@ and record which paths they touch. A complete leap year should require at most
 366 initial reads, no unrelated note reads, and no reads on an unchanged cached
 revisit. Also measure year-switch latency with multi-megabyte daily notes and
 confirm that the cache stays bounded after visiting more than six full years.
+
+## Sample journal
+
+Most of `Journal/` is a fictional journal: about 90 days of entries up to
+today, plus today's date in each of the three previous years, written from
+`scripts/sample-journal.md` with patterns planted to judge reflections against.
+Its answer key is in `docs/plans/reflection.md`. The fixtures above sit in May
+2026, before those 90 days. Move the journal up to today with:
+
+```bash
+npm run sample-journal
+```
+
+That replaces the notes it wrote last time, as listed in `.sample-journal.json`,
+except any you have edited since; it never writes over a note it did not create.
+
+To run the reflection presets against local Ollama models and record the
+results under `.reflection-spike/` (hidden from Obsidian):
+
+```bash
+node scripts/reflection-spike.mjs --models llama3.1:8b,qwen3:8b,gemma3:4b
+```
 
 ## Resetting
 

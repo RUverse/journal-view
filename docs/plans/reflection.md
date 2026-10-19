@@ -249,7 +249,7 @@ the build passing after every step, so the branch can be tested at any point.
 
 ### 0. Spike: judge the reflections before building the UI
 
-The current test vault is filler (`word word word…`), useless for judging a reflection. Before any
+The test vault's notes were filler (`word word word…`), useless for judging a reflection. Before any
 UI:
 
 1. Add a realistic sample journal to the test vault, dated relative to the day the script runs:
@@ -269,6 +269,30 @@ UI:
 
 The spike decides whether the presets are good, which the UI cannot fix later. Keep the sample
 journal; the script can be dropped once `context.ts` exists.
+
+#### The sample journal
+
+The journal is now the test vault's own `Journal/`. `scripts/sample-journal.md` holds 66 entries
+keyed by "days ago" and "years ago": 63 between 89 days ago and today, with ordinary gaps and one
+5-day gap (43–39, a visit to the parents), and this date 1, 2 and 3 years ago. `npm run test-vault`
+writes them the first time, and `npm run sample-journal` moves them up to today. The setup script's
+fixtures moved to May 2026, before those 90 days.
+
+The narrator is a product designer living alone; Mina is their younger sister, Theo a coworker and
+friend, Dana their manager. Planted patterns, by days ago:
+
+| Pattern | Where | A good reflection |
+| --- | --- | --- |
+| Worry that fades: a reorganization at work | Heavy 86–60 (9 entries), lighter 57–35, last at 24 ("hadn't thought about it in over a week") | Names it, and says it faded once names were announced at 51 |
+| Habit dropped: morning runs | First run 80, 5 km at 62, sore knee 50, "I should get back to it" 45, then nothing | Notices the runs stopped after 45 |
+| Two plans never mentioned again | 27: write to Mr. Farahani, an old art teacher. 15: build a hallway bookshelf | *Open loops* lists both |
+| Decoys that were followed up | Bike brakes 22 → fixed 17; helping Mina move 19 → done 9; client presentation 13 → held 5 | *Open loops* leaves them out |
+| A lesson stated plainly | 6: walking away for twenty minutes beats two hours of forcing a design | *What I learned* finds it, cited to 6 |
+| A lesson left implicit | 11: Mina calms down once the narrator stops offering solutions and listens | A strong answer finds it; not required |
+| A person who comes up often | Mina in 17 entries: flat hunt from 65, lease at 30, move at 9, dinner at hers at 3 | *Recurring themes* names her and her move |
+| Private entry | 33, tagged `private`: a doctor's visit for headaches; 20: mostly gone after less coffee | Reads only when filters let it through |
+| The last week | 6 good, 5 a bad client presentation, 4 tired, 3 dinner at Mina's, 2 steady, 1 drained but a good book, 0 calm | *Week in review* gets the high (3) and low (5) |
+| This day over the years | 3 years: just moved, lonely, wants friends and meaningful work. 2: new job, likes Theo, Mina visits. 1: Mina has moved to the city, rent going up. Today: settled, Mina 10 minutes away | Traces loneliness to closeness, citing each year |
 
 ### 1. Reflection files and cards
 
