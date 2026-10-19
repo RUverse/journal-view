@@ -12,7 +12,8 @@
 //   npm run sample-journal
 //   node scripts/reflection-spike.mjs [--models a,b] [--presets id,id]
 //     [--today YYYY-MM-DD] [--folder path] [--server url] [--temperature n]
-//     [--max-context tokens] [--runs n] [--think] [--dry-run]
+//     [--max-context tokens] [--runs n] [--think auto|on|off] [--digest]
+//     [--dry-run]
 //
 // Results land in test-vault/.reflection-spike/<run>/, which Obsidian hides.
 
@@ -24,6 +25,8 @@ const DEFAULT_MODELS = ["llama3.1:8b", "qwen3:8b", "gemma3:4b"];
 const CHARS_PER_TOKEN = 4;
 const ANSWER_TOKENS = 1024;
 const CONTEXT_STEP = 2048;
+/** Room for reasoning and the answer, when a model thinks first. */
+const THINKING_TOKENS = 12288;
 
 export const SYSTEM_PROMPT = `You read someone's private journal and write a short reflection back to them.
 
@@ -34,53 +37,63 @@ export const SYSTEM_PROMPT = `You read someone's private journal and write a sho
 - Keep it to about 150–300 words unless the request asks otherwise.`;
 
 /** Repeated after the notes, where small models still attend to it. */
-export const REMINDER = "Cite only with the links exactly as written in the headings above, such as [[2026-10-05]], one date per link. Use only what the notes say. No praise, no advice, no closing summary.";
+export const REMINDER = "Write to me as \"you\". Cite only with the links exactly as written in the headings above, such as [[2026-10-05]], one date per link. Use only what the notes say. No praise, no advice, no closing summary.";
 
-/** Mirrors the planned built-in presets. `days` counts today. */
+/**
+ * Mirrors the planned built-in presets. `days` counts today unless the range
+ * ends `beforeToday`. `thinking` asks models that can reason first to do so;
+ * `digest` reads the range in parts of that many days first, when the spike
+ * runs with --digest.
+ */
 export const PRESETS = [
 	{
 		id: "this-day",
 		name: "This day over the years",
 		scope: { kind: "this-day" },
 		prompt: "These are my notes from this date in earlier years, and from today. What was I doing, worrying about and hoping for on this date each year, and what has changed since?",
-		format: "Write one short paragraph per note, oldest first, each starting with that note's link. Then two or three sentences on what changed between the first note and today.",
+		format: "Write one short paragraph per note, oldest first. Start each with the note's link alone, then say in your own words who was around me and where, and what I worried about and hoped for. End with two or three sentences setting the first note's hopes against today's note.",
 	},
 	{
 		id: "what-i-learned",
 		name: "What I learned",
 		scope: { kind: "days", days: 14 },
 		prompt: "What did I learn or realize over these two weeks?",
-		format: "List up to five lessons as bullets, most important first. Each bullet is the lesson in one sentence, followed by the link of the note it comes from. Only include lessons the notes show; skip days that have none.",
+		format: "Most fortnights hold one to three lessons. Include one only where a note states or plainly shows a realization; a hard day is not a lesson. List them as bullets: the lesson in close to my own words, then the link of the note it comes from.",
 	},
 	{
 		id: "week-in-review",
 		name: "Week in review",
 		scope: { kind: "days", days: 7 },
 		prompt: "Review my week: the high points, the low points, and how my energy went.",
-		format: "Use three short sections headed **High points**, **Low points** and **Energy**, each a few bullets with the link of the note they come from. End with one line: **A question for next week:** followed by a single question.",
+		format: "Use three short sections. **High points** and **Low points** are a few bullets each, with the link of the note they come from. **Energy** is two or three sentences following it day by day from the first note to today, using each note's mood and words, citing each day. End with one line: **A question for next week:** followed by a single question about something the week left open.",
 	},
 	{
 		id: "open-loops",
 		name: "Open loops",
-		scope: { kind: "days", days: 30 },
-		prompt: "Find plans and intentions I wrote down (\"I want to…\", \"I should…\", \"try…\") that no later note mentions again.",
-		format: "Before listing a plan, look through the later notes for it, and leave it out if any later note follows it up. List each remaining plan as a bullet: the plan in a few words, the link of the note where I wrote it, and what I said about it. If there are none, say so.",
+		scope: { kind: "days", days: 30, beforeToday: true },
+		prompt: "Find the plans and intentions I wrote down (\"I want to…\", \"I should…\", \"try…\"), and check whether any later note follows each one up.",
+		format: "List each plan once, under one of two headings. **Still open**: the plan in a few words, the link of the note where I wrote it, and what I said about it. **Followed up**: the plan in a few words and the link of the later note that follows it up. If a heading would be empty, write \"None.\" under it.",
+		thinking: true,
 	},
 	{
 		id: "recurring-themes",
 		name: "Recurring themes",
 		scope: { kind: "days", days: 90 },
 		prompt: "Which people, worries, habits and topics keep returning in these notes, and how did each one shift over time?",
-		format: "Pick the three to five that come up most. For each, write its name in bold, then two or three sentences on how it changed from its first mention to its last, citing both notes. Say plainly when something stopped appearing.",
+		format: "Pick the three to five that come up most. For each, write its name in bold, then two or three sentences on how it changed, with the link of the first note that mentions it and the link of the last note that mentions it. When that last note is more than two weeks before today, say it stopped appearing after that note.",
+		digest: 14,
 	},
 	{
 		id: "questions",
 		name: "Questions to sit with",
 		scope: { kind: "days", days: 14 },
 		prompt: "Ask me three questions worth thinking about, each tied to a specific entry.",
-		format: "Number the three questions. After each, give the link of the entry it comes from and one sentence on what that entry says. Do not answer the questions or give advice.",
+		format: "Number the three questions. For each, give the link of the entry, one sentence on what it says, then the question. Ask about something the entry leaves open (a choice, a tension, a change it does not explain), never something it already answers. Do not answer the questions or give advice.",
 	},
 ];
+
+/** The first pass of a digest: what each part of a long range is about. */
+const DIGEST_PROMPT = "List the people, worries, habits and topics in these notes. One bullet each: the name in bold, then the link of every note that mentions it, then a few words on what those notes say about it, in order. Use only the links in the headings above.";
 
 function parseArgs(argv) {
 	const value = (flag, fallback) => {
@@ -96,7 +109,8 @@ function parseArgs(argv) {
 		temperature: value("--temperature", undefined),
 		maxContext: Number(value("--max-context", "32768")),
 		runs: Number(value("--runs", "1")),
-		think: argv.includes("--think"),
+		think: value("--think", "auto"),
+		digest: argv.includes("--digest"),
 		dryRun: argv.includes("--dry-run"),
 	};
 }
@@ -110,7 +124,7 @@ function readNotes(folder) {
 		.map((name) => {
 			const date = basename(name, ".md");
 			const text = readFileSync(join(folder, name), "utf8");
-			return { date, link: `[[${date}]]`, body: stripFrontmatter(text), tags: tagsOf(text) };
+			return { date, link: `[[${date}]]`, body: stripFrontmatter(text), properties: propertiesOf(text) };
 		});
 }
 
@@ -118,9 +132,28 @@ function stripFrontmatter(text) {
 	return text.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
 }
 
-function tagsOf(text) {
+/** Reads simple YAML: `key: value` lines and `key:` followed by `  - item` lines. */
+function propertiesOf(text) {
 	const frontmatter = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "";
-	return [...frontmatter.matchAll(/^\s+- (\S+)$/gm)].map((m) => m[1]);
+	const properties = {};
+	let list = null;
+	for (const line of frontmatter.split("\n")) {
+		const item = /^\s+- (.+)$/.exec(line);
+		if (item && list) {
+			list.push(item[1].trim());
+			continue;
+		}
+		const pair = /^([\w-]+):\s*(.*)$/.exec(line);
+		if (!pair) continue;
+		if (pair[2] === "") {
+			list = [];
+			properties[pair[1]] = list;
+		} else {
+			list = null;
+			properties[pair[1]] = pair[2].trim();
+		}
+	}
+	return properties;
 }
 
 function parseDate(date) {
@@ -135,9 +168,12 @@ function selectNotes(notes, scope, today) {
 		const notesOnDate = notes.filter((n) => n.date.slice(5) === monthDay && n.date <= todayKey);
 		return { notes: notesOnDate, from: notesOnDate[0]?.date ?? todayKey, to: todayKey };
 	}
-	const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (scope.days - 1));
+	// A range before today ends yesterday: today's plans cannot be open loops yet.
+	const end = scope.beforeToday ? new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1) : today;
+	const start = new Date(end.getFullYear(), end.getMonth(), end.getDate() - (scope.days - 1));
 	const from = formatDate(start);
-	return { notes: notes.filter((n) => n.date >= from && n.date <= todayKey), from, to: todayKey };
+	const to = formatDate(end);
+	return { notes: notes.filter((n) => n.date >= from && n.date <= to), from, to };
 }
 
 // --- Context -----------------------------------------------------------------
@@ -156,8 +192,27 @@ function demoteHeadings(body) {
 	return body.replace(/^(#{1,3}) /gm, (_, hashes) => "#".repeat(Math.min(6, hashes.length + 3)) + " ");
 }
 
-function formatNote(note, withYear) {
-	return `### ${note.link} · ${longDate(note.date, withYear)}\n\n${demoteHeadings(note.body)}`;
+/**
+ * One line of the note's properties, leaving out what tells the model nothing:
+ * empty values, values every note in the range shares (`type: daily`, the tag
+ * `journal`), and values that restate the note's own date.
+ */
+function propertyLine(note, notes) {
+	const shared = (key, value) => notes.every((other) => [other.properties[key]].flat().includes(value));
+	const restatesDate = (value) =>
+		value === note.date || value.toLowerCase() === longDate(note.date, false).split(" ")[0].replace(",", "").toLowerCase();
+	const parts = [];
+	for (const [key, raw] of Object.entries(note.properties)) {
+		const values = [raw].flat().filter((value) => value && !restatesDate(value) && (notes.length < 2 || !shared(key, value)));
+		if (values.length) parts.push(`${key}: ${values.join(", ")}`);
+	}
+	return parts.join(" · ");
+}
+
+function formatNote(note, withYear, notes) {
+	const properties = propertyLine(note, notes);
+	const heading = `### ${note.link} · ${longDate(note.date, withYear)}`;
+	return `${heading}\n${properties ? `${properties}\n` : ""}\n${demoteHeadings(note.body)}`;
 }
 
 const estimateTokens = (text) => Math.ceil(text.length / CHARS_PER_TOKEN);
@@ -171,7 +226,7 @@ function spreadEvenly(notes, count) {
 	return notes.filter((_, index) => picked.has(index));
 }
 
-function buildMessages(preset, selection, today, budget) {
+function buildMessages(preset, selection, today, budget, task = `${preset.prompt}\n\n${preset.format}\n\n${REMINDER}`) {
 	const withYear = selection.from.slice(0, 4) !== selection.to.slice(0, 4);
 	const range = preset.scope.kind === "this-day"
 		? `this date in every earlier year, and today`
@@ -179,8 +234,8 @@ function buildMessages(preset, selection, today, budget) {
 	const system = `${SYSTEM_PROMPT}\n\nToday is ${longDate(formatDate(today), true)}.`;
 	const compose = (notes) => {
 		const header = `My journal notes from ${range}, oldest first (${notes.length} of ${selection.notes.length} notes):`;
-		const body = notes.map((note) => formatNote(note, withYear)).join("\n\n");
-		return `${header}\n\n${body}\n\n---\n\n${preset.prompt}\n\n${preset.format}\n\n${REMINDER}`;
+		const body = notes.map((note) => formatNote(note, withYear, selection.notes)).join("\n\n");
+		return `${header}\n\n${body}\n\n---\n\n${task}`;
 	};
 
 	let kept = selection.notes;
@@ -256,6 +311,7 @@ async function chat(server, request) {
 		total: performance.now() - started,
 		promptTokens: final.prompt_eval_count,
 		answerTokens: final.eval_count,
+		doneReason: final.done_reason,
 		loadMs: final.load_duration ? final.load_duration / 1e6 : 0,
 	};
 }
@@ -280,6 +336,65 @@ const seconds = (ms) => (ms == null ? "-" : `${(ms / 1000).toFixed(1)} s`);
 
 // --- Main --------------------------------------------------------------------
 
+function numCtxFor(estimate, limit, thinking) {
+	const room = thinking ? THINKING_TOKENS : ANSWER_TOKENS;
+	return Math.min(limit, Math.ceil((estimate * 1.1 + room) / CONTEXT_STEP) * CONTEXT_STEP);
+}
+
+/** One preset on one model: a single pass, or a digest of each part and then the answer. */
+async function reflect(options, model, info, preset, selection) {
+	const thinking = info.capabilities.includes("thinking")
+		? options.think === "on" || (options.think === "auto" && preset.thinking === true)
+		: false;
+	const limit = Math.min(info.contextLength, options.maxContext);
+	const send = (messages, estimate) =>
+		chat(options.server, {
+			model,
+			messages,
+			options: {
+				num_ctx: numCtxFor(estimate, limit, thinking),
+				...(options.temperature ? { temperature: Number(options.temperature) } : {}),
+			},
+			...(info.capabilities.includes("thinking") ? { think: thinking } : {}),
+		});
+
+	if (!(options.digest && preset.digest)) {
+		const built = buildMessages(preset, selection, options.today, limit - ANSWER_TOKENS);
+		return { ...(await send(built.messages, built.estimate)), kept: built.kept, estimate: built.estimate, thinking: thinking ? "on" : "off", passes: 1 };
+	}
+
+	const started = performance.now();
+	const parts = [];
+	for (let first = parseDate(selection.from); formatDate(first) <= selection.to; ) {
+		const last = new Date(first.getFullYear(), first.getMonth(), first.getDate() + preset.digest - 1);
+		const from = formatDate(first);
+		const to = formatDate(last) < selection.to ? formatDate(last) : selection.to;
+		const part = { notes: selection.notes.filter((n) => n.date >= from && n.date <= to), from, to };
+		if (part.notes.length) {
+			const built = buildMessages(preset, part, options.today, limit - ANSWER_TOKENS, DIGEST_PROMPT);
+			const result = await send(built.messages, built.estimate);
+			parts.push({ ...part, text: result.content.trim() });
+		}
+		first = new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1);
+	}
+	const digests = parts.map((part) => `#### ${longDate(part.from, false)} to ${longDate(part.to, false)}\n\n${part.text}`).join("\n\n");
+	const system = `${SYSTEM_PROMPT}\n\nToday is ${longDate(formatDate(options.today), true)}.`;
+	const user = `What my journal notes from ${longDate(selection.from, false)} to ${longDate(selection.to, false)} are about, in parts of ${preset.digest} days, oldest first. Each link is a note.\n\n${digests}\n\n---\n\n${preset.prompt}\n\n${preset.format}\n\n${REMINDER}`;
+	const estimate = estimateTokens(system + user);
+	const final = await send([{ role: "system", content: system }, { role: "user", content: user }], estimate);
+	const firstPass = final.total - (final.firstToken ?? 0);
+	return {
+		...final,
+		firstToken: final.firstToken == null ? null : performance.now() - started - firstPass,
+		total: performance.now() - started,
+		kept: selection.notes,
+		estimate,
+		thinking: thinking ? "on" : "off",
+		passes: parts.length + 1,
+		digests,
+	};
+}
+
 async function main() {
 	const options = parseArgs(process.argv.slice(2));
 	const notes = readNotes(options.folder);
@@ -297,63 +412,53 @@ async function main() {
 
 	for (const model of options.models) {
 		const info = options.dryRun ? { capabilities: [], contextLength: 131072 } : await showModel(options.server, model);
-		const thinks = info.capabilities.includes("thinking");
-		const limit = Math.min(info.contextLength, options.maxContext);
 		for (const preset of presets) {
 			const selection = selectNotes(notes, preset.scope, options.today);
-			const built = buildMessages(preset, selection, options.today, limit - ANSWER_TOKENS);
-			const numCtx = Math.min(limit, Math.ceil((built.estimate + ANSWER_TOKENS) / CONTEXT_STEP) * CONTEXT_STEP);
-			const request = {
-				model,
-				messages: built.messages,
-				options: {
-					num_ctx: numCtx,
-					...(options.temperature ? { temperature: Number(options.temperature) } : {}),
-				},
-				...(thinks ? { think: options.think } : {}),
-			};
+			if (options.dryRun) {
+				const built = buildMessages(preset, selection, options.today, options.maxContext - ANSWER_TOKENS);
+				writeFileSync(join(out, `${preset.id}.prompt.md`), built.messages.map((m) => `## ${m.role}\n\n${m.content}`).join("\n\n"));
+				console.log(`${preset.name}: ${built.kept.length}/${selection.notes.length} notes, ~${built.estimate} tokens, prompt written`);
+				continue;
+			}
 			for (let run = 1; run <= options.runs; run++) {
 				const label = `${model} · ${preset.name}${options.runs > 1 ? ` · run ${run}` : ""}`;
-				process.stdout.write(`${label}: ${built.kept.length}/${selection.notes.length} notes, ~${built.estimate} tokens, num_ctx ${numCtx} … `);
-				if (options.dryRun) {
-					writeFileSync(join(out, `${preset.id}.prompt.md`), built.messages.map((m) => `## ${m.role}\n\n${m.content}`).join("\n\n"));
-					console.log("prompt written");
-					continue;
-				}
+				process.stdout.write(`${label}: ${selection.notes.length} notes … `);
 				let result;
 				try {
-					result = await chat(options.server, request);
+					result = await reflect(options, model, info, preset, selection);
 				} catch (error) {
 					console.log(`failed: ${error.message}`);
 					rows.push({ model, preset: preset.name, run, error: error.message });
 					continue;
 				}
-				const citations = checkCitations(result.content, built.kept);
-				console.log(`${seconds(result.total)}, ${words(result.content)} words, ${citations.cited.length} cited, ${citations.unknown.length} unknown, ${citations.malformed.length} malformed`);
+				const citations = checkCitations(result.content, result.kept);
+				const how = `${result.passes > 1 ? `${result.passes} passes` : "1 pass"}, thinking ${result.thinking}`;
+				console.log(`${how}, ${seconds(result.total)}, ${words(result.content)} words, ${citations.cited.length} cited, ${citations.unknown.length} unknown, ${citations.malformed.length} malformed`);
 				const file = `${model.replace(/[^\w.-]/g, "_")}--${preset.id}${options.runs > 1 ? `--${run}` : ""}.md`;
 				writeFileSync(
 					join(out, file),
 					[
 						`# ${label}`,
 						"",
-						`- Read: ${built.kept.length} of ${selection.notes.length} notes, ${selection.from} to ${selection.to}`,
-						`- Prompt: ~${built.estimate} tokens estimated, ${result.promptTokens ?? "?"} counted; num_ctx ${numCtx}`,
+						`- Read: ${result.kept.length} of ${selection.notes.length} notes, ${selection.from} to ${selection.to}; ${how}`,
+						`- Prompt: ~${result.estimate} tokens estimated, ${result.promptTokens ?? "?"} counted${result.passes > 1 ? " (last pass)" : ""}`,
 						`- Time: first words ${seconds(result.firstToken)}, total ${seconds(result.total)} (load ${seconds(result.loadMs)})`,
-						`- Answer: ${words(result.content)} words, ${result.answerTokens ?? "?"} tokens${result.thinking ? `, ${words(result.thinking)} words of thinking` : ""}`,
+						`- Answer: ${words(result.content)} words, ${result.answerTokens ?? "?"} tokens generated, stopped by ${result.doneReason ?? "?"}`,
 						`- Cited: ${citations.cited.join(", ") || "none"}${citations.unknown.length ? `; not given: ${citations.unknown.join(", ")}` : ""}${citations.malformed.length ? `; malformed: ${citations.malformed.map((m) => `[[${m}]]`).join(", ")}` : ""}${citations.bareDates ? `; ${citations.bareDates} bare dates` : ""}`,
 						"",
 						"---",
 						"",
 						result.content,
 						"",
+						...(result.digests ? ["", "<!-- first pass", "", result.digests, "", "-->", ""] : []),
 					].join("\n"),
 				);
 				rows.push({
 					model,
 					preset: preset.name,
 					run,
-					notes: `${built.kept.length}/${selection.notes.length}`,
-					estimate: built.estimate,
+					how,
+					estimate: result.estimate,
 					counted: result.promptTokens,
 					firstToken: seconds(result.firstToken),
 					total: seconds(result.total),
@@ -368,13 +473,13 @@ async function main() {
 	}
 
 	if (!options.dryRun) {
-		const header = "| Model | Preset | Notes | Tokens est. / counted | First words | Total | Words | Cited | Unknown | Malformed | Bare dates |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
+		const header = "| Model | Preset | How | Tokens est. / counted | First words | Total | Words | Cited | Unknown | Malformed | Bare dates |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |";
 		const lines = rows.map((r) =>
 			r.error
 				? `| ${r.model} | ${r.preset} | failed: ${r.error} | | | | | | | | |`
-				: `| ${r.model} | ${r.preset} | ${r.notes} | ${r.estimate} / ${r.counted ?? "?"} | ${r.firstToken} | ${r.total} | ${r.words} | ${r.cited} | ${r.unknown} | ${r.malformed} | ${r.bare} |`,
+				: `| ${r.model} | ${r.preset} | ${r.how} | ${r.estimate} / ${r.counted ?? "?"} | ${r.firstToken} | ${r.total} | ${r.words} | ${r.cited} | ${r.unknown} | ${r.malformed} | ${r.bare} |`,
 		);
-		const settings = `Temperature ${options.temperature ?? "model default"}, thinking ${options.think ? "on" : "off"}.`;
+		const settings = `Temperature ${options.temperature ?? "model default"}, thinking ${options.think}${options.digest ? ", digest on" : ""}.`;
 		writeFileSync(join(out, "summary.md"), `${settings}\n\n${header}\n${lines.join("\n")}\n`);
 	}
 	console.log(`\nResults in ${out}`);
