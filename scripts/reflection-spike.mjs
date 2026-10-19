@@ -12,7 +12,7 @@
 //   npm run sample-journal
 //   node scripts/reflection-spike.mjs [--models a,b] [--presets id,id]
 //     [--today YYYY-MM-DD] [--folder path] [--server url] [--temperature n]
-//     [--max-context tokens] [--runs n] [--think auto|on|off] [--digest]
+//     [--max-context tokens] [--runs n] [--think on|off] [--digest]
 //     [--dry-run]
 //
 // Results land in test-vault/.reflection-spike/<run>/, which Obsidian hides.
@@ -41,9 +41,8 @@ export const REMINDER = "Write to me as \"you\". Cite only with the links exactl
 
 /**
  * Mirrors the planned built-in presets. `days` counts today unless the range
- * ends `beforeToday`. `thinking` asks models that can reason first to do so;
- * `digest` reads the range in parts of that many days first, when the spike
- * runs with --digest.
+ * ends `beforeToday`. `digest` reads the range in parts of that many days
+ * first, when the spike runs with --digest; the spike found it no better.
  */
 export const PRESETS = [
 	{
@@ -51,36 +50,35 @@ export const PRESETS = [
 		name: "This day over the years",
 		scope: { kind: "this-day" },
 		prompt: "These are my notes from this date in earlier years, and from today. What was I doing, worrying about and hoping for on this date each year, and what has changed since?",
-		format: "Write one short paragraph per note, oldest first. Start each with the note's link alone, then say in your own words who was around me and where, and what I worried about and hoped for. End with two or three sentences setting the first note's hopes against today's note.",
+		format: "Write one short paragraph per note, oldest first, starting with the note's link alone. Keep each paragraph to its own year: who was around me and how near they were, what I worried about, and what I hoped for. Save every comparison for two or three closing sentences that set the first note's hopes against today's note.",
 	},
 	{
 		id: "what-i-learned",
 		name: "What I learned",
 		scope: { kind: "days", days: 14 },
 		prompt: "What did I learn or realize over these two weeks?",
-		format: "Most fortnights hold one to three lessons. Include one only where a note states or plainly shows a realization; a hard day is not a lesson. List them as bullets: the lesson in close to my own words, then the link of the note it comes from.",
+		format: "Answer with one to three bullets and nothing else. Each is the lesson, said to me as \"you\", then the link of the note it comes from. A note counts when it states a realization, or shows me doing something differently and it working. A good or hard day on its own does not count.",
 	},
 	{
 		id: "week-in-review",
 		name: "Week in review",
 		scope: { kind: "days", days: 7 },
 		prompt: "Review my week: the high points, the low points, and how my energy went.",
-		format: "Use three short sections. **High points** and **Low points** are a few bullets each, with the link of the note they come from. **Energy** is two or three sentences following it day by day from the first note to today, using each note's mood and words, citing each day. End with one line: **A question for next week:** followed by a single question about something the week left open.",
+		format: "Use three short sections. **High points** and **Low points** are a few bullets each, with the link of the note they come from. **Energy** is two or three sentences following it day by day from the first note to today, using each note's mood and words, citing each day. End with one line: **A question for next week:** followed by a single question about a worry or decision that the last note still leaves open.",
 	},
 	{
 		id: "open-loops",
 		name: "Open loops",
 		scope: { kind: "days", days: 30, beforeToday: true },
 		prompt: "Find the plans and intentions I wrote down (\"I want to…\", \"I should…\", \"try…\"), and check whether any later note follows each one up.",
-		format: "List each plan once, under one of two headings. **Still open**: the plan in a few words, the link of the note where I wrote it, and what I said about it. **Followed up**: the plan in a few words and the link of the later note that follows it up. If a heading would be empty, write \"None.\" under it.",
-		thinking: true,
+		format: "A plan is something I said I would do; leave out lessons, things already done, and other people's plans. Write **Still open** first: each plan no later note follows up, the link of the note where I wrote it, and what I said about it. Then **Followed up**: each plan with the link of the note where I wrote it and the link of the later note that follows it up. Put each plan under one heading only, and under Followed up only if you can give that later link. If a heading would be empty, write \"None.\" under it.",
 	},
 	{
 		id: "recurring-themes",
 		name: "Recurring themes",
 		scope: { kind: "days", days: 90 },
 		prompt: "Which people, worries, habits and topics keep returning in these notes, and how did each one shift over time?",
-		format: "Pick the three to five that come up most. For each, write its name in bold, then two or three sentences on how it changed, with the link of the first note that mentions it and the link of the last note that mentions it. When that last note is more than two weeks before today, say it stopped appearing after that note.",
+		format: "Pick the three to five that come up most. For each, write its name in bold, then two or three sentences on how it changed, with the link of the first note that mentions it and the link of the last note that mentions it. When that last note is before {twoWeeksAgo}, write that it stopped appearing after that note.",
 		digest: 14,
 	},
 	{
@@ -88,7 +86,7 @@ export const PRESETS = [
 		name: "Questions to sit with",
 		scope: { kind: "days", days: 14 },
 		prompt: "Ask me three questions worth thinking about, each tied to a specific entry.",
-		format: "Number the three questions. For each, give the link of the entry, one sentence on what it says, then the question. Ask about something the entry leaves open (a choice, a tension, a change it does not explain), never something it already answers. Do not answer the questions or give advice.",
+		format: "Number the three questions. For each, give the link of the entry, one sentence on what it says, then the question. Ask about something the entry leaves open in my own life (a choice, a tension, a change it does not explain), never something it already answers, what something says, suggests or reveals about me, or what I will do next. Do not answer the questions or give advice.",
 	},
 ];
 
@@ -109,7 +107,7 @@ function parseArgs(argv) {
 		temperature: value("--temperature", undefined),
 		maxContext: Number(value("--max-context", "32768")),
 		runs: Number(value("--runs", "1")),
-		think: value("--think", "auto"),
+		think: value("--think", "off"),
 		digest: argv.includes("--digest"),
 		dryRun: argv.includes("--dry-run"),
 	};
@@ -232,6 +230,9 @@ function buildMessages(preset, selection, today, budget, task = `${preset.prompt
 		? `this date in every earlier year, and today`
 		: `${longDate(selection.from, withYear)} to ${longDate(selection.to, withYear)}`;
 	const system = `${SYSTEM_PROMPT}\n\nToday is ${longDate(formatDate(today), true)}.`;
+	// Models cannot count back from today, so the cut-off date is written in.
+	const twoWeeksAgo = longDate(formatDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 14)), withYear);
+	task = task.replaceAll("{twoWeeksAgo}", twoWeeksAgo);
 	const compose = (notes) => {
 		const header = `My journal notes from ${range}, oldest first (${notes.length} of ${selection.notes.length} notes):`;
 		const body = notes.map((note) => formatNote(note, withYear, selection.notes)).join("\n\n");
@@ -343,9 +344,7 @@ function numCtxFor(estimate, limit, thinking) {
 
 /** One preset on one model: a single pass, or a digest of each part and then the answer. */
 async function reflect(options, model, info, preset, selection) {
-	const thinking = info.capabilities.includes("thinking")
-		? options.think === "on" || (options.think === "auto" && preset.thinking === true)
-		: false;
+	const thinking = info.capabilities.includes("thinking") && options.think === "on";
 	const limit = Math.min(info.contextLength, options.maxContext);
 	const send = (messages, estimate) =>
 		chat(options.server, {

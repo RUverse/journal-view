@@ -92,7 +92,8 @@ Presets and model…
 ### The modal
 
 - **Connection:** server address (default `http://127.0.0.1:11434`), a status line, and setup steps
-  when nothing answers (install Ollama, `ollama pull llama3.1:8b`, retry).
+  when nothing answers: install Ollama, pull a model, retry. Suggest `gemma4:26b` with 32 GB of memory
+  or more and `gemma4:e4b` otherwise (see the spike's results).
 - **Model:** a dropdown of installed models (`/api/tags`), marking which support tools. The choice is
   remembered as the default and can be changed for a single run.
 - **Prompt:** a text box, with the presets as chips above it that fill it in.
@@ -125,17 +126,21 @@ when its day loads again.
 
 ## Presets
 
-Each preset fixes the notes it reads, so it works with every model. The wording is a starting point,
-to be tuned in the spike (step 0).
+Each preset fixes the notes it reads, so it works with every model. The spike (step 0) tuned the
+wording; `PRESETS` in `scripts/reflection-spike.mjs` holds each preset's exact request and the shape
+of its answer, and `presets.ts` should start from those.
 
-| Preset | Reads | Asks for |
+| Preset | Reads | Asks for, in this shape |
 | --- | --- | --- |
-| This day over the years | This date in every earlier year | What you did, worried about and hoped for on this date, and what changed |
-| What I learned | Last 14 days | Lessons and realizations, each with the date it came from |
-| Week in review | Last 7 days | High and low points, energy, and one question to carry into next week |
-| Open loops | Last 30 days | Plans and intentions ("I want to…", "try…") that never came up again |
-| Recurring themes | Last 90 days | People, worries and topics that keep returning, and how they shifted |
-| Questions to sit with | Last 14 days | Three questions, each tied to a specific entry, and no advice |
+| This day over the years | This date in every earlier year, and today | A paragraph per note, starting with its link, then the first note's hopes set against today |
+| What I learned | Last 14 days | One to three lessons as bullets, each in close to the note's own words, with its link |
+| Week in review | Last 7 days | **High points** and **Low points** as cited bullets, **Energy** day by day, and one question |
+| Open loops | The 30 days before today | Each plan once, under **Still open** (where it was written) or **Followed up** (where it was) |
+| Recurring themes | Last 90 days | Three to five topics, each with its first and last mention, saying when one stopped appearing |
+| Questions to sit with | Last 14 days | Three numbered questions, each after an entry's link and what it says, about what it leaves open |
+
+Open loops ends yesterday because the models list today's to-dos however they are told not to; a plan
+written today is not an open loop yet.
 
 The shared system prompt is what separates an insight from a horoscope:
 
@@ -144,6 +149,11 @@ The shared system prompt is what separates an insight from a horoscope:
 - No praise, no generic advice, no therapy-speak.
 - Write to the reader in the second person, in the language their notes are written in.
 - Keep it to about 150–300 words unless the prompt asks otherwise.
+
+Small models stop following the system prompt a few thousand tokens later, so the request ends with
+a short reminder after the notes: write to me as "you", cite only with the links in the headings, one
+date per link, use only what the notes say, and no praise, advice or closing summary. Without it, and
+without the preset's answer shape, 8B models cited nothing at all.
 
 ## Architecture
 
@@ -218,15 +228,27 @@ sources: ["[[2026-10-05]]", "[[2026-10-09]]", "[[2026-10-14]]"]
 
 ## Context and tools
 
-- Each note is passed oldest first, without its YAML properties, under a heading that carries its
-  exact link: `### [[2026-10-05]] · Monday, 5 October`. The model is told to cite with those links,
-  so citations resolve whatever the date format is.
-- The system message states today's date and the range being read.
+- Each note is passed oldest first under a heading that carries its exact link:
+  `### [[2026-10-05]] · Monday, 5 October`. The model is told to cite with those links, so citations
+  resolve whatever the date format is.
+- Below the heading goes one line of the note's properties, such as `mood: awful · tags: work`,
+  leaving out empty values, values that every note in the range shares (`type: daily`, the tag
+  `journal`), and values that restate the note's date. The YAML itself is not passed. Moods are the
+  best signal *Week in review* has for energy, and stripping all properties lost them.
+- The note's own headings are pushed below that `###`, so a `## Log` cannot read as a new note.
+- The system message states today's date. The user message names the range, lists the notes, and
+  ends with the preset's request, its answer shape, and the reminder.
 - **Budget:** estimate tokens at about four characters each, then set Ollama's `options.num_ctx` to
   fit the prompt plus room for the answer, capped by the model's own limit and by the *Maximum
-  context* setting. Without this, Ollama silently cuts prompts at its default context size.
+  context* setting. Without this, Ollama silently cuts prompts at its default context size. For
+  English the estimate came within 5% of Ollama's count but ran low on Gemma, so add 10%. Scripts
+  such as Persian or Chinese take more tokens per character; check the first response's
+  `prompt_eval_count` against the estimate, and leave more room when they differ.
 - When the notes do not fit, drop whole notes evenly across the range rather than only the oldest,
   and say so on the card: `Read 20 of 31 notes; the rest did not fit`.
+- **Citations as written:** models sometimes put two dates in one link (`[[2024-10-19, 2025-10-19]]`)
+  or write a bare `2026-10-05`. Before rendering, split such links into one per date, and link bare
+  dates that match a note that was read. Leave dates that match no note as plain text.
 
 Tools offered to custom prompts on models that support them:
 
@@ -248,6 +270,8 @@ the feature's single pull request. Merge the latest `dev` into the branch when i
 the build passing after every step, so the branch can be tested at any point.
 
 ### 0. Spike: judge the reflections before building the UI
+
+Done on 2026-10-19: see [The sample journal](#the-sample-journal) and [Results](#results) below.
 
 The test vault's notes were filler (`word word word…`), useless for judging a reflection. Before any
 UI:
@@ -294,6 +318,64 @@ friend, Dana their manager. Planted patterns, by days ago:
 | The last week | 6 good, 5 a bad client presentation, 4 tired, 3 dinner at Mina's, 2 steady, 1 drained but a good book, 0 calm | *Week in review* gets the high (3) and low (5) |
 | This day over the years | 3 years: just moved, lonely, wants friends and meaningful work. 2: new job, likes Theo, Mina visits. 1: Mina has moved to the city, rent going up. Today: settled, Mina 10 minutes away | Traces loneliness to closeness, citing each year |
 
+#### Results
+
+Run on 2026-10-19 on an M5 Max with 128 GB, Ollama 0.40.6, through `scripts/reflection-spike.mjs`.
+The prompts went through four rounds. Separate grading agents read every answer against the notes
+and the key above, checking each claim and whether each cited note supports the sentence it is
+attached to, and scored it from 1 (wrong or generic) to 5 (grounded, specific, accurate). One sample
+can move a score by about a point, so the last round used two samples per model.
+
+| Model | Memory once loaded | Short presets, last round | *Open loops* and *Recurring themes* | Time per preset | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| `gemma4:26b` | ~18 GB resident | 4.4 | Open loops 5 in both samples; Recurring themes 3 | 1–9 s | Suggest with 32 GB or more |
+| `gemma4:12b` | 15 GB | 4.75 | Files one open plan as followed up; Recurring themes 2–4 | 1–11 s | Only with 24 GB or more; little gain over 26b's memory |
+| `gemma4:e4b` | 10 GB | 3.25 | Open loops 2–3, or 4–5 with thinking (6–8 s); Recurring themes 2 | 1–5 s | Suggest with 16 GB |
+| `qwen3:8b` | 6 GB | 2.75 | 1.5; usable on Open loops only with thinking (25–29 s) | 2–9 s | Not suggested |
+| `llama3.1:8b` | — | 2.0 (third round) | 2.7 | 3–10 s | Not suggested |
+| `gemma3:4b` | — | 1.75 | 1.3; writes fiction | 2–10 s | Not suggested |
+
+Memory is macOS's `footprint` for the runner process, or its resident size for `gemma4:26b`, whose
+weights are mapped from the file. `ollama ps` is unreliable here: it reported 16 GB for `gemma4:12b`
+and 1.2 GB for `gemma4:26b`. `gemma4:26b` is a mixture of experts with under 4B parameters active per
+token, which is why it is as fast as the 8B models. Expect every time to be several times longer on
+a machine without Apple Silicon or a GPU.
+
+By preset, with the final wording:
+
+- **This day over the years:** 4–5 on the Gemma 4 models once each paragraph kept to its own year.
+  Smaller models still misread who was where, such as Mina's "you could live here".
+- **What I learned:** both lessons, the stated and the implicit one, in every sample from
+  `gemma4:12b` and `gemma4:26b`. Asking for "one to three bullets and nothing else" stopped the
+  padding that "up to five" invited.
+- **Week in review:** 4.4 on average. The mood line under each heading fixed the energy arc, which
+  the models had misdated while properties were stripped.
+- **Open loops:** ending the range yesterday removed today's to-dos, which no instruction did. The
+  **Still open** / **Followed up** shape gave follow-ups somewhere to go; putting **Followed up**
+  first backfired, filing open plans there as "None". The final wording, with **Still open** first
+  and each plan under one heading, was checked by hand in two samples per Gemma 4 model rather than
+  graded: right every time on `gemma4:26b`, while `gemma4:12b` and `gemma4:e4b` still filed the
+  bookshelf under **Followed up** unless `gemma4:e4b` was thinking.
+- **Recurring themes:** the weakest preset, 3 at best. Models read a walk on 13 October as the runs
+  resuming, and rarely say a worry faded. Writing the cut-off date into the prompt helped a little,
+  since models cannot count back from today. The two-pass digest scored no better for any model at
+  five times the time, because its first pass dropped details such as the worry's last mention; it
+  is not planned.
+- **Questions to sit with:** quoting the entry before the question made models drop the question or
+  ask about minor lines, so the final wording keeps the summary sentence first. It was checked by
+  hand rather than graded.
+
+What carries into the implementation:
+
+- The answer shape and the reminder after the notes are what made small models cite at all; without
+  them, 8B models cited nothing in most answers. Keep both in `presets.ts`.
+- Enforce in code what the models ignore: the range that ends yesterday, the cut-off date written in.
+- Temperature made no difference worth keeping; leave each model's default.
+- Thinking stays off (see [Risks](#risks)). If `gemma4:e4b` turns out to be what most people run,
+  thinking for *Open loops* alone is worth another look: 6–8 s there, and it fixed the misfiled plan.
+- The first round changed the prompt wording as well as adding the answer shapes, so its gains are
+  not the shapes' alone.
+
 ### 1. Reflection files and cards
 
 - The `store.ts` index and the card in its ready state, on the right day in both orders.
@@ -324,9 +406,9 @@ friend, Dana their manager. Planted patterns, by days ago:
 ## Testing with Ollama on a Mac
 
 ```bash
-ollama pull llama3.1:8b        # tools
-ollama pull qwen3:8b           # tools
-ollama pull gemma3:4b          # check `ollama show gemma3:4b`: if it lists no tools, it tests the fallback
+ollama pull gemma4:e4b         # the suggestion for 16 GB; tools and thinking
+ollama pull gemma4:26b         # the suggestion for 32 GB or more
+ollama pull gemma3:4b          # no tools: tests the range-picker fallback
 curl http://127.0.0.1:11434/api/tags
 ```
 
@@ -368,10 +450,13 @@ the plugin has to be disabled and re-enabled to load a new build.
 - **Tool calling.** Small models often skip tools or call them with bad arguments. Validate arguments,
   return clear errors the model can recover from, and fall back to the range picker when a model has
   no tool support.
-- **Thinking models.** `qwen3`, and on the test Mac `qwen3.8` and `gemma4`, report the `thinking`
-  capability and by default reason before answering, in a separate `message.thinking` field. That
-  text must not stream into the card or be saved, and it uses up context. Send `think: false` for
-  presets, or keep the thinking apart and show `Thinking…` in the status line; decide in the spike.
+- **Thinking models.** `qwen3` and `gemma4` report the `thinking` capability and by default reason
+  before answering, in a separate `message.thinking` field. Decided in the spike: send `think: false`
+  for presets. Thinking helped only *Open loops*, and only on the smaller models, at 5–25 s extra;
+  on `gemma4:26b` and `gemma4:12b` it added 70–115 s, and once the prompt and 4,643 tokens of
+  reasoning added up to exactly the 8,192 of `num_ctx`, and no answer came. Models without thinking accept
+  `think: false` too. If thinking is ever offered, never stream or save `message.thinking`, give it
+  its own room in `num_ctx`, and treat an empty answer that stopped on `length` as an error.
 - **Speed.** On a machine without a GPU, a 90-day preset can take minutes. The menu shows the size
   up front, and Stop always works.
 - **Scroll position.** Text streaming into a card above the reader (newest first) must not move what
