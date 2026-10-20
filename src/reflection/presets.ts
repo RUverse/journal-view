@@ -6,7 +6,7 @@
  * change it there first.
  */
 
-/** The notes a preset reads, counted back from today. */
+/** The notes a reflection reads. */
 export type ReflectionScope =
 	| {
 			kind: "days";
@@ -15,7 +15,11 @@ export type ReflectionScope =
 			/** Ends yesterday: today's plans are not open loops yet. */
 			beforeToday?: boolean;
 	  }
-	| { kind: "this-day" };
+	| { kind: "this-day" }
+	/** Fixed dates, `YYYY-MM-DD`, for a question of the reader's own. */
+	| { kind: "range"; from: string; to: string }
+	/** The model picks what to read through tools, which it has to support. */
+	| { kind: "model" };
 
 export interface ReflectionPreset {
 	id: string;
@@ -28,6 +32,38 @@ export interface ReflectionPreset {
 	 * since models cannot count back from today.
 	 */
 	format: string;
+}
+
+/** What a reflection is asked: a preset, or a question of the reader's own. */
+export interface ReflectionRequest {
+	/** The preset it came from, or null for a question of the reader's own. */
+	presetId: string | null;
+	/** What its card and note are titled: the preset's name, or the question. */
+	title: string;
+	prompt: string;
+	format: string;
+	scope: ReflectionScope;
+}
+
+/** The shape asked of a question of the reader's own, which has none of its own. */
+export const QUESTION_FORMAT =
+	"Answer in a few short paragraphs or bullets. Give each point the link of the note it comes from. If the notes do not answer the question, say so.";
+
+/** A preset, as a run asks it. */
+export function presetRequest(preset: ReflectionPreset): ReflectionRequest {
+	return {
+		presetId: preset.id,
+		title: preset.name,
+		prompt: preset.prompt,
+		format: preset.format || QUESTION_FORMAT,
+		scope: preset.scope,
+	};
+}
+
+/** A question of the reader's own, over `scope`. */
+export function questionRequest(question: string, scope: ReflectionScope): ReflectionRequest {
+	const prompt = question.trim();
+	return { presetId: null, title: prompt, prompt, format: QUESTION_FORMAT, scope };
 }
 
 /**
@@ -100,8 +136,104 @@ export const BUILT_IN_PRESETS: readonly ReflectionPreset[] = [
 	},
 ];
 
-/** How a preset's range reads in its menu item: "14 days". Empty for a date over the years, which its name says. */
+/**
+ * How a scope reads beside a preset: "14 days". Empty for a date over the
+ * years, which the preset's name says.
+ */
 export function scopeLabel(scope: ReflectionScope): string {
-	if (scope.kind === "this-day") return "";
-	return scope.beforeToday ? `${scope.days} days before today` : `${scope.days} days`;
+	switch (scope.kind) {
+		case "this-day":
+			return "";
+		case "model":
+			return "model chooses";
+		case "range":
+			return scope.from === scope.to ? scope.from : `${scope.from} – ${scope.to}`;
+		case "days":
+			return scope.beforeToday ? `${scope.days} days before today` : `${scope.days} days`;
+	}
+}
+
+/** Built-in presets, by id, to tell an edited one from the shipped one. */
+const BUILT_IN_BY_ID = new Map(BUILT_IN_PRESETS.map((preset) => [preset.id, preset]));
+
+/** The presets the reader has: their own list once they changed it, the built-in ones until then. */
+export function presetsOf(saved: readonly ReflectionPreset[] | null): readonly ReflectionPreset[] {
+	return saved ?? BUILT_IN_PRESETS;
+}
+
+/**
+ * Brings back every built-in preset as shipped - the edited ones and the
+ * deleted ones, at their shipped place - and keeps the reader's own after
+ * them. Null when that leaves only the built-in ones.
+ */
+export function restoreBuiltIns(saved: readonly ReflectionPreset[] | null): ReflectionPreset[] | null {
+	const own = (saved ?? []).filter((preset) => !BUILT_IN_BY_ID.has(preset.id));
+	return own.length ? [...BUILT_IN_PRESETS.map((preset) => ({ ...preset })), ...own] : null;
+}
+
+/** True when a built-in preset was edited or deleted, which restoring them would undo. */
+export function canRestoreBuiltIns(saved: readonly ReflectionPreset[] | null): boolean {
+	if (!saved) return false;
+	return BUILT_IN_PRESETS.some((shipped) => {
+		const preset = saved.find((candidate) => candidate.id === shipped.id);
+		return !preset || JSON.stringify(preset) !== JSON.stringify(shipped);
+	});
+}
+
+const KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A scope read from settings, or null when it is not one. */
+function scopeSetting(value: unknown): ReflectionScope | null {
+	if (typeof value !== "object" || value === null) return null;
+	const scope = value as Record<string, unknown>;
+	switch (scope.kind) {
+		case "this-day":
+			return { kind: "this-day" };
+		case "model":
+			return { kind: "model" };
+		case "range":
+			return typeof scope.from === "string" && KEY.test(scope.from) && typeof scope.to === "string" && KEY.test(scope.to)
+				? { kind: "range", from: scope.from, to: scope.to }
+				: null;
+		case "days": {
+			if (typeof scope.days !== "number" || !Number.isFinite(scope.days)) return null;
+			const days = Math.max(1, Math.min(3650, Math.round(scope.days)));
+			return scope.beforeToday === true ? { kind: "days", days, beforeToday: true } : { kind: "days", days };
+		}
+		default:
+			return null;
+	}
+}
+
+/** The saved presets, keeping those that read back whole; null for none saved. */
+export function presetsSetting(value: unknown): ReflectionPreset[] | null {
+	if (!Array.isArray(value)) return null;
+	const presets: ReflectionPreset[] = [];
+	const ids = new Set<string>();
+	for (const item of value) {
+		if (typeof item !== "object" || item === null) continue;
+		const preset = item as Record<string, unknown>;
+		const scope = scopeSetting(preset.scope);
+		if (
+			typeof preset.id !== "string" ||
+			!preset.id ||
+			ids.has(preset.id) ||
+			typeof preset.name !== "string" ||
+			!preset.name.trim() ||
+			typeof preset.prompt !== "string" ||
+			!preset.prompt.trim() ||
+			!scope
+		) {
+			continue;
+		}
+		ids.add(preset.id);
+		presets.push({
+			id: preset.id,
+			name: preset.name.trim(),
+			scope,
+			prompt: preset.prompt.trim(),
+			format: typeof preset.format === "string" ? preset.format.trim() : "",
+		});
+	}
+	return presets;
 }

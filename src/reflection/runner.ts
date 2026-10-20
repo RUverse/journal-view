@@ -4,17 +4,22 @@ import { createMoment } from "../moment";
 import type { Moment } from "../moment";
 import { buildContext, repairCitations } from "./context";
 import type { ReflectionSource, ScopeRange } from "./context";
-import type { ReflectionPreset } from "./presets";
+import type { ReflectionRequest, ReflectionScope } from "./presets";
 import { NO_MODELS_MESSAGE, ProviderError, describeProviderError } from "./provider";
+import type { ModelInfo } from "./provider";
+import { reflectWithTools } from "./tools";
 
 export type RunStatus = "reading" | "writing" | "failed";
+
+/** What a question the model cannot choose notes for reads instead. */
+const FALLBACK_SCOPE: ReflectionScope = { kind: "days", days: 14 };
 
 /** A reflection being written, which its card follows until the note is saved. */
 export interface ReflectionRun {
 	readonly id: number;
 	/** The day it belongs to, `YYYY-MM-DD`. */
 	readonly key: string;
-	readonly preset: ReflectionPreset;
+	readonly request: ReflectionRequest;
 	status: RunStatus;
 	/** What the card says above the text: what is being read, or what went wrong. */
 	statusLine: string;
@@ -69,12 +74,12 @@ export class ReflectionRunner extends Component {
 		return () => this.listeners.delete(listener);
 	}
 
-	/** Starts a preset on `today`, the day its reflection belongs to. */
-	start(preset: ReflectionPreset, today: Moment = createMoment().startOf("day")): ReflectionRun {
+	/** Starts a reflection on `today`, the day it belongs to. */
+	start(request: ReflectionRequest, today: Moment = createMoment().startOf("day")): ReflectionRun {
 		const run: ActiveRun = {
 			id: this.nextId++,
 			key: today.format("YYYY-MM-DD"),
-			preset,
+			request,
 			status: "reading",
 			statusLine: "Connecting…",
 			text: "",
@@ -103,7 +108,7 @@ export class ReflectionRunner extends Component {
 		const run = this.runs.find((candidate) => candidate.id === id);
 		if (!run || run.status !== "failed") return;
 		this.dismiss(id);
-		this.start(run.preset, createMoment(run.key, "YYYY-MM-DD", true));
+		this.start(run.request, createMoment(run.key, "YYYY-MM-DD", true));
 	}
 
 	/** Removes a failed run's card. */
@@ -123,7 +128,7 @@ export class ReflectionRunner extends Component {
 			if (folder === null) {
 				throw new ProviderError(
 					"failed",
-					"The Reflections folder is the daily-note folder. Choose another in Settings → Journal View.",
+					"The Reflections folder is the daily-note folder. Choose another in the Reflect window's settings.",
 				);
 			}
 			let model = plugin.settings.reflectionModel;
@@ -137,11 +142,26 @@ export class ReflectionRunner extends Component {
 			run.model = model;
 			const info = await provider.showModel(model);
 			if (run.controller.signal.aborted) throw new ProviderError("aborted", "Stopped.");
+			const sourcePath = `${folder ? `${folder}/` : ""}${run.key}.md`;
 
-			const context = await buildContext(plugin, run.preset, today, {
+			const choosing = run.request.scope.kind === "model";
+			if (choosing && info.tools) {
+				try {
+					await this.answerWithTools(run, info, today, sourcePath);
+					await this.save(run);
+					return;
+				} catch (error) {
+					// The server knows better than the model's description: read a fixed range instead.
+					if (!(error instanceof ProviderError && error.kind === "no-tools")) throw error;
+					run.text = "";
+					run.status = "reading";
+				}
+			}
+			const scope = choosing ? FALLBACK_SCOPE : run.request.scope;
+			const context = await buildContext(plugin, { ...run.request, scope }, today, {
 				contextLength: info.contextLength,
 				maxContext: plugin.settings.reflectionMaxContext,
-				sourcePath: `${folder ? `${folder}/` : ""}${run.key}.md`,
+				sourcePath,
 			});
 			run.range = context.range;
 			run.sources = context.sources;
@@ -149,22 +169,16 @@ export class ReflectionRunner extends Component {
 				throw new ProviderError("failed", "There are no notes in that range to reflect on.");
 			}
 			run.statusLine = readingLine(context.range, context.sources.length, context.total);
-			this.announce(run.key);
+			// Said up front: the question asked for the model to choose, and it cannot.
+			if (choosing) run.statusLine = `${model} cannot choose its own notes. ${run.statusLine}`;
+			this.announce(run.key, true);
 
 			await provider.chat({
 				model,
 				messages: context.messages,
 				numCtx: context.numCtx,
 				signal: run.controller.signal,
-				onText: (delta) => {
-					run.text += delta;
-					if (run.status !== "writing") {
-						run.status = "writing";
-						this.announce(run.key, true);
-					} else {
-						this.announce(run.key);
-					}
-				},
+				onText: (delta) => this.receive(run, delta),
 			});
 			await this.save(run);
 		} catch (error) {
@@ -187,6 +201,56 @@ export class ReflectionRunner extends Component {
 		}
 	}
 
+	/**
+	 * Lets the model read the journal through tools. Each call shows on the
+	 * card as it happens; text from a round that ends up calling tools is
+	 * taken back, so only the answer stays.
+	 */
+	private async answerWithTools(run: ActiveRun, model: ModelInfo, today: Moment, sourcePath: string): Promise<void> {
+		run.statusLine = "Looking through your notes…";
+		this.announce(run.key, true);
+		const result = await reflectWithTools({
+			plugin: this.plugin,
+			provider: this.plugin.reflectionProvider(),
+			model,
+			question: run.request.prompt,
+			today,
+			maxContext: this.plugin.settings.reflectionMaxContext,
+			sourcePath,
+			signal: run.controller.signal,
+			onStatus: (line) => {
+				run.statusLine = line;
+				this.announce(run.key, true);
+			},
+			onText: (delta) => this.receive(run, delta),
+			onReset: () => {
+				run.text = "";
+				if (run.status === "writing") run.status = "reading";
+				this.announce(run.key, true);
+			},
+			// So a run stopped before its answer still records what it read.
+			onSources: (sources, range) => {
+				run.sources = sources;
+				run.range = range;
+			},
+		});
+		run.sources = result.sources;
+		run.range = result.range;
+		// The stream may have been taken back after the answer's text arrived whole.
+		if (!run.text.trim()) run.text = result.text;
+	}
+
+	/** Adds streamed text to the run; the first words turn its skeleton into the answer. */
+	private receive(run: ActiveRun, delta: string): void {
+		run.text += delta;
+		if (run.status !== "writing") {
+			run.status = "writing";
+			this.announce(run.key, true);
+		} else {
+			this.announce(run.key);
+		}
+	}
+
 	/** Writes the reflection's note, after which the note's own card takes over from the run's. */
 	private async save(run: ActiveRun): Promise<void> {
 		if (this.unloading) return;
@@ -197,9 +261,9 @@ export class ReflectionRunner extends Component {
 			await plugin.reflections.create(
 				{
 					created: createMoment(),
-					title: run.preset.name,
-					preset: run.preset.id,
-					prompt: run.preset.prompt,
+					title: run.request.title,
+					preset: run.request.presetId,
+					prompt: run.request.prompt,
 					model: run.model ?? "",
 					from: run.range?.from ?? run.key,
 					to: run.range?.to ?? run.key,

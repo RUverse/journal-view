@@ -3,6 +3,8 @@ import type { App, TAbstractFile } from "obsidian";
 import type JournalViewPlugin from "../main";
 import { createMoment } from "../moment";
 import type { Moment } from "../moment";
+import { keyAfter, keyBefore } from "../noteIndex";
+import type { DaySequence } from "../noteIndex";
 
 /** The property that marks a note as a reflection, and its value. */
 export const REFLECTION_PROPERTY = "journal-view";
@@ -53,13 +55,20 @@ type Listener = (keys: string[] | null) => void;
  * or from the date its name starts with while Obsidian has not read the
  * property yet. The folder is never the daily-note folder, and a note the
  * daily-note index claims is never taken for a reflection.
+ *
+ * The days with reflections are a sequence the journal walks, so a day
+ * keeps its place for its reflections when it has no note.
  */
-export class ReflectionStore extends Component {
+export class ReflectionStore extends Component implements DaySequence {
 	private byKey = new Map<string, StoredReflection[]>();
 	private byPath = new Map<string, StoredReflection>();
 	private listeners = new Set<Listener>();
 	/** The folders the index was built for, to notice when either moves. */
 	private signature = "";
+	private sorted: string[] = [];
+	private sortedDirty = true;
+	/** Moves on whenever a day gains its first reflection or loses its last. */
+	version = 0;
 
 	constructor(
 		private app: App,
@@ -93,6 +102,31 @@ export class ReflectionStore extends Component {
 		return this.byKey.get(key) ?? [];
 	}
 
+	has(key: string): boolean {
+		return this.byKey.has(key);
+	}
+
+	range(): { first: string; last: string } | null {
+		const keys = this.keys();
+		return keys.length ? { first: keys[0], last: keys[keys.length - 1] } : null;
+	}
+
+	next(key: string): string | null {
+		return keyAfter(this.keys(), key);
+	}
+
+	prev(key: string): string | null {
+		return keyBefore(this.keys(), key);
+	}
+
+	private keys(): readonly string[] {
+		if (this.sortedDirty) {
+			this.sorted = [...this.byKey.keys()].sort();
+			this.sortedDirty = false;
+		}
+		return this.sorted;
+	}
+
 	/** Listens for reflections appearing, changing or going: the days touched, or null for all. */
 	onChanged(listener: Listener): () => void {
 		this.listeners.add(listener);
@@ -113,6 +147,7 @@ export class ReflectionStore extends Component {
 		this.signature = this.signatureNow();
 		this.byKey.clear();
 		this.byPath.clear();
+		this.daysChanged();
 		const folder = this.folder();
 		if (folder !== null) {
 			for (const file of this.app.vault.getMarkdownFiles()) {
@@ -167,6 +202,7 @@ export class ReflectionStore extends Component {
 
 	private add(reflection: StoredReflection): void {
 		this.byPath.set(reflection.file.path, reflection);
+		if (!this.byKey.has(reflection.key)) this.daysChanged();
 		const list = this.byKey.get(reflection.key) ?? [];
 		list.push(reflection);
 		list.sort((left, right) => left.time - right.time || left.file.path.localeCompare(right.file.path));
@@ -177,7 +213,12 @@ export class ReflectionStore extends Component {
 		this.byPath.delete(reflection.file.path);
 		const list = this.byKey.get(reflection.key)?.filter((other) => other.file.path !== reflection.file.path);
 		if (list?.length) this.byKey.set(reflection.key, list);
-		else this.byKey.delete(reflection.key);
+		else if (this.byKey.delete(reflection.key)) this.daysChanged();
+	}
+
+	private daysChanged(): void {
+		this.sortedDirty = true;
+		this.version++;
 	}
 
 	private notify(keys: string[] | null): void {

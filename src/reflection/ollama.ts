@@ -1,7 +1,15 @@
 import { requestUrl } from "obsidian";
 import type { RequestUrlParam, RequestUrlResponse } from "obsidian";
 import { ProviderError } from "./provider";
-import type { ChatRequest, ChatResult, ModelInfo, ReflectionProvider } from "./provider";
+import type { ChatMessage, ChatRequest, ChatResult, ModelInfo, ReflectionProvider, ToolCall } from "./provider";
+
+/**
+ * The most an answer may run to, in tokens: far more than any reflection
+ * needs. Between tool calls Gemma 4 sometimes loops on its own markup without
+ * writing a word; this stops it in seconds rather than once it has filled the
+ * whole context, which a tool run asks to be large.
+ */
+const ANSWER_LIMIT = 2048;
 
 /** What an Ollama model says it can do, from `/api/show`. */
 interface Described {
@@ -15,14 +23,32 @@ interface Answer {
 	text: string;
 	promptTokens: number | null;
 	doneReason: string | null;
+	toolCalls: ToolCall[];
+	/** Tokens written, to tell an answer cut off by `ANSWER_LIMIT` from one cut off by the context. */
+	answerTokens: number | null;
+}
+
+/** A message as Ollama's chat endpoint takes it. */
+interface OllamaMessage {
+	role: ChatMessage["role"];
+	content: string;
+	tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }>;
+	tool_name?: string;
+}
+
+/** A tool as Ollama's chat endpoint takes it. */
+interface OllamaTool {
+	type: "function";
+	function: { name: string; description: string; parameters: Record<string, unknown> };
 }
 
 /** What the chat endpoint is sent, before choosing whether it streams. */
 interface ChatPayload {
 	model: string;
-	messages: ChatRequest["messages"];
-	options: { num_ctx: number };
+	messages: OllamaMessage[];
+	options: { num_ctx: number; num_predict: number };
 	think: false;
+	tools?: OllamaTool[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -88,11 +114,13 @@ function describe(name: string, capabilities: string[] | null, contextLength: nu
 }
 
 /** Reads the end of an answer: why it stopped, and how many tokens the prompt took. */
-function answerOf(text: string, final: Record<string, unknown> | null): Answer {
+function answerOf(text: string, toolCalls: ToolCall[], final: Record<string, unknown> | null): Answer {
 	return {
 		text,
 		promptTokens: typeof final?.prompt_eval_count === "number" ? final.prompt_eval_count : null,
 		doneReason: typeof final?.done_reason === "string" ? final.done_reason : null,
+		toolCalls,
+		answerTokens: typeof final?.eval_count === "number" ? final.eval_count : null,
 	};
 }
 
@@ -102,11 +130,56 @@ function contentOf(part: Record<string, unknown>): string {
 }
 
 /**
+ * The tool calls a line of the chat stream, or a whole answer, carries.
+ * Ollama sends each call whole, its arguments already parsed; a model that
+ * wrote them as a JSON string has them parsed here, and anything else is
+ * passed on as no arguments for the tool to reject.
+ */
+function toolCallsOf(part: Record<string, unknown>): ToolCall[] {
+	if (!isRecord(part.message) || !Array.isArray(part.message.tool_calls)) return [];
+	const calls: ToolCall[] = [];
+	for (const call of part.message.tool_calls) {
+		if (!isRecord(call) || !isRecord(call.function) || typeof call.function.name !== "string") continue;
+		const given = call.function.arguments;
+		const parsed = typeof given === "string" ? parseJson(given) : given;
+		calls.push({ name: call.function.name, arguments: isRecord(parsed) ? parsed : {} });
+	}
+	return calls;
+}
+
+/** The conversation as Ollama takes it: calls under `tool_calls`, and each result naming its tool. */
+function ollamaMessage(message: ChatMessage): OllamaMessage {
+	switch (message.role) {
+		case "tool":
+			return { role: "tool", content: message.content, tool_name: message.toolName };
+		case "assistant":
+			return message.toolCalls?.length
+				? {
+						role: "assistant",
+						content: message.content,
+						tool_calls: message.toolCalls.map((call) => ({
+							function: { name: call.name, arguments: call.arguments },
+						})),
+					}
+				: { role: "assistant", content: message.content };
+		default:
+			return { role: message.role, content: message.content };
+	}
+}
+
+/**
  * An error Ollama answered with. It names the model when it is not
  * installed, which the card treats differently from any other failure.
  */
 function chatError(status: number | null, body: unknown): ProviderError {
 	const message = errorOf(body);
+	// Such as "registry.ollama.ai/library/gemma3:4b does not support tools".
+	if (message && /does not support tools/i.test(message)) {
+		return new ProviderError(
+			"no-tools",
+			"This model cannot choose its own notes. Pick the notes it reads, or a model that supports tools.",
+		);
+	}
 	if (message && /not found/i.test(message)) return new ProviderError("model-missing", message);
 	return new ProviderError("failed", message ?? `Ollama answered with status ${status ?? "unknown"}`);
 }
@@ -178,11 +251,17 @@ export class OllamaProvider implements ReflectionProvider {
 		if (request.signal.aborted) throw aborted();
 		const payload: ChatPayload = {
 			model: request.model,
-			messages: request.messages,
-			options: { num_ctx: request.numCtx },
+			messages: request.messages.map(ollamaMessage),
+			options: { num_ctx: request.numCtx, num_predict: ANSWER_LIMIT },
 			// Every model accepts this, thinking or not; reasoning first cost minutes for little gain.
 			think: false,
 		};
+		if (request.tools?.length) {
+			payload.tools = request.tools.map((tool) => ({
+				type: "function",
+				function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+			}));
+		}
 		let response: Response;
 		try {
 			// `fetch` on purpose, and only here: `requestUrl` cannot stream, and a
@@ -229,13 +308,14 @@ export class OllamaProvider implements ReflectionProvider {
 
 	/**
 	 * Reads the chat stream: one JSON object per line, each with the next
-	 * piece of the answer, and a last one saying why it stopped.
+	 * piece of the answer or a tool call, and a last one saying why it stopped.
 	 */
 	private async readStream(body: ReadableStream<Uint8Array>, request: ChatRequest): Promise<Answer> {
 		const reader = body.getReader();
 		const decoder = new TextDecoder();
 		let buffer = "";
 		let text = "";
+		const toolCalls: ToolCall[] = [];
 		let final: Record<string, unknown> | null = null;
 		/** Delivers one line's text, and returns the line when it is the last. */
 		const take = (line: string): Record<string, unknown> | null => {
@@ -248,6 +328,7 @@ export class OllamaProvider implements ReflectionProvider {
 				text += delta;
 				request.onText(delta);
 			}
+			toolCalls.push(...toolCallsOf(part));
 			return part.done === true ? part : null;
 		};
 		try {
@@ -275,7 +356,7 @@ export class OllamaProvider implements ReflectionProvider {
 			reader.cancel().catch(() => undefined);
 		}
 		if (!final) throw new ProviderError("unreachable", "Ollama stopped before the answer was complete");
-		return answerOf(text, final);
+		return answerOf(text, toolCalls, final);
 	}
 
 	/** One whole answer through `requestUrl`, delivered with a single `onText`. */
@@ -284,7 +365,7 @@ export class OllamaProvider implements ReflectionProvider {
 		const body = parseJson(textOf(response));
 		if (response.status >= 400 || errorOf(body) !== null) throw chatError(response.status, body);
 		if (!isRecord(body)) throw new ProviderError("failed", "Ollama sent an answer that could not be read");
-		const answer = checked(answerOf(contentOf(body), body));
+		const answer = checked(answerOf(contentOf(body), toolCallsOf(body), body));
 		if (answer.text) request.onText(answer.text);
 		return { ...answer, streamed: false };
 	}
@@ -306,12 +387,23 @@ export class OllamaProvider implements ReflectionProvider {
 }
 
 /**
- * An answer that stopped on `length` before any text means the prompt left
- * no room to write in, which is an error rather than an empty reflection.
+ * An answer that stopped on `length` before any text or tool call means the
+ * prompt left no room to write in, which is an error rather than an empty
+ * reflection; or that the model used up `ANSWER_LIMIT` without writing.
  */
-function checked(answer: Answer): Answer {
-	if (!answer.text.trim() && answer.doneReason === "length") {
-		throw new ProviderError("failed", "The notes filled the model's context before it could answer");
+function checked(answer: Answer): Omit<ChatResult, "streamed"> {
+	if (!answer.text.trim() && !answer.toolCalls.length && answer.doneReason === "length") {
+		throw new ProviderError(
+			"failed",
+			answer.answerTokens !== null && answer.answerTokens >= ANSWER_LIMIT
+				? "The model stopped before it wrote an answer"
+				: "The notes filled the model's context before it could answer",
+		);
 	}
-	return answer;
+	return {
+		text: answer.text,
+		promptTokens: answer.promptTokens,
+		doneReason: answer.doneReason,
+		toolCalls: answer.toolCalls,
+	};
 }

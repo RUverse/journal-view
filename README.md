@@ -21,7 +21,8 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
   alongside that day's note.
 - **Reflect on what you wrote.** On desktop, a model on your own computer (through Ollama) can read
   the last weeks, or this date in past years, and write back what it notices, citing the days it
-  draws on. Each reflection is saved as a note of its own.
+  draws on. Pick a preset or ask a question of your own. Each reflection is saved as a note of its
+  own.
 - **Stay responsive across years of notes.** Journal View keeps the days around you ready to edit
   while efficiently handling the rest of your timeline.
 
@@ -42,8 +43,9 @@ Journal View works locally with files in your Obsidian vault. It does not collec
 an account, or access files outside your vault.
 
 Its only network requests are reflections, which you start yourself: a reflection sends the notes it
-reads to the Ollama server set in Settings → Journal View, which by default runs on your own computer,
-and to nothing else. Turn off **Show Reflect button** to keep the feature out of sight.
+reads to the Ollama server set in the Reflect window's settings, which by default runs on your own
+computer, and to nothing else. Turn off **Reflections** in Settings → Journal View to keep the feature
+out of sight.
 
 ## Contributing
 

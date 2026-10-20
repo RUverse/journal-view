@@ -23,6 +23,7 @@ export default defineConfig(
 						"manifest.json",
 						"scripts/deploy-ios-test-vault.mjs",
 						"scripts/reflection-spike.mjs",
+						"scripts/reflection-tools-spike.mjs",
 						"scripts/sample-journal.mjs",
 					],
 				},

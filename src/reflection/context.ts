@@ -5,23 +5,23 @@ import type { Moment } from "../moment";
 import { editorBody } from "../noteBody";
 import { DAY_KEY_FORMAT } from "../noteIndex";
 import { REMINDER, SYSTEM_PROMPT } from "./presets";
-import type { ReflectionPreset, ReflectionScope } from "./presets";
+import type { ReflectionRequest, ReflectionScope } from "./presets";
 import { ProviderError } from "./provider";
 import type { ChatMessage } from "./provider";
 
 /** About four characters to a token, which came within 5% of Ollama's own count for English. */
-const CHARS_PER_TOKEN = 4;
+export const CHARS_PER_TOKEN = 4;
 /** Gemma counted more tokens than the estimate; the margin keeps a prompt from being cut. */
-const ESTIMATE_MARGIN = 1.1;
+export const ESTIMATE_MARGIN = 1.1;
 /** Room left for the answer once the prompt is in. */
-const ANSWER_TOKENS = 1024;
+export const ANSWER_TOKENS = 1024;
 /** Context sizes are asked for in steps, so similar prompts reuse a loaded model. */
 const CONTEXT_STEP = 2048;
 /** Assumed when the server does not say how much a model takes: Ollama's own default. */
 const DEFAULT_CONTEXT = 8192;
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const MONTHS = [
+export const MONTHS = [
 	"January", "February", "March", "April", "May", "June",
 	"July", "August", "September", "October", "November", "December",
 ];
@@ -53,7 +53,7 @@ export interface ReflectionContext {
 }
 
 /** A note in scope, once read and ready to format. */
-interface ReadNote extends ReflectionSource {
+export interface ReadNote extends ReflectionSource {
 	/** The file name, which a property can restate. */
 	name: string;
 	body: string;
@@ -69,7 +69,7 @@ function dateOf(key: string): Date {
  * "Monday, 5 October", in English whatever the app's language: the prompts
  * are English, and they were tuned with dates written this way.
  */
-function longDate(key: string, withYear: boolean): string {
+export function longDate(key: string, withYear: boolean): string {
 	const date = dateOf(key);
 	const text = `${WEEKDAYS[date.getDay()]}, ${date.getDate()} ${MONTHS[date.getMonth()]}`;
 	return withYear ? `${text} ${date.getFullYear()}` : text;
@@ -80,7 +80,7 @@ function isLeapYear(year: number): boolean {
 }
 
 /** The same month and day as `today`; on 29 February, the 28th stands in for years without one. */
-function onThisDay(key: string, today: string): boolean {
+export function onThisDay(key: string, today: string): boolean {
 	const monthDay = today.slice(5);
 	if (key.slice(5) === monthDay) return true;
 	return monthDay === "02-29" && key.slice(5) === "02-28" && !isLeapYear(Number(key.slice(0, 4)));
@@ -90,13 +90,16 @@ function onThisDay(key: string, today: string): boolean {
  * The days a scope reads. A range of days counts today unless it ends
  * before today. This day over the years is given as today alone: which
  * earlier years it reaches depends on the notes, and `buildContext` reports
- * the range it read.
+ * the range it read. So is a scope the model chooses, which no range fixes.
  */
 export function scopeRange(scope: ReflectionScope, today: Moment): ScopeRange {
 	const end = today.clone().startOf("day");
-	if (scope.kind === "this-day") {
+	if (scope.kind === "this-day" || scope.kind === "model") {
 		const key = end.format(DAY_KEY_FORMAT);
 		return { from: key, to: key };
+	}
+	if (scope.kind === "range") {
+		return scope.from <= scope.to ? { from: scope.from, to: scope.to } : { from: scope.to, to: scope.from };
 	}
 	if (scope.beforeToday) end.subtract(1, "days");
 	const days = Number.isFinite(scope.days) ? Math.max(1, Math.floor(scope.days)) : 1;
@@ -108,7 +111,7 @@ export function scopeRange(scope: ReflectionScope, today: Moment): ScopeRange {
  * Notes are judged one by one, as the journal judges them within a day, so a
  * rule such as excluding `#private` keeps those notes from the model.
  */
-function notesInScope(
+export function notesInScope(
 	plugin: JournalViewPlugin,
 	scope: ReflectionScope,
 	today: Moment,
@@ -161,7 +164,7 @@ function propertyValues(value: unknown): string[] {
 	return values;
 }
 
-function propertiesOf(frontmatter: FrontMatterCache | undefined): Map<string, string[]> {
+export function propertiesOf(frontmatter: FrontMatterCache | undefined): Map<string, string[]> {
 	const properties = new Map<string, string[]>();
 	if (!frontmatter) return properties;
 	for (const [key, value] of Object.entries(frontmatter)) {
@@ -203,7 +206,7 @@ function sharedValues(notes: readonly ReadNote[]): Map<string, Set<string>> {
  * Moods are the best signal a week's review has for energy; what every note
  * shares, or what restates the date, tells the model nothing.
  */
-function propertyLine(note: ReadNote, shared: Map<string, Set<string>>): string {
+export function propertyLine(note: ReadNote, shared: Map<string, Set<string>>): string {
 	const parts: string[] = [];
 	for (const [key, values] of note.properties) {
 		const kept = values.filter((value) => !restatesDate(value, note) && !shared.get(key)?.has(value));
@@ -213,13 +216,13 @@ function propertyLine(note: ReadNote, shared: Map<string, Set<string>>): string 
 }
 
 /** A note under a heading carrying the exact link to cite it by. */
-function formatNote(note: ReadNote, withYear: boolean, shared: Map<string, Set<string>>): string {
+export function formatNote(note: ReadNote, withYear: boolean, shared: Map<string, Set<string>>): string {
 	const properties = propertyLine(note, shared);
 	const heading = `### ${note.link} · ${longDate(note.key, withYear)}`;
 	return `${heading}\n${properties ? `${properties}\n` : ""}\n${note.body}`.trimEnd();
 }
 
-async function readNote(
+export async function readNote(
 	plugin: JournalViewPlugin,
 	note: { key: string; file: TFile },
 	sourcePath: string,
@@ -247,7 +250,7 @@ async function readNote(
  * and always keeping the first and last, so dropping notes thins the whole
  * range rather than cutting off its start. One note is the latest.
  */
-function spreadEvenly(length: number, count: number): number[] {
+export function spreadEvenly(length: number, count: number): number[] {
 	if (count >= length) return Array.from({ length }, (_, index) => index);
 	if (count <= 1) return length ? [length - 1] : [];
 	const picked: number[] = [];
@@ -255,17 +258,17 @@ function spreadEvenly(length: number, count: number): number[] {
 	return picked;
 }
 
-const estimateTokens = (characters: number) => Math.ceil(characters / CHARS_PER_TOKEN);
+export const estimateTokens = (characters: number) => Math.ceil(characters / CHARS_PER_TOKEN);
 
 /** The context to work in: the model's own limit, capped by the Maximum context setting. */
-function contextLimit(contextLength: number | null, maxContext: number): number {
+export function contextLimit(contextLength: number | null, maxContext: number): number {
 	const model = contextLength !== null && contextLength > 0 ? contextLength : DEFAULT_CONTEXT;
 	return Number.isFinite(maxContext) && maxContext > 0 ? Math.min(model, maxContext) : model;
 }
 
 /**
- * The conversation that asks for a preset's reflection: the notes in its
- * scope, oldest first, each under a heading with the link to cite it by,
+ * The conversation that asks for a reflection over fixed notes: the notes in
+ * its scope, oldest first, each under a heading with the link to cite it by,
  * then the request, the shape of its answer, and a reminder of the rules.
  * When the notes do not fit the model's context, whole notes are dropped
  * evenly across the range. Throws `ProviderError("failed")` when no note in
@@ -273,7 +276,7 @@ function contextLimit(contextLength: number | null, maxContext: number): number 
  */
 export async function buildContext(
 	plugin: JournalViewPlugin,
-	preset: ReflectionPreset,
+	preset: Pick<ReflectionRequest, "scope" | "prompt" | "format">,
 	today: Moment,
 	limits: { contextLength: number | null; maxContext: number; sourcePath: string },
 ): Promise<ReflectionContext> {
@@ -371,14 +374,20 @@ function linkText(link: string): string {
 
 /**
  * Mends citations as models write them before they are rendered: a link
- * holding several notes, `[[2024-10-19, 2025-10-19]]`, becomes one link per
- * note, and a bare `2026-10-05` that is exactly a note's link text becomes
- * its link. Only notes that were read are linked; anything else, including
- * links to notes that were not read and text in code, is left as written.
+ * holding several notes, `[[2024-10-19, 2025-10-19]]` or
+ * `[[2024-10-19], [2025-10-19]]`, becomes one link per note, and a bare
+ * `2026-10-05` that is exactly a note's link text becomes its link. Only
+ * notes that were read are linked; anything else, including links to notes
+ * that were not read and text in code, is left as written.
  */
 export function repairCitations(text: string, sources: readonly ReflectionSource[]): string {
 	const targets = new Set(sources.map((source) => linkText(source.link)).filter(Boolean));
 	if (!targets.size) return text;
+	// Gemma writes several notes as `[[2026-07-25], [2026-08-14]]`: one link per note.
+	text = text.replace(/\[\[[^[\]\n]+\](?:\s*[,;]\s*\[[^[\]\n]+\])+\]/g, (match: string) => {
+		const parts = Array.from(match.slice(1, -1).matchAll(/\[([^[\]\n]+)\]/g), (part) => part[1].trim());
+		return parts.every((part) => targets.has(part)) ? parts.map((part) => `[[${part}]]`).join(", ") : match;
+	});
 	// Longest first, so `2026-10-05 Birthday` is not linked as `2026-10-05`.
 	const names = [...targets].sort((left, right) => right.length - left.length).map(escapeRegExp);
 	const pattern = new RegExp(

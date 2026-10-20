@@ -119,7 +119,7 @@ export class ReflectionCard {
 	private showRun(run: ReflectionRun): void {
 		this.el.toggleClass("journal-reflection-pending", run.status !== "failed");
 		this.el.toggleClass("journal-reflection-failed", run.status === "failed");
-		this.setTitle(run.preset.name);
+		this.setTitle(run.request.title);
 		this.actionsEl.empty();
 		const runner = this.host.plugin.reflectionRuns;
 		if (run.status === "failed") {
@@ -164,7 +164,8 @@ export class ReflectionCard {
 	private setTitle(kind: string): void {
 		this.titleEl.empty();
 		this.titleEl.createSpan({ cls: "journal-reflection-label", text: "Reflection" });
-		this.titleEl.createSpan({ cls: "journal-reflection-kind", text: kind });
+		// A long question is cut to one line; its tooltip holds the rest.
+		setTooltip(this.titleEl.createSpan({ cls: "journal-reflection-kind", text: kind }), kind);
 	}
 
 	private addAction(icon: string, label: string, onClick: () => void): void {

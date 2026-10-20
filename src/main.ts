@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
+import { MarkdownView, Platform, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import { DailyNoteResolver } from "./dailyNotes";
 import { DayFileIndex } from "./dayFiles";
 import { FILES_HOVER_SOURCE } from "./dayFilesList";
@@ -8,6 +8,7 @@ import { FilteredDailyNoteIndex, filterRulesSetting, hasIncludeFilter } from "./
 import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { DAY_KEY_FORMAT, DailyNoteIndex } from "./noteIndex";
+import type { DaySequence } from "./noteIndex";
 import {
 	DEFAULT_SETTINGS,
 	JournalViewSettingTab,
@@ -19,6 +20,7 @@ import {
 	clampReflectionContext,
 	clampSaveDelay,
 	reflectionFolderSetting,
+	reflectionServerSetting,
 	isYearProgressMode,
 } from "./settings";
 import type { DailyHeaderStyle, DayFilesDate, DaySortDirection, YearProgressMode } from "./settings";
@@ -29,8 +31,9 @@ import { StatisticsView, VIEW_TYPE_STATISTICS } from "./statisticsView";
 import { OllamaProvider } from "./reflection/ollama";
 import type { ReflectionProvider } from "./reflection/provider";
 import { ReflectionRunner } from "./reflection/runner";
+import { ReflectionModal } from "./reflection/modal";
+import { presetsSetting } from "./reflection/presets";
 import { ReflectionStore } from "./reflection/store";
-import { ReflectionPresetModal } from "./reflection/presetModal";
 
 type EntryDirection = -1 | 0 | 1;
 
@@ -58,6 +61,8 @@ export default class JournalViewPlugin extends Plugin {
 	reflections!: ReflectionStore;
 	/** Reflections being written. */
 	reflectionRuns!: ReflectionRunner;
+	/** The open Reflect window, which talks to this instance and so closes with it. */
+	private reflectModal: ReflectionModal | null = null;
 	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
 	private dailyNoteActions = new Map<MarkdownView, HTMLElement>();
 	private settingsTab: JournalViewSettingTab | null = null;
@@ -118,12 +123,16 @@ export default class JournalViewPlugin extends Plugin {
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
 		this.dayFiles = new DayFileIndex(this.app, this.index, this.daily, () => this.settings);
 		// File history never makes an empty day eligible in note-only mode.
-		// Include filters also cannot match a day without a note.
-		this.shownDays = new ShownDays(this.index, this.filteredIndex, () =>
-			this.settings.showDayFiles && !this.settings.hideEmptyDays && !hasIncludeFilter(this.settings)
-				? this.dayFiles
-				: null,
-		);
+		// Include filters also cannot match a day without a note. A day keeps
+		// its reflections in the journal either way.
+		this.shownDays = new ShownDays(this.index, this.filteredIndex, () => {
+			const others: DaySequence[] = [];
+			if (this.settings.showDayFiles && !this.settings.hideEmptyDays && !hasIncludeFilter(this.settings)) {
+				others.push(this.dayFiles);
+			}
+			if (this.settings.reflectionsEnabled) others.push(this.reflections);
+			return others;
+		});
 		// onLayoutReady queues callbacks without returning an EventRef, so they
 		// need an explicit guard when the plugin unloads before layout restoration.
 		let layoutReadyCallbacksEnabled = true;
@@ -218,7 +227,11 @@ export default class JournalViewPlugin extends Plugin {
 		this.addCommand({
 			id: "create-reflection",
 			name: "Create reflection",
-			callback: () => this.createReflection(),
+			checkCallback: (checking) => {
+				if (!this.settings.reflectionsEnabled || !Platform.isDesktop) return false;
+				if (!checking) this.openReflectModal(() => void this.openJournalEntry(0));
+				return true;
+			},
 		});
 
 		this.addCommand({
@@ -244,6 +257,7 @@ export default class JournalViewPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.reflectModal?.close();
 		// Views clean themselves up in onClose; make sure nothing typed in the
 		// last moment is lost when the plugin is disabled or reloaded.
 		const flushes: Promise<void>[] = [];
@@ -261,25 +275,20 @@ export default class JournalViewPlugin extends Plugin {
 		return new OllamaProvider(this.settings.reflectionServer);
 	}
 
-	/** Picks a preset and writes its reflection under today, in the journal. */
-	private createReflection(): void {
-		new ReflectionPresetModal(this.app, (preset) => {
-			this.reflectionRuns.start(preset);
-			void this.openJournalEntry(0);
-		}).open();
-	}
-
-	/** Opens Obsidian's settings on this plugin's tab. */
-	openSettingsTab(): void {
-		// Not in Obsidian's typings.
-		const setting = (this.app as typeof this.app & { setting?: { open(): void; openTabById(id: string): void } })
-			.setting;
-		if (!setting) {
-			new Notice("Journal view: could not open the plugin settings");
-			return;
-		}
-		setting.open();
-		setting.openTabById(this.manifest.id);
+	/**
+	 * Opens the Reflect window, whose reflection is written under today.
+	 * `onStart` follows it there, for a window opened outside the journal.
+	 */
+	openReflectModal(onStart?: () => void): void {
+		this.reflectModal?.close();
+		const modal = new ReflectionModal(this.app, this, {
+			onStart,
+			onClose: () => {
+				if (this.reflectModal === modal) this.reflectModal = null;
+			},
+		});
+		this.reflectModal = modal;
+		modal.open();
 	}
 
 	async openStatistics(): Promise<void> {
@@ -448,16 +457,15 @@ export default class JournalViewPlugin extends Plugin {
 			dayFilesProperty: stringSetting(saved.dayFilesProperty, DEFAULT_SETTINGS.dayFilesProperty).trim(),
 			dayFilesAttachments: booleanSetting(saved.dayFilesAttachments, DEFAULT_SETTINGS.dayFilesAttachments),
 			dayFilesExcluded: stringSetting(saved.dayFilesExcluded, DEFAULT_SETTINGS.dayFilesExcluded),
-			reflectionServer:
-				stringSetting(saved.reflectionServer, DEFAULT_REFLECTION_SERVER).trim().replace(/\/+$/, "") ||
-				DEFAULT_REFLECTION_SERVER,
+			reflectionsEnabled: booleanSetting(saved.reflectionsEnabled, DEFAULT_SETTINGS.reflectionsEnabled),
+			reflectionServer: reflectionServerSetting(stringSetting(saved.reflectionServer, DEFAULT_REFLECTION_SERVER)),
 			reflectionModel: stringSetting(saved.reflectionModel, DEFAULT_SETTINGS.reflectionModel).trim(),
 			reflectionFolder: reflectionFolderSetting(stringSetting(saved.reflectionFolder, DEFAULT_SETTINGS.reflectionFolder)),
 			reflectionMaxContext:
 				typeof saved.reflectionMaxContext === "number" && Number.isFinite(saved.reflectionMaxContext)
 					? clampReflectionContext(saved.reflectionMaxContext)
 					: DEFAULT_SETTINGS.reflectionMaxContext,
-			showReflectButton: booleanSetting(saved.showReflectButton, DEFAULT_SETTINGS.showReflectButton),
+			reflectionPresets: presetsSetting(saved.reflectionPresets),
 		};
 	}
 

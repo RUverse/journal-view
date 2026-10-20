@@ -14,10 +14,24 @@ export interface ModelInfo {
 	contextLength: number | null;
 }
 
-export interface ChatMessage {
-	role: "system" | "user" | "assistant";
-	content: string;
+/** A tool the model may call, described by a JSON schema of its arguments. */
+export interface ToolDefinition {
+	name: string;
+	description: string;
+	parameters: Record<string, unknown>;
 }
+
+/** A call the model asked for, with the arguments it gave; they are not checked yet. */
+export interface ToolCall {
+	name: string;
+	arguments: Record<string, unknown>;
+}
+
+export type ChatMessage =
+	| { role: "system" | "user"; content: string }
+	| { role: "assistant"; content: string; toolCalls?: ToolCall[] }
+	/** What a tool returned, for the call of that name before it. */
+	| { role: "tool"; content: string; toolName: string };
 
 export interface ChatRequest {
 	model: string;
@@ -28,6 +42,8 @@ export interface ChatRequest {
 	signal: AbortSignal;
 	/** Receives the answer as it is written. Called once with all of it when streaming is unavailable. */
 	onText: (delta: string) => void;
+	/** Tools the model may call instead of answering; their calls come back in `toolCalls`. */
+	tools?: ToolDefinition[];
 }
 
 export interface ChatResult {
@@ -38,9 +54,12 @@ export interface ChatResult {
 	doneReason: string | null;
 	/** False when the answer arrived in one piece, through the fallback. */
 	streamed: boolean;
+	/** The tools the model asked to call, in order; empty when it answered. */
+	toolCalls: ToolCall[];
 }
 
-export type ProviderErrorKind = "unreachable" | "model-missing" | "aborted" | "failed";
+/** `no-tools`: the model was offered tools and the server says it cannot use them. */
+export type ProviderErrorKind = "unreachable" | "model-missing" | "no-tools" | "aborted" | "failed";
 
 export class ProviderError extends Error {
 	constructor(

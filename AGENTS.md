@@ -98,9 +98,10 @@ word counts and, through `src/vocabulary.ts`, each note's distinct words.
 journal-wide mosaic of words used for the first time each month.
 
 `src/reflection/` is Reflection: a local model (Ollama, `ollama.ts`) reads a preset's notes
-(`context.ts`, `presets.ts`) and writes back a reflection note. `store.ts` indexes those notes by day,
-`runner.ts` holds the ones being written so they outlive their day's cards, and `card.ts` and
-`button.ts` are what a day shows. `docs/plans/reflection.md` is the plan and the spike's results.
+(`context.ts`, `presets.ts`), or chooses its own through tools (`tools.ts`), and writes back a
+reflection note. `store.ts` indexes those notes by day, `runner.ts` holds the ones being written so
+they outlive their day's cards, `card.ts` and `button.ts` are what a day shows, and `modal.ts` is the
+Reflect window with its settings. `docs/plans/reflection.md` is the plan and the spikes' results.
 
 `src/datePicker.ts` is the toolbar's calendar: a scrolling column of months that
 hangs off the view rather than being part of it, and moves the journal by date.

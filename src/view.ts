@@ -139,6 +139,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private indexVersion = -1;
 	private filteredIndexVersion = -1;
 	private dayFilesVersion = -1;
+	private reflectionsVersion = -1;
 	private initialTarget?: { date: Moment; focusAtEnd: boolean; revealThroughFilters: boolean; path?: string };
 
 	constructor(
@@ -307,6 +308,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.indexVersion = this.plugin.index.version;
 		this.filteredIndexVersion = this.plugin.filteredIndex.version;
 		this.dayFilesVersion = this.plugin.dayFiles.version;
+		this.reflectionsVersion = this.plugin.reflections.version;
 		this.walker = new DayWalker(
 			this.today,
 			this.plugin.index,
@@ -1406,11 +1408,13 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const changed =
 			this.plugin.index.version !== this.indexVersion ||
 			this.plugin.filteredIndex.version !== this.filteredIndexVersion ||
-			this.plugin.dayFiles.version !== this.dayFilesVersion;
+			this.plugin.dayFiles.version !== this.dayFilesVersion ||
+			this.plugin.reflections.version !== this.reflectionsVersion;
 		if (!changed) return false;
 		this.indexVersion = this.plugin.index.version;
 		this.filteredIndexVersion = this.plugin.filteredIndex.version;
 		this.dayFilesVersion = this.plugin.dayFiles.version;
+		this.reflectionsVersion = this.plugin.reflections.version;
 		this.exhausted = { start: false, end: false };
 		return true;
 	}
@@ -1418,14 +1422,27 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	/**
 	 * Reflections on some days came, changed or went (every day's, for null),
 	 * or one is being written. Only loaded days draw them; the resize anchor
-	 * absorbs a card growing above the reader.
+	 * absorbs a card growing above the reader. A day without a note is
+	 * brought in by its first reflection and hidden again after its last,
+	 * while the journal leaves out empty days.
 	 */
 	private onReflectionsChanged(keys: string[] | null): void {
 		if (!this.ready) return;
-		const wanted = keys === null ? null : new Set(keys);
-		for (const section of this.sections) {
-			if (!wanted || wanted.has(section.key)) section.refreshReflections();
+		this.syncWithIndex();
+		const days = keys === null ? [...this.sections] : [];
+		for (const key of keys ?? []) {
+			const offset = this.walker.offsetFor(key);
+			const day = this.sectionAt(offset) ?? (this.walker.isVisible(offset) ? this.ensureSectionFor(offset) : undefined);
+			if (day) days.push(day);
 		}
+		let changed = false;
+		for (const day of days) {
+			day.refreshReflections();
+			changed = day.refreshVisibility() || changed;
+		}
+		if (!changed) return;
+		this.syncDateSeparators();
+		this.find?.sectionsChanged();
 	}
 
 	/** Moves the journal to a note a reflection cites, on its day. */
@@ -1631,6 +1648,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			dayFilesProperty: settings.dayFilesProperty,
 			dayFilesAttachments: settings.dayFilesAttachments,
 			dayFilesExcluded: settings.dayFilesExcluded,
+			// Days without a note come and go with their reflections.
+			reflectionsEnabled: settings.reflectionsEnabled,
+			reflectionFolder: settings.reflectionFolder,
 		});
 	}
 

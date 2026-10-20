@@ -2133,8 +2133,17 @@ button.journal-appearance-settings-link:hover {
 }
 
 .journal-reflection-label {
+	flex: none;
 	color: var(--text-normal);
 	font-weight: var(--font-semibold);
+}
+
+/* A question of the reader's own can be long: one line, cut short. */
+.journal-reflection-kind {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* A saved reflection's buttons show while it is hovered, as a note's do; a
@@ -2220,6 +2229,180 @@ button.journal-appearance-settings-link:hover {
 	}
 }
 
-.journal-settings-reflection-status {
+/* The Reflect window: a question and its notes, then the presets. Its
+   settings and a preset's editor are pages of the same window. */
+.journal-reflect-title {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	/* Clear of the window's own close button. */
+	padding-inline-end: var(--size-4-8);
+}
+
+.journal-reflect-title-text {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.journal-reflect-icon-button {
+	flex: none;
+}
+
+.journal-reflect-setup {
+	margin-bottom: var(--size-4-4);
+	padding: var(--size-4-3) var(--size-4-4);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	font-size: var(--font-ui-small);
+}
+
+.journal-reflect-setup[hidden],
+.journal-reflect-range[hidden] {
+	display: none;
+}
+
+.journal-reflect-setup-title {
+	font-weight: var(--font-semibold);
+}
+
+.journal-reflect-setup-steps {
+	margin: var(--size-4-2) 0;
+	padding-inline-start: var(--size-4-6);
+}
+
+.journal-reflect-setup-actions {
+	display: flex;
+	gap: var(--size-4-2);
+}
+
+.journal-reflect-composer {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+}
+
+textarea.journal-reflect-question {
+	width: 100%;
+	min-height: 4.5em;
+	resize: vertical;
+	font-size: var(--font-ui-medium);
+	line-height: var(--line-height-normal);
+}
+
+.journal-reflect-composer-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--size-4-2);
+}
+
+.journal-reflect-spacer {
+	flex: 1 1 auto;
+}
+
+/* Obsidian draws a disabled call to action like an enabled one. */
+.journal-reflect-composer-row button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.journal-reflect-range {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.journal-reflect-hint {
+	min-height: 1.5em;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.journal-reflect-hint-warning {
+	color: var(--text-warning);
+}
+
+.journal-reflect-section-title {
+	margin: var(--size-4-5) 0 var(--size-4-2);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	color: var(--text-muted);
+}
+
+.journal-reflect-presets {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-1);
+	margin: 0 calc(-1 * var(--size-4-3));
+}
+
+button.journal-reflect-preset {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--size-4-4);
+	width: 100%;
+	height: auto;
+	padding: var(--size-4-2) var(--size-4-3);
+	border-radius: var(--radius-s);
+	background-color: transparent;
+	box-shadow: none;
+	font-weight: var(--font-normal);
+	text-align: start;
+	cursor: var(--cursor);
+}
+
+button.journal-reflect-preset:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+button.journal-reflect-preset:disabled {
+	background-color: transparent;
+	opacity: 0.5;
+	cursor: default;
+}
+
+.journal-reflect-preset-name {
+	color: var(--text-normal);
+}
+
+.journal-reflect-preset-meta {
+	flex: none;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.journal-reflect-empty {
+	padding: var(--size-4-2) 0;
+	color: var(--text-muted);
+}
+
+/* The first preset cannot move up, nor the last down. */
+.journal-reflect-preset-row .clickable-icon.is-disabled {
+	opacity: 0.3;
+	pointer-events: none;
+}
+
+.journal-reflect-connection {
 	margin-top: var(--size-4-1);
+	color: var(--text-muted);
+}
+
+/* A preset's question and answer shape take the window's width. */
+.setting-item.journal-reflect-wide-setting {
+	flex-direction: column;
+	align-items: stretch;
+	gap: var(--size-4-2);
+}
+
+.journal-reflect-wide-setting .setting-item-control {
+	justify-content: stretch;
+}
+
+.journal-reflect-wide-setting textarea {
+	width: 100%;
+	min-height: 5em;
+	resize: vertical;
 }

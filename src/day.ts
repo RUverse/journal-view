@@ -486,10 +486,12 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 	 */
 	refreshReflections(): void {
 		const { plugin } = this.host;
-		const sources: ReflectionCardSource[] = [
-			...plugin.reflections.reflectionsFor(this.key).map((stored) => ({ stored })),
-			...plugin.reflectionRuns.runsFor(this.key).map((run) => ({ run })),
-		];
+		const sources: ReflectionCardSource[] = plugin.settings.reflectionsEnabled
+			? [
+					...plugin.reflections.reflectionsFor(this.key).map((stored) => ({ stored })),
+					...plugin.reflectionRuns.runsFor(this.key).map((run) => ({ run })),
+				]
+			: [];
 		if (this.newestFirst) sources.reverse();
 		const existing = new Map(this.reflectionCards.map((card) => [card.identity, card]));
 		this.reflectionCards = sources.map((source) => {
@@ -501,7 +503,7 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		});
 		for (const card of existing.values()) card.destroy();
 
-		const wantsButton = this.isToday && Platform.isDesktop && plugin.settings.showReflectButton;
+		const wantsButton = plugin.settings.reflectionsEnabled && this.isToday && Platform.isDesktop;
 		if (wantsButton && !this.reflectButton) this.reflectButton = new ReflectButton(plugin);
 		if (!wantsButton && this.reflectButton) {
 			this.reflectButton.destroy();

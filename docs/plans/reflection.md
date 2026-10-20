@@ -38,7 +38,7 @@ show the journal column of each:
 1. **Resting:** a faint pill below today's card.
 2. **Hovered:** the pill grows into a **Reflect** button.
 3. **Preset menu:** a rough sketch of a short list of presets (*this day over years*, *summarize*,
-   *?*). The menu below replaces it.
+   *?*). The Reflect window below replaces it.
 4. **Generating:** a card with a thin border and no fill, titled **Reflection**, with skeleton lines.
 5. **Ready:** the same card; its body is left empty in the draft.
 
@@ -50,7 +50,9 @@ Agreed with the user on 2026-10-19:
 | --- | --- | --- |
 | Context | Presets fix their own range and the plugin hands those notes over. Custom prompts give the model tools; models without tools get a range picker | Presets must work with any model; small local models call tools unreliably |
 | Storage | One Markdown note per reflection in a configurable `Reflections` folder | Searchable, linkable, and kept without the plugin; no lock-in |
-| Composer | A menu of presets under the button; **Write your own…** and **Presets and model…** open a modal | One click for the common case, a full form for the rest |
+| Composer | The button opens the Reflect window: a question of your own over a chosen scope, and the presets below it, each a click away. Changed from a menu on 2026-10-20 | A question of your own belongs next to the presets, not behind a menu item |
+| Settings | Server, model, folder, context and presets live on the window's settings page; the plugin's tab keeps one **Reflections** toggle. Decided 2026-10-20 | The settings sit where they are used |
+| Days | A day with reflections stays in the journal when it has no note, even with **Only show days that have a note** on. Decided 2026-10-20 | A reflection made yesterday must not vanish because yesterday had no note |
 | Card | Read-only Markdown with linked source dates, **Regenerate**, **Ask a follow-up**, and **Delete** | Lets the reader check a reflection against what they wrote and keep talking to it |
 | Generating | The drafted skeleton until the first words arrive, then streamed text with **Stop** | A local model reading two weeks of notes can take 30 s or more |
 | Newest first | The whole stack flips: button, reflections (newest first), then the day's card | A new reflection always appears next to the button that made it |
@@ -66,43 +68,48 @@ Agreed with the user on 2026-10-19:
 - Hovering, or focusing it with the keyboard, expands it into **Reflect**. Focus is a real path, not
   only hover: it is a `<button>` with an accessible name.
 - It follows the pattern of today's add-note button (`src/day.ts:115`), and only exists on desktop
-  (`Platform.isDesktop`) while **Show Reflect button** is on.
+  (`Platform.isDesktop`) while **Reflections** is on.
 
-### The menu
+### The Reflect window
 
-Selecting **Reflect** opens an Obsidian `Menu` under the button:
+Selecting **Reflect** opens a modal titled **Reflect**, as **Customization** is opened from the
+toolbar. The **Create reflection** command opens the same window. A gear at the top right turns the
+window into its settings page, and an arrow leads back.
 
 ```text
-This day over the years
-What I learned · 14 days
-Week in review · 7 days
-Open loops · 30 days
-Recurring themes · 90 days
-Questions to sit with · 14 days
-────────────
-Write your own…
-Presets and model…
+Reflect                                              ⚙  ✕
+┌──────────────────────────────────────────────────────┐
+│ Ask your journal a question…                         │
+└──────────────────────────────────────────────────────┘
+[Let the model choose ▾] [gemma4:26b ▾]          🔖 [Reflect]
+The model searches and reads your notes itself, which takes longer.
+
+Presets
+This day over the years                           4 notes
+What I learned                        14 days · ~3k words
+Week in review                        7 days · ~620 words
+…
 ```
 
-- A preset item shows how much it would read, such as `90 days · ~12k words`, so a slow run is not a
-  surprise.
-- Until Ollama answers, the menu holds a single **Connect to Ollama…**, which opens the modal at its
-  connection step.
-
-### The modal
-
-- **Connection:** server address (default `http://127.0.0.1:11434`), a status line, and setup steps
-  when nothing answers: install Ollama, pull a model, retry. Suggest `gemma4:26b` with 32 GB of memory
-  or more and `gemma4:e4b` otherwise (see the spike's results).
-- **Model:** a dropdown of installed models (`/api/tags`), marking which support tools. The choice is
-  remembered as the default and can be changed for a single run.
-- **Prompt:** a text box, with the presets as chips above it that fill it in.
+- **Question:** a text box; Enter asks, Shift+Enter starts a new line. What was typed is kept while
+  the plugin runs, so closing the window by accident loses nothing.
 - **Scope:** *Let the model choose* (needs a model with tools), *Last 7 / 14 / 30 / 90 days*, *This
-  day over the years*, or a custom from–to range. Without tool support, *Let the model choose* is
-  disabled with a one-line explanation and the scope defaults to *Last 14 days*.
-- **Presets:** save the current prompt and scope as a preset; edit, reorder and delete presets; reset
-  the built-in ones.
-- **Create** closes the modal and starts the card.
+  day over the years*, or *Dates…*, a from–to range. Under it, how much it reads: `Reads 12 notes ·
+  ~3k words`. Without tool support, *Let the model choose* is disabled and says it needs a model with
+  tools; a scope left at it falls back to *Last 14 days*.
+- **Model:** a dropdown of installed models, marking those without tools. The choice is the default
+  model, the same one the settings page sets.
+- **Presets:** run at a click, each showing how much it would read, so a slow run is not a surprise.
+  The bookmark button saves the typed question and its scope as a new preset.
+- Until Ollama answers, the window says so above the question, with the setup steps: install Ollama,
+  pull a model (`gemma4:26b` with 32 GB of memory or more, `gemma4:e4b` otherwise), **Try again**.
+
+The settings page holds the server address and the connection's status, the model, the folder,
+**Maximum context**, and the presets: reorder, edit, delete, **New preset**, and **Restore built-in
+presets**, which brings back edited and deleted ones and keeps the reader's own. A preset's editor
+has its name, question, an optional answer shape, and what it reads. The plugin's settings tab keeps
+a single **Reflections** toggle, which turns the whole feature off: the button, the command, the cards,
+and the days kept for their reflections.
 
 ### The card
 
@@ -169,20 +176,23 @@ stays behind small host interfaces, as with the view's other collaborators.
 | `presets.ts` | Built-in presets, and merging them with the user's |
 | `store.ts` | Indexes the Reflections folder by date, follows vault events, creates, rewrites and trashes reflection files |
 | `card.ts` | The bordered card: skeleton, streaming, Stop, Regenerate, follow-ups, sources, errors |
-| `button.ts` | Today's handle and its preset menu |
-| `modal.ts` | Connection, model, prompt, scope and preset management |
+| `button.ts` | Today's handle, which opens the Reflect window |
+| `modal.ts` | The Reflect window: the question, its scope and model, the presets, and the settings page with the connection and preset management |
 
 Changes to existing code:
 
-- `src/settings.ts`: a `reflections` block holding the server address, default model, folder
-  (default `Reflections`), maximum context size, **Show Reflect button**, and presets, plus a
-  *Reflections* section in the settings tab.
+- `src/settings.ts`: the server address, default model, folder (default `Reflections`), maximum
+  context size and presets (null until edited: the built-in ones), and **Reflections**, the one
+  toggle the settings tab shows.
 - `src/day.ts`: a reflections element on every day, placed by sort direction, and the handle on
   today.
 - `src/dayFiles.ts`: leave the Reflections folder out of file history, next to the template folders
   (`src/dayFiles.ts:229`).
 - `src/main.ts`: create the store as a child component, like `FindCorpus`
-  (`src/main.ts:101`), and add a **Create reflection** command that opens the menu's choices.
+  (`src/main.ts:101`), and add a **Create reflection** command that opens the Reflect window.
+- `src/dayWalk.ts`: `ShownDays` counts the days with reflections, next to the days with files, so
+  the walker keeps them when empty days are hidden; the view brings such a day in with its first
+  reflection and hides it after its last.
 - `README.md`: a feature bullet and a revised **Privacy** section. It currently promises no network
   requests; it must say that reflections send the notes they read to the Ollama server you configure,
   by default on this computer, and nowhere else.
@@ -392,12 +402,59 @@ What carries into the implementation:
 
 ### 3. Reflect button and presets
 
-- The handle, the menu, and the built-in presets.
+- The handle, the menu (replaced by the Reflect window in step 4), and the built-in presets.
 - The card's reading, writing, stopped and error states, and saving the file.
 
 ### 4. Modal and tools
 
 - Custom prompts, the scope picker, `tools.ts` with its loop and fallback, and preset management.
+
+Done on 2026-10-20, with the changes asked for that day: the window replaces the menu, its settings
+page replaces the settings tab's section, and days with reflections stay in the journal.
+`scripts/reflection-tools-spike.mjs` mirrors `tools.ts` over the sample journal, and tuned the tools,
+the prompts and the loop; change them there first. Its runs are in `test-vault/.reflection-spike/`.
+
+#### The tools, as tuned
+
+- `search_journal` matches the start of words with a light stemmer, so *run* finds *running*, and
+  ends with the `read_journal` call that would read what it found. That one line is what got small
+  models to read notes in full rather than answer from excerpts.
+- `read_journal` names the notes it already showed rather than repeating them, drops whole notes
+  evenly when they do not fit (search hits last), and names the dropped ones. A tag that matches
+  nothing reads the whole range and lists the tags there: models take topics for tags.
+- `list_journal` lists by month past 120 notes; `on_this_day` takes a date in any year.
+- Arguments are checked, and every error says how to call again. A backwards range is swapped.
+- Up to six rounds with tools, then one request without them. `num_ctx` is the whole context limit
+  from the first round, since changing it makes Ollama load the model again, and each tool result is
+  cut to the room left, measured against `prompt_eval_count` as the rounds go.
+- **Two guards, each used once.** An answer written before any tool call is dropped unseen and the
+  model told to look first: `qwen3:8b` invented whole notes in its first round for five of seven
+  questions, and shown its own answer it went looking for the notes it had invented. An answer that
+  leans on excerpts alone is sent back once to read in full. While either could fire, the text is
+  held back and given to the card whole.
+- `llama3.1` writes its calls into the text as JSON; those are taken as calls.
+
+#### Results
+
+Seven questions whose answers the sample journal plants (*When did I stop running, and why?*, Mina,
+the reorg, this date in past years, the Farahani letter, what I learned, and the unanswerable *How did
+my trip to Lisbon go?*), plus one with `#private` excluded, scored 1–5 against the answer key by two
+grading agents:
+
+| Model | Score | Time per question | Notes |
+| --- | --- | --- | --- |
+| `qwen3.8:27b-mlx` | 4.6 | 4–35 s | Several targeted searches and reads; checks nothing came later |
+| `gemma4:26b` | 4.4 | 1–12 s | Sensible calls every time. Suggested |
+| `gemma4:12b` | 4.1 | 3–15 s | Usable; sometimes loops on hidden markup after a tool result |
+| `gemma4:e4b` | 3.0 | 0.2–13 s | Wrong dates and ranges at times; answers from lists |
+| `qwen3:8b` | 3.3 | 5–33 s | Needs both guards; odd ranges |
+| `llama3.1:8b` | 2.3 | 2–21 s | Garbage arguments, no links, invents. Unusable |
+| `gemma3:4b` | — | — | The server refuses tools: the `no-tools` path, which reads the last 14 days |
+
+Every model said the notes do not cover Lisbon. With `#private` excluded, `gemma4:26b` said the notes
+do not record what the doctor said. The slips left: a detail cited to the note next to its own, and
+no answer saying the runs never resumed. Gemma writes several citations as `[[a], [b]]`, which
+`repairCitations` now splits.
 
 ### 5. Regenerate, follow-ups and sources
 
@@ -463,7 +520,12 @@ the plugin has to be disabled and re-enabled to load a new build.
   reasoning added up to exactly the 8,192 of `num_ctx`, and no answer came. Models without thinking accept
   `think: false` too. If thinking is ever offered, never stream or save `message.thinking`, give it
   its own room in `num_ctx`, and treat an empty answer that stopped on `length` as an error.
-- **Speed.** On a machine without a GPU, a 90-day preset can take minutes. The menu shows the size
+- **Answers that never end.** Gemma 4, `gemma4:12b` most, sometimes loops after a tool result and
+  sends nothing until `num_ctx` fills, minutes later. Every chat caps the answer with
+  `options.num_predict` at 2048 tokens, which ends such a loop in about 20 s.
+- **Memory of tool runs.** A question the model answers with tools asks for the whole *Maximum
+  context* (32k by default) from its first round.
+- **Speed.** On a machine without a GPU, a 90-day preset can take minutes. The window shows the size
   up front, and Stop always works.
 - **Scroll position.** Text streaming into a card above the reader (newest first) must not move what
   they are reading.
@@ -474,8 +536,9 @@ Not yet confirmed with the user; change them here if they turn out wrong.
 
 - Reflections read only notes the journal's filters let through, so an exclude rule such as `#private`
   keeps those notes from the model. The card notes when filters are on.
-- A reflection keeps its day in the journal even with **Only show days that have a note** on.
+- Days kept for their reflections stay even under an include filter; a day whose note a filter
+  leaves out stays out, as a day with files does, since showing it would show the note.
 - Regenerate replaces the first answer and clears follow-ups, asking first when there are some.
 - **Find in journal** does not search reflections in the first version.
-- **Show Reflect button** is on by default on desktop.
-- The menu's presets use the default model; the modal can pick another for one run.
+- **Reflections** is on by default.
+- The window's model picker changes the default model rather than the model for one run.
