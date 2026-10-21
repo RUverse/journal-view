@@ -30,6 +30,9 @@ interface MonthCell {
  * yet are dimmest. Selecting a month moves the journal to it. It only appears
  * when the pane has room beside the column.
  *
+ * The months run the way the days do: down from January when the journal
+ * reads oldest to newest, and up from it when it reads newest to oldest.
+ *
  * The left and right modes show the twelve months of the year being read,
  * naming a month while it is hovered. The experimental mode instead turns
  * like a wheel picker, holding the marked month in the middle with the months
@@ -50,11 +53,13 @@ export class YearProgress {
 		private readonly hostEl: HTMLElement,
 		private readonly scrollEl: HTMLElement,
 		private mode: YearProgressMode,
+		private descending: boolean,
 		private readonly onPick: (year: number, month: number) => void,
 	) {
 		// Hidden until the first layout has a column to place it beside.
 		this.el = hostEl.createDiv({ cls: "journal-year-progress is-hidden" });
 		this.trackEl = this.el.createDiv({ cls: "journal-year-progress-track" });
+		this.el.toggleClass("is-descending", descending);
 		// The strip sits over the scroller rather than in it, so a wheel turned
 		// over it would otherwise go nowhere. Passing the event on first lets
 		// the view see the reader taking over scrolling, as it would anywhere.
@@ -89,6 +94,14 @@ export class YearProgress {
 		this.layout();
 	}
 
+	/** Turns the months to run the way the days do. */
+	setDescending(descending: boolean): void {
+		if (descending === this.descending) return;
+		this.descending = descending;
+		this.el.toggleClass("is-descending", descending);
+		this.show(this.date);
+	}
+
 	/** Every mode but right keeps the strip on the journal's left. */
 	private get onLeft(): boolean {
 		return this.mode !== "right";
@@ -104,7 +117,7 @@ export class YearProgress {
 		const current = date.getFullYear() * 12 + date.getMonth();
 		const today = new Date();
 		const firstFuture = today.getFullYear() * 12 + today.getMonth() + 1;
-		const drawn = `${current}-${firstFuture}-${this.wheel}`;
+		const drawn = `${current}-${firstFuture}-${this.wheel}-${this.descending}`;
 		if (drawn === this.drawn) return;
 		this.drawn = drawn;
 
@@ -118,12 +131,14 @@ export class YearProgress {
 			}
 		}
 		// The wheel places each month itself, so only the year's lines, which
-		// stack in order, need to be laid down from the top.
+		// stack in order, need to be laid down from the top; the stylesheet
+		// turns them over when the days run newest first.
 		for (let key = first; key <= last; key++) {
 			const cell = this.cells.get(key) ?? this.createCell(key);
 			const offset = key - current;
 			cell.el.setCssProps({
-				"--journal-year-progress-offset": String(offset),
+				// Down the wheel is later in time, unless the days run the other way.
+				"--journal-year-progress-offset": String(this.descending ? -offset : offset),
 				"--journal-year-progress-distance": String(Math.abs(offset)),
 			});
 			cell.el.toggleClass("is-current", offset === 0);
