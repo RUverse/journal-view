@@ -315,6 +315,7 @@ function wordCountPlugin(app: App): InternalWordCountPlugin | null {
 }
 
 type EditorCtor = new (app: App, container: HTMLElement, owner: InternalEditorOwner) => InternalEditorInstance;
+type EmbedFactory = NonNullable<App["embedRegistry"]>["embedByExtension"][string];
 
 let cachedCtor: EditorCtor | null | undefined;
 
@@ -322,35 +323,58 @@ let cachedCtor: EditorCtor | null | undefined;
  * Obsidian does not export its embeddable markdown editor, but it hands one out
  * through the embed registry. We borrow the constructor once and reuse it.
  * Everything is guarded - if the shape ever changes we fall back to a textarea.
+ *
+ * Obsidian's own factory builds the probe without a note. A plugin can put its
+ * own factory in front of it, to embed some notes its own way, and that one may
+ * need a note to inspect: the probe is then retried with a real one, preferably
+ * the day being opened. The probe is never loaded, so the note is not read.
  */
-function resolveEditorCtor(app: App): EditorCtor | null {
+function resolveEditorCtor(app: App, file: TFile | null): EditorCtor | null {
 	if (cachedCtor !== undefined) return cachedCtor;
 
 	cachedCtor = null;
-	try {
-		const factory = app.embedRegistry?.embedByExtension?.["md"];
-		if (!factory) return cachedCtor;
+	const factory = app.embedRegistry?.embedByExtension?.["md"];
+	if (!factory) return cachedCtor;
 
-		const candidate = factory({ app, containerEl: createDiv() }, null, "");
-		if (!candidate || typeof candidate !== "object") return cachedCtor;
-		const probe = candidate as Record<string, unknown>;
-		probe.editable = true;
-		if (typeof probe.showEditor === "function") probe.showEditor.call(probe);
-		const editMode = probe.editMode;
-		if (editMode) {
-			const parent: unknown = Object.getPrototypeOf(editMode);
-			const proto: unknown = parent && typeof parent === "object" ? Object.getPrototypeOf(parent) : null;
-			if (proto && typeof proto === "object") {
-				const ctor: unknown = (proto as Record<string, unknown>).constructor;
-				if (typeof ctor === "function") cachedCtor = ctor as EditorCtor;
-			}
+	const errors: unknown[] = [];
+	const probe = (note: TFile | null): EditorCtor | null => {
+		try {
+			return probeEditorCtor(app, factory, note);
+		} catch (error) {
+			errors.push(error);
+			return null;
 		}
-		if (typeof probe.unload === "function") probe.unload.call(probe);
-	} catch (error) {
-		console.warn("Journal View: Obsidian's embedded editor is unavailable, using the plain editor", error);
-		cachedCtor = null;
+	};
+	cachedCtor = probe(null);
+	if (!cachedCtor) {
+		const note = file ?? app.vault.getMarkdownFiles()[0];
+		if (note) cachedCtor = probe(note);
+	}
+	if (!cachedCtor) {
+		console.warn("Journal View: Obsidian's embedded editor is unavailable, using the plain editor", ...errors);
 	}
 	return cachedCtor;
+}
+
+/** The editor class behind the embed `factory` builds for `file`, if it built a Markdown one. */
+function probeEditorCtor(app: App, factory: EmbedFactory, file: TFile | null): EditorCtor | null {
+	const candidate = factory({ app, containerEl: createDiv() }, file, "");
+	if (!candidate || typeof candidate !== "object") return null;
+	const probe = candidate as Record<string, unknown>;
+	let found: EditorCtor | null = null;
+	probe.editable = true;
+	if (typeof probe.showEditor === "function") probe.showEditor.call(probe);
+	const editMode = probe.editMode;
+	if (editMode) {
+		const parent: unknown = Object.getPrototypeOf(editMode);
+		const proto: unknown = parent && typeof parent === "object" ? Object.getPrototypeOf(parent) : null;
+		if (proto && typeof proto === "object") {
+			const ctor: unknown = (proto as Record<string, unknown>).constructor;
+			if (typeof ctor === "function") found = ctor as EditorCtor;
+		}
+	}
+	if (typeof probe.unload === "function") probe.unload.call(probe);
+	return found;
 }
 
 class RichEditor implements JournalEditor {
@@ -808,7 +832,7 @@ class PlainEditor implements JournalEditor {
 
 export function createJournalEditor(options: JournalEditorOptions, preferRich: boolean): JournalEditor {
 	if (preferRich) {
-		const Ctor = resolveEditorCtor(options.app);
+		const Ctor = resolveEditorCtor(options.app, options.file);
 		if (Ctor) {
 			try {
 				return new RichEditor(options, Ctor);
