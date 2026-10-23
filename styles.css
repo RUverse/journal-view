@@ -1889,6 +1889,11 @@ button.journal-appearance-settings-link:hover {
 	height: 100%;
 }
 
+/* Newest to oldest, December sits at the top, as the days above are later. */
+.journal-year-progress.is-descending .journal-year-progress-track {
+	flex-direction: column-reverse;
+}
+
 /* The experimental mode turns like a wheel picker. Every month sits in the
    middle slot, a twelfth of the strip tall, moved up or down by its distance
    in months from the marked one, so they all slide as the marked month
