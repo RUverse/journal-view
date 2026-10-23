@@ -14,6 +14,8 @@ export interface JournalEditorOptions {
 	placeholder: string;
 	/** The note being edited, when it already exists. Used for link resolution. */
 	file: TFile | null;
+	/** The note's name as a tab would title it, also before the note exists. */
+	displayText: () => string;
 	/** Rebuilds the complete note, frontmatter included, around the editor's body. */
 	noteContent: (body: string) => string;
 	onChange: () => void;
@@ -112,6 +114,7 @@ interface InternalEditorOwner extends ActiveEditorOwner {
 	hoverPopover: null;
 	getMode(): string;
 	getFile(): TFile | null;
+	getDisplayText(): string;
 	getSelection(): string;
 	onMarkdownScroll(): undefined;
 	onMarkdownFold(): undefined;
@@ -447,6 +450,9 @@ class RichEditor implements JournalEditor {
 			hoverPopover: null,
 			getMode: () => "source",
 			getFile: () => this.options.file,
+			// Plugins title the editor through its owner as they would a tab: Zoom
+			// heads its breadcrumbs with it, and without it never draws them.
+			getDisplayText: () => this.options.displayText(),
 			getSelection: () => this.instance?.editor?.getSelection?.() ?? "",
 			onMarkdownScroll: () => undefined,
 			onMarkdownFold: () => undefined,
