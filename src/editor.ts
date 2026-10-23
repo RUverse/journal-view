@@ -317,7 +317,15 @@ function wordCountPlugin(app: App): InternalWordCountPlugin | null {
 type EditorCtor = new (app: App, container: HTMLElement, owner: InternalEditorOwner) => InternalEditorInstance;
 type EmbedFactory = NonNullable<App["embedRegistry"]>["embedByExtension"][string];
 
+/**
+ * Notes a probe is tried with once the factory refuses one without a note. A
+ * plugin may embed any one note its own way, so the first refusing says little.
+ */
+const PROBE_NOTES = 3;
+
 let cachedCtor: EditorCtor | null | undefined;
+/** Set once the factory has refused a probe without a note. */
+let probeNeedsNote = false;
 
 /**
  * Obsidian does not export its embeddable markdown editor, but it hands one out
@@ -326,34 +334,59 @@ let cachedCtor: EditorCtor | null | undefined;
  *
  * Obsidian's own factory builds the probe without a note. A plugin can put its
  * own factory in front of it, to embed some notes its own way, and that one may
- * need a note to inspect: the probe is then retried with a real one, preferably
- * the day being opened. The probe is never loaded, so the note is not read.
+ * need a note to inspect: the probe is then retried with real ones, starting
+ * with the day being opened. Journal View never loads the probe, so it does not
+ * ask for the note to be read. While there is no note to try, the question is
+ * left open for the next day to ask again.
  */
 function resolveEditorCtor(app: App, file: TFile | null): EditorCtor | null {
 	if (cachedCtor !== undefined) return cachedCtor;
 
-	cachedCtor = null;
-	const factory = app.embedRegistry?.embedByExtension?.["md"];
-	if (!factory) return cachedCtor;
-
 	const errors: unknown[] = [];
-	const probe = (note: TFile | null): EditorCtor | null => {
-		try {
-			return probeEditorCtor(app, factory, note);
-		} catch (error) {
-			errors.push(error);
-			return null;
+	let probed = false;
+	try {
+		const factory = app.embedRegistry?.embedByExtension?.["md"];
+		if (!factory) return (cachedCtor = null);
+
+		const probe = (note: TFile | null): EditorCtor | null => {
+			probed = true;
+			try {
+				return probeEditorCtor(app, factory, note);
+			} catch (error) {
+				errors.push(error);
+				return null;
+			}
+		};
+		if (!probeNeedsNote) {
+			const ctor = probe(null);
+			if (ctor) return (cachedCtor = ctor);
+			probeNeedsNote = true;
 		}
-	};
-	cachedCtor = probe(null);
-	if (!cachedCtor) {
-		const note = file ?? app.vault.getMarkdownFiles()[0];
-		if (note) cachedCtor = probe(note);
+		const notes = probeNotes(app, file);
+		for (const note of notes) {
+			const ctor = probe(note);
+			if (ctor) return (cachedCtor = ctor);
+		}
+		// Refused with notes as well, the editor is out of reach, not one note.
+		if (notes.length) cachedCtor = null;
+	} catch (error) {
+		errors.push(error);
+		cachedCtor = null;
 	}
-	if (!cachedCtor) {
+	if (probed || errors.length) {
 		console.warn("Journal View: Obsidian's embedded editor is unavailable, using the plain editor", ...errors);
 	}
-	return cachedCtor;
+	return null;
+}
+
+/** The day's own note, then the vault's first others, to probe the factory with. */
+function probeNotes(app: App, file: TFile | null): TFile[] {
+	const notes = file ? [file] : [];
+	for (const note of app.vault.getMarkdownFiles()) {
+		if (notes.length >= PROBE_NOTES) break;
+		if (note !== file) notes.push(note);
+	}
+	return notes;
 }
 
 /** The editor class behind the embed `factory` builds for `file`, if it built a Markdown one. */
@@ -361,20 +394,35 @@ function probeEditorCtor(app: App, factory: EmbedFactory, file: TFile | null): E
 	const candidate = factory({ app, containerEl: createDiv() }, file, "");
 	if (!candidate || typeof candidate !== "object") return null;
 	const probe = candidate as Record<string, unknown>;
-	let found: EditorCtor | null = null;
-	probe.editable = true;
-	if (typeof probe.showEditor === "function") probe.showEditor.call(probe);
-	const editMode = probe.editMode;
-	if (editMode) {
+	try {
+		probe.editable = true;
+		if (typeof probe.showEditor === "function") probe.showEditor.call(probe);
+		const editMode = probe.editMode;
+		if (!editMode) return null;
 		const parent: unknown = Object.getPrototypeOf(editMode);
 		const proto: unknown = parent && typeof parent === "object" ? Object.getPrototypeOf(parent) : null;
-		if (proto && typeof proto === "object") {
-			const ctor: unknown = (proto as Record<string, unknown>).constructor;
-			if (typeof ctor === "function") found = ctor as EditorCtor;
-		}
+		const ctor: unknown = proto && typeof proto === "object" ? (proto as Record<string, unknown>).constructor : null;
+		return typeof ctor === "function" ? (ctor as EditorCtor) : null;
+	} finally {
+		disposeProbe(probe);
 	}
-	if (typeof probe.unload === "function") probe.unload.call(probe);
-	return found;
+}
+
+/**
+ * Unloading an embed that was never loaded leaves its editor running and
+ * watching the document, so the editor is destroyed first, as a day's is.
+ */
+function disposeProbe(probe: Record<string, unknown>): void {
+	try {
+		(probe.editMode as InternalEditorInstance | undefined)?.destroy?.();
+	} catch {
+		/* the probe is discarded either way */
+	}
+	try {
+		if (typeof probe.unload === "function") probe.unload.call(probe);
+	} catch {
+		/* the probe is discarded either way */
+	}
 }
 
 class RichEditor implements JournalEditor {
