@@ -38,6 +38,11 @@ The [guide](https://github.com/RUverse/journal-view/blob/main/docs/guide.md) cov
 Journal View works locally with files in your Obsidian vault. It does not make network requests,
 collect telemetry, require an account, or access files outside your vault.
 
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](https://github.com/RUverse/journal-view/blob/main/CONTRIBUTING.md) for how
+to report a problem, set up the project and open a pull request.
+
 ## License
 
 [MIT](LICENSE) © 2026 RUverse

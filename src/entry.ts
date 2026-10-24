@@ -1622,6 +1622,7 @@ export class NoteEntry {
 					value: body,
 					placeholder,
 					file: this.file,
+					displayText: () => this.file?.basename ?? this.path.slice(this.path.lastIndexOf("/") + 1).replace(/\.md$/, ""),
 					noteContent: (editorText) => replaceNoteBody(this.latestContent, editorText),
 					onReady: () => {
 						if (this.destroyed || token !== this.modeToken) return;

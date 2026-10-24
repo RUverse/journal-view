@@ -174,7 +174,9 @@ button.journal-find-button.is-active {
 	   built-in scroll anchoring would correct for the same layout changes a
 	   second time, and the two corrections fight each other. */
 	overflow-anchor: none;
-	overscroll-behavior: contain;
+	/* Only the vertical axis: a sideways wheel has to carry on to the
+	   workspace, which scrolls stacked tabs with it. */
+	overscroll-behavior-y: contain;
 	/* A rebuild empties the timeline for a moment. Keeping the scrollbar's
 	   room then stops the column, and the year progress strip beside it,
 	   from shifting sideways while the scrollbar comes and goes. */
@@ -1887,6 +1889,11 @@ button.journal-appearance-settings-link:hover {
 	display: flex;
 	flex-direction: column;
 	height: 100%;
+}
+
+/* Newest to oldest, December sits at the top, as the days above are later. */
+.journal-year-progress.is-descending .journal-year-progress-track {
+	flex-direction: column-reverse;
 }
 
 /* The experimental mode turns like a wheel picker. Every month sits in the

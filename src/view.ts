@@ -213,6 +213,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			this.contentEl,
 			this.scrollEl,
 			this.plugin.settings.yearProgress,
+			this.sortStep() === -1,
 			(year, month) => this.goToMonth(year, month),
 		);
 
@@ -1616,6 +1617,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.syncWithIndex();
 		this.syncFilterButton();
 		this.yearProgress?.setMode(this.plugin.settings.yearProgress);
+		this.yearProgress?.setDescending(this.sortStep() === -1);
 		if (!this.ready) {
 			// A build is in flight against the old values - dropping the change
 			// here would leave the toolbar and the days disagreeing.
