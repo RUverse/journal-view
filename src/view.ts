@@ -139,6 +139,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	private indexVersion = -1;
 	private filteredIndexVersion = -1;
 	private dayFilesVersion = -1;
+	private reflectionsVersion = -1;
 	private initialTarget?: { date: Moment; focusAtEnd: boolean; revealThroughFilters: boolean; path?: string };
 
 	constructor(
@@ -226,6 +227,8 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.registerDomEvent(this.containerEl, "keydown", (event) => this.onKeydown(event), { capture: true });
 		this.registerVaultEvents();
 		this.register(this.plugin.dayFiles.onChanged((keys) => this.onDayFilesChanged(keys)));
+		this.register(this.plugin.reflections.onChanged((keys) => this.onReflectionsChanged(keys)));
+		this.register(this.plugin.reflectionRuns.onChanged((key) => this.onReflectionsChanged([key])));
 
 		const initialTarget = this.initialTarget;
 		this.initialTarget = undefined;
@@ -305,6 +308,7 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.indexVersion = this.plugin.index.version;
 		this.filteredIndexVersion = this.plugin.filteredIndex.version;
 		this.dayFilesVersion = this.plugin.dayFiles.version;
+		this.reflectionsVersion = this.plugin.reflections.version;
 		this.walker = new DayWalker(
 			this.today,
 			this.plugin.index,
@@ -1404,13 +1408,48 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		const changed =
 			this.plugin.index.version !== this.indexVersion ||
 			this.plugin.filteredIndex.version !== this.filteredIndexVersion ||
-			this.plugin.dayFiles.version !== this.dayFilesVersion;
+			this.plugin.dayFiles.version !== this.dayFilesVersion ||
+			this.plugin.reflections.version !== this.reflectionsVersion;
 		if (!changed) return false;
 		this.indexVersion = this.plugin.index.version;
 		this.filteredIndexVersion = this.plugin.filteredIndex.version;
 		this.dayFilesVersion = this.plugin.dayFiles.version;
+		this.reflectionsVersion = this.plugin.reflections.version;
 		this.exhausted = { start: false, end: false };
 		return true;
+	}
+
+	/**
+	 * Reflections on some days came, changed or went (every day's, for null),
+	 * or one is being written. Only loaded days draw them; the resize anchor
+	 * absorbs a card growing above the reader. A day without a note is
+	 * brought in by its first reflection and hidden again after its last,
+	 * while the journal leaves out empty days.
+	 */
+	private onReflectionsChanged(keys: string[] | null): void {
+		if (!this.ready) return;
+		this.syncWithIndex();
+		const days = keys === null ? [...this.sections] : [];
+		for (const key of keys ?? []) {
+			const offset = this.walker.offsetFor(key);
+			const day = this.sectionAt(offset) ?? (this.walker.isVisible(offset) ? this.ensureSectionFor(offset) : undefined);
+			if (day) days.push(day);
+		}
+		let changed = false;
+		for (const day of days) {
+			day.refreshReflections();
+			changed = day.refreshVisibility() || changed;
+		}
+		if (!changed) return;
+		this.syncDateSeparators();
+		this.find?.sectionsChanged();
+	}
+
+	/** Moves the journal to a note a reflection cites, on its day. */
+	revealNote(path: string): void {
+		const key = this.plugin.index.keyForPath(path);
+		if (!key) return;
+		this.goToCommandDate(createMoment(key, DAY_KEY_FORMAT, true), false, path);
 	}
 
 	/**
@@ -1609,6 +1648,9 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 			dayFilesProperty: settings.dayFilesProperty,
 			dayFilesAttachments: settings.dayFilesAttachments,
 			dayFilesExcluded: settings.dayFilesExcluded,
+			// Days without a note come and go with their reflections.
+			reflectionsEnabled: settings.reflectionsEnabled,
+			reflectionFolder: settings.reflectionFolder,
 		});
 	}
 
@@ -1627,7 +1669,10 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		// Appearance settings do not change the editor or the day window. Repaint
 		// their small metadata strips in place and let the resize anchor absorb
 		// any height change without moving the reader.
-		for (const section of this.sections) section.refreshMetadata();
+		for (const section of this.sections) {
+			section.refreshMetadata();
+			section.refreshReflections();
+		}
 		const signature = this.rebuildSettingsSignature();
 		if (signature === this.appliedSettingsSignature) {
 			const previousMax = this.appliedMaxLoadedDays;

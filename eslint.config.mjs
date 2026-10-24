@@ -22,6 +22,9 @@ export default defineConfig(
 						"stylelint.config.mjs",
 						"manifest.json",
 						"scripts/deploy-ios-test-vault.mjs",
+						"scripts/reflection-spike.mjs",
+						"scripts/reflection-tools-spike.mjs",
+						"scripts/sample-journal.mjs",
 					],
 				},
 				tsconfigRootDir: import.meta.dirname,
@@ -31,14 +34,16 @@ export default defineConfig(
 	},
 	...obsidianmd.configs.recommended,
 	{
-		files: ["scripts/deploy-ios-test-vault.mjs"],
+		files: ["scripts/*.mjs"],
 		languageOptions: { globals: globals.node },
 		rules: {
-			// This is a Node-based development script, not code bundled into the
-			// mobile plugin. It deliberately manages a test vault's `.obsidian` files.
+			// These are Node-based development scripts, not code bundled into the
+			// plugin. They deliberately manage a test vault's files.
 			"obsidianmd/hardcoded-config-path": "off",
 			"obsidianmd/no-nodejs-modules": "off",
 			"obsidianmd/rule-custom-message": "off",
+			// Node has no `requestUrl`; its own `fetch` is the right call here.
+			"no-restricted-globals": "off",
 		},
 	},
 );
