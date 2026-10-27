@@ -21,8 +21,8 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
   alongside that day's note.
 - **Reflect on what you wrote.** On desktop, a model on your own computer (through Ollama) can read
   the last weeks, or this date in past years, and write back what it notices, citing the days it
-  draws on. Pick a preset or ask a question of your own. Each reflection is saved as a note of its
-  own.
+  draws on. Pick a preset or ask a question of your own, then ask follow-ups or regenerate it. Each
+  reflection is saved as a note of its own.
 - **Stay responsive across years of notes.** Journal View keeps the days around you ready to edit
   while efficiently handling the rest of your timeline.
 
@@ -35,6 +35,7 @@ The [guide](https://github.com/RUverse/journal-view/blob/main/docs/guide.md) cov
 - [Several notes a day](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#several-notes-a-day): notes with text or a time after the date
 - [File modification history](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#file-modification-history): the files listed under each day
 - [Filters](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#filters): tag and property rules
+- [Reflections](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#reflections): asking a local model about your journal, and the notes it saves
 - [Statistics](https://github.com/RUverse/journal-view/blob/main/docs/guide.md#statistics): the year mosaic and new words
 
 ## Privacy

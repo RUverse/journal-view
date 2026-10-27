@@ -1,15 +1,27 @@
 import { Component, Notice } from "obsidian";
+import type { TFile } from "obsidian";
 import type JournalViewPlugin from "../main";
 import { createMoment } from "../moment";
 import type { Moment } from "../moment";
+import { noteBody } from "../noteBody";
 import { buildContext, repairCitations } from "./context";
 import type { ReflectionSource, ScopeRange } from "./context";
+import { followUpMarkdown, parseConversation } from "./conversation";
+import type { Conversation } from "./conversation";
+import { QUESTION_FORMAT, presetsOf } from "./presets";
 import type { ReflectionRequest, ReflectionScope } from "./presets";
 import { NO_MODELS_MESSAGE, ProviderError, describeProviderError } from "./provider";
 import type { ModelInfo } from "./provider";
+import type { StoredReflection, StoredScope } from "./store";
 import { reflectWithTools } from "./tools";
 
 export type RunStatus = "reading" | "writing" | "failed";
+
+/**
+ * What a run writes: a new reflection note, a new answer in place of a
+ * reflection's own, or the answer to a follow-up at the end of its note.
+ */
+export type RunKind = "new" | "regenerate" | "follow-up";
 
 /** What a question the model cannot choose notes for reads instead. */
 const FALLBACK_SCOPE: ReflectionScope = { kind: "days", days: 14 };
@@ -20,6 +32,11 @@ export interface ReflectionRun {
 	/** The day it belongs to, `YYYY-MM-DD`. */
 	readonly key: string;
 	readonly request: ReflectionRequest;
+	readonly kind: RunKind;
+	/** The reflection note a regenerate or a follow-up writes back to; its card shows the run. */
+	readonly target: TFile | null;
+	/** The question a follow-up asks. */
+	readonly question: string | null;
 	status: RunStatus;
 	/** What the card says above the text: what is being read, or what went wrong. */
 	statusLine: string;
@@ -30,9 +47,20 @@ export interface ReflectionRun {
 	sources: ReflectionSource[];
 }
 
+interface RunSpec {
+	key: string;
+	request: ReflectionRequest;
+	kind: RunKind;
+	target: TFile | null;
+	question: string | null;
+	/** What it reads when the model was to choose and cannot. */
+	fallback: ReflectionScope;
+}
+
 interface ActiveRun extends ReflectionRun {
+	readonly spec: RunSpec;
 	controller: AbortController;
-	/** Set by Stop: what arrived is kept and saved. */
+	/** Set by Stop: what arrived is kept and saved, except by a regenerate. */
 	stopped: boolean;
 }
 
@@ -57,6 +85,18 @@ export class ReflectionRunner extends Component {
 		super();
 	}
 
+	onload(): void {
+		// A reflection deleted while it is being rewritten takes its run with it.
+		this.registerEvent(
+			this.plugin.app.vault.on("delete", (file) => {
+				for (const run of this.runs.filter((candidate) => candidate.target === file)) {
+					run.controller.abort();
+					this.remove(run);
+				}
+			}),
+		);
+	}
+
 	onunload(): void {
 		this.unloading = true;
 		for (const run of this.runs) run.controller.abort();
@@ -64,8 +104,14 @@ export class ReflectionRunner extends Component {
 		if (this.frame) window.cancelAnimationFrame(this.frame);
 	}
 
+	/** The new reflections being written on a day; a regenerate or a follow-up is its note's. */
 	runsFor(key: string): readonly ReflectionRun[] {
-		return this.runs.filter((run) => run.key === key);
+		return this.runs.filter((run) => run.key === key && !run.target);
+	}
+
+	/** The regenerate or follow-up writing back to a reflection note, if one is. */
+	runFor(file: TFile): ReflectionRun | null {
+		return this.runs.find((run) => run.target === file) ?? null;
 	}
 
 	/** Listens for runs starting, changing and ending, by day. */
@@ -76,26 +122,50 @@ export class ReflectionRunner extends Component {
 
 	/** Starts a reflection on `today`, the day it belongs to. */
 	start(request: ReflectionRequest, today: Moment = createMoment().startOf("day")): ReflectionRun {
-		const run: ActiveRun = {
-			id: this.nextId++,
+		return this.launch({
 			key: today.format("YYYY-MM-DD"),
 			request,
-			status: "reading",
-			statusLine: "Connecting…",
-			text: "",
-			model: null,
-			range: null,
-			sources: [],
-			controller: new AbortController(),
-			stopped: false,
-		};
-		this.runs.push(run);
-		this.announce(run.key, true);
-		void this.execute(run, today);
-		return run;
+			kind: "new",
+			target: null,
+			question: null,
+			fallback: FALLBACK_SCOPE,
+		});
 	}
 
-	/** Stops a run, keeping what it has written so far. */
+	/**
+	 * Asks a reflection's question again over the notes it read, as of its
+	 * own day. The new answer replaces the old one, and its follow-ups, once
+	 * it is complete.
+	 */
+	regenerate(reflection: StoredReflection): void {
+		if (this.runFor(reflection.file)) return;
+		this.launch({
+			key: reflection.key,
+			request: this.requestOf(reflection),
+			kind: "regenerate",
+			target: reflection.file,
+			question: null,
+			fallback: FALLBACK_SCOPE,
+		});
+	}
+
+	/** Asks a reflection a follow-up, over the notes it read, and adds the answer to its note. */
+	followUp(reflection: StoredReflection, question: string): void {
+		const asked = question.trim();
+		if (!asked || this.runFor(reflection.file)) return;
+		this.launch({
+			key: reflection.key,
+			request: this.requestOf(reflection),
+			kind: "follow-up",
+			target: reflection.file,
+			question: asked,
+			// The days its answer drew on, rather than a fixed two weeks.
+			fallback:
+				reflection.from && reflection.to ? { kind: "range", from: reflection.from, to: reflection.to } : FALLBACK_SCOPE,
+		});
+	}
+
+	/** Stops a run, keeping what it has written so far; a regenerate keeps the old answer instead. */
 	stop(id: number): void {
 		const run = this.runs.find((candidate) => candidate.id === id);
 		if (!run) return;
@@ -108,16 +178,53 @@ export class ReflectionRunner extends Component {
 		const run = this.runs.find((candidate) => candidate.id === id);
 		if (!run || run.status !== "failed") return;
 		this.dismiss(id);
-		this.start(run.request, createMoment(run.key, "YYYY-MM-DD", true));
+		this.launch(run.spec);
 	}
 
-	/** Removes a failed run's card. */
+	/** Removes a failed run's card, or its place in its reflection's card. */
 	dismiss(id: number): void {
 		const run = this.runs.find((candidate) => candidate.id === id);
 		if (!run) return;
 		run.controller.abort();
-		this.runs = this.runs.filter((candidate) => candidate !== run);
+		this.remove(run);
+	}
+
+	private launch(spec: RunSpec): ReflectionRun {
+		const run: ActiveRun = {
+			id: this.nextId++,
+			key: spec.key,
+			request: spec.request,
+			kind: spec.kind,
+			target: spec.target,
+			question: spec.question,
+			spec,
+			status: "reading",
+			statusLine: "Connecting…",
+			text: "",
+			model: null,
+			range: null,
+			sources: [],
+			controller: new AbortController(),
+			stopped: false,
+		};
+		this.runs.push(run);
 		this.announce(run.key, true);
+		void this.execute(run, createMoment(run.key, "YYYY-MM-DD", true));
+		return run;
+	}
+
+	/** What a saved reflection was asked, to ask it again: its question, over the notes it read. */
+	private requestOf(reflection: StoredReflection): ReflectionRequest {
+		const preset = reflection.preset
+			? presetsOf(this.plugin.settings.reflectionPresets).find((candidate) => candidate.id === reflection.preset)
+			: undefined;
+		return {
+			presetId: reflection.preset,
+			title: reflection.title,
+			prompt: reflection.prompt,
+			format: preset?.format || QUESTION_FORMAT,
+			scope: scopeOf(reflection, preset?.scope),
+		};
 	}
 
 	private async execute(run: ActiveRun, today: Moment): Promise<void> {
@@ -142,12 +249,16 @@ export class ReflectionRunner extends Component {
 			run.model = model;
 			const info = await provider.showModel(model);
 			if (run.controller.signal.aborted) throw new ProviderError("aborted", "Stopped.");
-			const sourcePath = `${folder ? `${folder}/` : ""}${run.key}.md`;
+			const sourcePath = run.target?.path ?? `${folder ? `${folder}/` : ""}${run.key}.md`;
+			const followUp =
+				run.target && run.question
+					? { conversation: await this.conversationOf(run.target), question: run.question }
+					: undefined;
 
 			const choosing = run.request.scope.kind === "model";
 			if (choosing && info.tools) {
 				try {
-					await this.answerWithTools(run, info, today, sourcePath);
+					await this.answerWithTools(run, info, today, sourcePath, followUp);
 					await this.save(run);
 					return;
 				} catch (error) {
@@ -157,12 +268,18 @@ export class ReflectionRunner extends Component {
 					run.status = "reading";
 				}
 			}
-			const scope = choosing ? FALLBACK_SCOPE : run.request.scope;
-			const context = await buildContext(plugin, { ...run.request, scope }, today, {
-				contextLength: info.contextLength,
-				maxContext: plugin.settings.reflectionMaxContext,
-				sourcePath,
-			});
+			const scope = choosing ? run.spec.fallback : run.request.scope;
+			const context = await buildContext(
+				plugin,
+				{ ...run.request, scope },
+				today,
+				{
+					contextLength: info.contextLength,
+					maxContext: plugin.settings.reflectionMaxContext,
+					sourcePath,
+				},
+				followUp,
+			);
 			run.range = context.range;
 			run.sources = context.sources;
 			if (!context.sources.length) {
@@ -182,14 +299,16 @@ export class ReflectionRunner extends Component {
 			});
 			await this.save(run);
 		} catch (error) {
-			if (this.unloading) return;
+			if (this.unloading || !this.runs.includes(run)) return;
+			// A regenerate cut short keeps the answer it was to replace.
+			const keeps = run.kind !== "regenerate" && run.text.trim() !== "";
 			if (run.stopped || (error instanceof ProviderError && error.kind === "aborted")) {
-				if (run.stopped && run.text.trim()) await this.save(run);
+				if (run.stopped && keeps) await this.save(run);
 				else this.remove(run);
 				return;
 			}
 			console.error("Journal View: reflection failed", error);
-			if (run.text.trim()) {
+			if (keeps) {
 				// Keep what arrived: the reader can read it, or delete it.
 				new Notice(`Journal View: the reflection stopped early. ${describeProviderError(error)}`);
 				await this.save(run);
@@ -201,12 +320,23 @@ export class ReflectionRunner extends Component {
 		}
 	}
 
+	/** A reflection note's answer and follow-ups, as they are now. */
+	private async conversationOf(file: TFile): Promise<Conversation> {
+		return parseConversation(noteBody(await this.plugin.app.vault.read(file)));
+	}
+
 	/**
 	 * Lets the model read the journal through tools. Each call shows on the
 	 * card as it happens; text from a round that ends up calling tools is
 	 * taken back, so only the answer stays.
 	 */
-	private async answerWithTools(run: ActiveRun, model: ModelInfo, today: Moment, sourcePath: string): Promise<void> {
+	private async answerWithTools(
+		run: ActiveRun,
+		model: ModelInfo,
+		today: Moment,
+		sourcePath: string,
+		followUp: { conversation: Conversation; question: string } | undefined,
+	): Promise<void> {
 		run.statusLine = "Looking through your notes…";
 		this.announce(run.key, true);
 		const result = await reflectWithTools({
@@ -214,6 +344,7 @@ export class ReflectionRunner extends Component {
 			provider: this.plugin.reflectionProvider(),
 			model,
 			question: run.request.prompt,
+			followUp,
 			today,
 			maxContext: this.plugin.settings.reflectionMaxContext,
 			sourcePath,
@@ -251,26 +382,65 @@ export class ReflectionRunner extends Component {
 		}
 	}
 
-	/** Writes the reflection's note, after which the note's own card takes over from the run's. */
+	/**
+	 * Writes the answer: a new reflection note, the reflection's own answer
+	 * in place, or a follow-up at its end. Then the note's card shows it
+	 * rather than the run.
+	 */
 	private async save(run: ActiveRun): Promise<void> {
-		if (this.unloading) return;
+		if (this.unloading || !this.runs.includes(run)) return;
 		const { plugin } = this;
 		// Stopped mid-link, the last citation is half written: drop it.
 		const text = repairCitations(run.text.replace(/\[\[[^\]\n]*$/, "").trimEnd(), run.sources);
+		const links = run.sources.map((source) => source.link);
+		const model = run.model ?? "";
 		try {
-			await plugin.reflections.create(
-				{
-					created: createMoment(),
-					title: run.request.title,
-					preset: run.request.presetId,
-					prompt: run.request.prompt,
-					model: run.model ?? "",
-					from: run.range?.from ?? run.key,
-					to: run.range?.to ?? run.key,
-					sources: run.sources.map((source) => source.link),
-				},
-				text,
-			);
+			if (run.target && run.kind === "regenerate") {
+				await plugin.reflections.revise(
+					run.target,
+					() => text,
+					(frontmatter) => {
+						frontmatter.model = model;
+						if (run.range) {
+							frontmatter.from = run.range.from;
+							frontmatter.to = run.range.to;
+						}
+						frontmatter.sources = links;
+						frontmatter.scope = storedScopeOf(run.request.scope);
+					},
+				);
+			} else if (run.target && run.question !== null) {
+				const question = run.question;
+				await plugin.reflections.revise(
+					run.target,
+					(body) => `${body.trimEnd()}\n\n${followUpMarkdown(question, text)}`,
+					(frontmatter) => {
+						// The follow-up's notes join the reflection's, and widen its days.
+						const earlier: unknown[] = Array.isArray(frontmatter.sources) ? (frontmatter.sources as unknown[]) : [];
+						const kept = earlier.filter((link): link is string => typeof link === "string");
+						frontmatter.sources = [...new Set([...kept, ...links])];
+						if (!run.range) return;
+						const { from, to } = frontmatter;
+						if (typeof from !== "string" || run.range.from < from) frontmatter.from = run.range.from;
+						if (typeof to !== "string" || run.range.to > to) frontmatter.to = run.range.to;
+					},
+				);
+			} else {
+				await plugin.reflections.create(
+					{
+						created: createMoment(),
+						title: run.request.title,
+						preset: run.request.presetId,
+						prompt: run.request.prompt,
+						scope: storedScopeOf(run.request.scope),
+						model,
+						from: run.range?.from ?? run.key,
+						to: run.range?.to ?? run.key,
+						sources: links,
+					},
+					text,
+				);
+			}
 			this.remove(run);
 		} catch (error) {
 			console.error("Journal View: could not save a reflection", error);
@@ -281,6 +451,7 @@ export class ReflectionRunner extends Component {
 	}
 
 	private remove(run: ActiveRun): void {
+		if (!this.runs.includes(run)) return;
 		this.runs = this.runs.filter((candidate) => candidate !== run);
 		this.announce(run.key, true);
 	}
@@ -307,6 +478,23 @@ export class ReflectionRunner extends Component {
 		this.changed.clear();
 		for (const key of keys) for (const listener of this.listeners) listener(key);
 	}
+}
+
+/** How a note records what a request read. */
+function storedScopeOf(scope: ReflectionScope): StoredScope {
+	return scope.kind === "model" || scope.kind === "this-day" ? scope.kind : "range";
+}
+
+/**
+ * What a saved reflection reads when it is asked again: what the model
+ * chooses, this date over the years, or the days it read. Notes written
+ * before the scope was recorded go by their preset's.
+ */
+function scopeOf(reflection: StoredReflection, presetScope: ReflectionScope | undefined): ReflectionScope {
+	const kind = reflection.scope ?? (presetScope ? storedScopeOf(presetScope) : "range");
+	if (kind !== "range") return { kind };
+	if (reflection.from && reflection.to) return { kind: "range", from: reflection.from, to: reflection.to };
+	return presetScope ?? FALLBACK_SCOPE;
 }
 
 /** "Reading 5–19 Oct · 9 notes", and how many were left out when not all fitted. */

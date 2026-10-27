@@ -488,7 +488,9 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		const { plugin } = this.host;
 		const sources: ReflectionCardSource[] = plugin.settings.reflectionsEnabled
 			? [
-					...plugin.reflections.reflectionsFor(this.key).map((stored) => ({ stored })),
+					...plugin.reflections
+						.reflectionsFor(this.key)
+						.map((stored) => ({ stored, run: plugin.reflectionRuns.runFor(stored.file) })),
 					...plugin.reflectionRuns.runsFor(this.key).map((run) => ({ run })),
 				]
 			: [];
@@ -522,6 +524,11 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 
 	revealNote(path: string): void {
 		this.host.revealNote(path);
+	}
+
+	/** A reflection on this day being written, if one is. */
+	writingReflection(): HTMLElement | null {
+		return this.reflectionCards.find((card) => card.writing)?.el ?? null;
 	}
 
 	/** Lists the files from this date again, after they changed. */

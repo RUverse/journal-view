@@ -1,6 +1,6 @@
 # Reflection: feature plan
 
-Planned 2026-10-19, still in prototyping. This is a working plan for contributors, not user
+Planned 2026-10-19; every step was built by 2026-10-27 and awaits review. This is a working plan for contributors, not user
 documentation: once the feature lands, its behavior belongs in [the guide](../guide.md).
 
 Reflection lets a local model read the journal and write back something worth reading: what you
@@ -176,6 +176,7 @@ stays behind small host interfaces, as with the view's other collaborators.
 | `presets.ts` | Built-in presets, and merging them with the user's |
 | `store.ts` | Indexes the Reflections folder by date, follows vault events, creates, rewrites and trashes reflection files |
 | `card.ts` | The bordered card: skeleton, streaming, Stop, Regenerate, follow-ups, sources, errors |
+| `conversation.ts` | A reflection's follow-ups as its note keeps them, read back into a conversation |
 | `button.ts` | Today's handle, which opens the Reflect window |
 | `modal.ts` | The Reflect window: the question, its scope and model, the presets, and the settings page with the connection and preset management |
 
@@ -213,6 +214,7 @@ journal-view: reflection
 created: 2026-10-19T15:32
 preset: what-i-learned
 prompt: Summarize what I learned during the last 2 weeks
+scope: range
 model: llama3.1:8b
 from: 2026-10-05
 to: 2026-10-19
@@ -230,9 +232,14 @@ sources: ["[[2026-10-05]]", "[[2026-10-09]]", "[[2026-10-14]]"]
   ```
 
 - The day a reflection belongs to is the date in `created`.
+- `scope` is what Regenerate and follow-ups read again: `range` (the days from `from` to `to`),
+  `this-day`, or `model` (the model chooses through tools). Notes written before it was recorded
+  go by their preset's scope, else by `from` and `to`.
 - The file is written once the stream ends, or on **Stop** if some text arrived. Regenerate rewrites
   the body in place with `vault.process` once the new answer is complete, and asks first when there
-  are follow-ups, which it clears.
+  are follow-ups, which it clears; **Stop** or an error keeps the old answer. It then rewrites
+  `model`, `from`, `to`, `sources` and `scope` with `processFrontMatter`. A follow-up adds its
+  callout and answer to the end, adds its notes to `sources`, and widens `from` and `to`.
 - Delete reuses the note flow: `fileManager.promptForDeletion`, then `trashFile`
   (`src/entry.ts:1321`).
 
@@ -462,6 +469,45 @@ no answer saying the runs never resumed. Gemma writes several citations as `[[a]
   journal.
 - The guide section.
 
+Done on 2026-10-27. A regenerate or a follow-up is a run in `runner.ts` that names the note it
+writes back to; the day shows it inside that note's card rather than as a card of its own. Both ask
+again as of the reflection's own day, with the window's current model:
+
+- **Regenerate** rebuilds the request from the note: its `prompt`, the format of its `preset` when it
+  still exists (else the one for questions of your own), and its `scope`. The card shows the
+  skeleton and the new answer in place of the old one; a regenerate that fails shows the old answer
+  again with the error above it.
+- **Follow-ups** read the note's conversation back with `parseConversation`. Over fixed notes, the
+  context is built as before and the answer, the earlier follow-ups and the new question come after
+  it, the notes making room for them. With tools, the conversation follows the first question, and
+  the model looks through the journal again, since what it read before is not kept: the guard that
+  drops an answer written before looking applies to follow-ups too. A model without tools reads
+  the reflection's `from`–`to` instead. The question shows as its callout at the bottom of the
+  card, with its own status line, **Stop**, and on failure **Try again** and **Dismiss**, which puts
+  the question back in the box.
+- The footer opens into a chip per source, sorted by date, that moves the journal there; a source
+  no longer in the journal is a disabled chip. Ctrl/Cmd on a chip or a citation opens the note in a
+  new tab.
+- Deleting a reflection while a regenerate or follow-up runs cancels the run.
+- **Scroll position.** The anchor pinned the day below a reflection being written, so the
+  reflection grew upwards: its text climbed, and its Stop button slid away from the pointer, about
+  130 px a second, so a real click (press and release on the same element) missed it. While a
+  reflection being written is at least partly in view, `src/anchor.ts` now pins that reflection's
+  top instead, and it grows downwards; out of view, the day below is pinned as before, so a note
+  being read below a reflection streaming above it does not move. The card also draws its title,
+  buttons and footer only when they change, rather than every frame while text streams in.
+
+Tested in the test vault on `gemma4:26b`: a follow-up over fixed notes, then one with tools, which
+listed and read 4 Sep – 20 Oct and said truthfully that the runs never resumed; Regenerate of *What
+I learned* over the same 13 notes, which found both planted lessons; Regenerate with follow-ups,
+cancelled at the question, then stopped part-way, leaving the note byte for byte as it was; a
+follow-up against an unreachable server, retried and dismissed; a citation and a chip moving the
+journal; and deleting a reflection while a follow-up to it ran. With mouse events sent through
+the DevTools protocol, a press and release on Stop while a follow-up streamed stopped it and kept
+the text so far. In both day orders a follow-up in view held still while it streamed, after one
+step up as it replaced the box it was typed in; with the reflection streaming out of view above,
+the note being read stayed where it was.
+
 ## Testing with Ollama on a Mac
 
 ```bash
@@ -528,7 +574,8 @@ the plugin has to be disabled and re-enabled to load a new build.
 - **Speed.** On a machine without a GPU, a 90-day preset can take minutes. The window shows the size
   up front, and Stop always works.
 - **Scroll position.** Text streaming into a card above the reader (newest first) must not move what
-  they are reading.
+  they are reading, and a card being watched must not climb away from them. See step 5 for how the
+  anchor tells the two apart.
 
 ## Defaults assumed
 
@@ -539,6 +586,8 @@ Not yet confirmed with the user; change them here if they turn out wrong.
 - Days kept for their reflections stay even under an include filter; a day whose note a filter
   leaves out stays out, as a day with files does, since showing it would show the note.
 - Regenerate replaces the first answer and clears follow-ups, asking first when there are some.
+- Regenerate and follow-ups use the model currently chosen, not the one that wrote the reflection,
+  and read as of the reflection's own day.
 - **Find in journal** does not search reflections in the first version.
 - **Reflections** is on by default.
 - The window's model picker changes the default model rather than the model for one run.

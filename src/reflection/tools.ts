@@ -22,6 +22,8 @@ import {
 	spreadEvenly,
 } from "./context";
 import type { ReadNote, ReflectionSource, ScopeRange } from "./context";
+import { conversationMessages } from "./conversation";
+import type { Conversation } from "./conversation";
 import { QUESTION_FORMAT, REMINDER } from "./presets";
 import { ProviderError } from "./provider";
 import type { ChatMessage, ChatResult, ModelInfo, ReflectionProvider, ToolCall, ToolDefinition } from "./provider";
@@ -40,6 +42,8 @@ export interface ToolRunOptions {
 	model: ModelInfo;
 	/** The reader's question. */
 	question: string;
+	/** A follow-up to the answer `question` already has, and the follow-ups before it. */
+	followUp?: { conversation: Conversation; question: string };
 	/** The day the reflection belongs to. */
 	today: Moment;
 	/** The Maximum context setting, in tokens, and where links are written from. */
@@ -943,10 +947,15 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 			// Also as the tools take dates, so ranges can be counted from it.
 			`Today is ${longDate(journal.today, true)} (${journal.today}). The journal holds ${plural(journal.notes.length, "note")}, from ${longDate(journal.notes[0].key, true)} to ${longDate(latest.key, true)}.`,
 		].join("\n");
+		const closing = `${QUESTION_FORMAT}\n\n${fill(TOOLS_REMINDER)}`;
 		const messages: ChatMessage[] = [
 			{ role: "system", content: system },
-			{ role: "user", content: `${options.question}\n\n${QUESTION_FORMAT}\n\n${fill(TOOLS_REMINDER)}` },
+			{ role: "user", content: `${options.question}\n\n${closing}` },
 		];
+		const { followUp } = options;
+		// The notes read for earlier answers are not kept, so a follow-up looks again.
+		if (followUp) messages.push(...conversationMessages(followUp.conversation, followUp.question, closing));
+		const question = followUp?.question ?? options.question;
 
 		// The whole context from the first round: changing it between rounds
 		// would make Ollama load the model again each time.
@@ -1068,7 +1077,7 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 
 		messages.push({
 			role: "user",
-			content: `${ANSWER_NOW} ${options.question}\n\n${QUESTION_FORMAT}\n\n${fill(REMINDER)}`,
+			content: `${ANSWER_NOW} ${question}\n\n${QUESTION_FORMAT}\n\n${fill(REMINDER)}`,
 		});
 		const { result, streamed } = await send(undefined, true);
 		if (!hasText(result.text)) {

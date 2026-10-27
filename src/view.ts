@@ -1445,6 +1445,22 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 		this.find?.sectionsChanged();
 	}
 
+	/**
+	 * A reflection being written that is at least partly in view: the reader
+	 * is watching it, so the anchor lets it grow downwards.
+	 */
+	watchedReflection(): { section: DaySection; el: HTMLElement } | null {
+		let view: DOMRect | null = null;
+		for (const section of this.sections) {
+			const el = section.writingReflection();
+			if (!el) continue;
+			view ??= this.scrollEl.getBoundingClientRect();
+			const rect = el.getBoundingClientRect();
+			if (rect.bottom > view.top && rect.top < view.bottom) return { section, el };
+		}
+		return null;
+	}
+
 	/** Moves the journal to a note a reflection cites, on its day. */
 	revealNote(path: string): void {
 		const key = this.plugin.index.keyForPath(path);

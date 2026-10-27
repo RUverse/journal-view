@@ -1,4 +1,4 @@
-import { Component, Notice, TFile, normalizePath } from "obsidian";
+import { Component, Notice, TFile, getFrontMatterInfo, normalizePath } from "obsidian";
 import type { App, TAbstractFile } from "obsidian";
 import type JournalViewPlugin from "../main";
 import { createMoment } from "../moment";
@@ -17,6 +17,14 @@ const CREATED_FORMAT = "YYYY-MM-DDTHH:mm";
 /** Characters a file name cannot hold, replaced when a title becomes one. */
 const UNSAFE_NAME = /[\\/:*?"<>|#^[\]]/g;
 
+/**
+ * What a reflection read, so Regenerate and follow-ups read it again: the
+ * days from `from` to `to`, this date over the years, or what the model chose.
+ */
+export type StoredScope = "range" | "this-day" | "model";
+
+const STORED_SCOPES: ReadonlySet<string> = new Set<StoredScope>(["range", "this-day", "model"]);
+
 /** One reflection note, as the journal lists it under the day it was made. */
 export interface StoredReflection {
 	file: TFile;
@@ -26,6 +34,11 @@ export interface StoredReflection {
 	time: number;
 	/** What it was asked, for its card: the preset's name or the custom prompt. */
 	title: string;
+	/** The question itself, and the preset it came from. */
+	prompt: string;
+	preset: string | null;
+	/** Null in notes written before it was recorded. */
+	scope: StoredScope | null;
 	model: string | null;
 	/** The range it read, as `YYYY-MM-DD` keys. */
 	from: string | null;
@@ -40,6 +53,7 @@ export interface ReflectionRecord {
 	title: string;
 	preset: string | null;
 	prompt: string;
+	scope: StoredScope;
 	model: string;
 	from: string;
 	to: string;
@@ -188,11 +202,16 @@ export class ReflectionStore extends Component implements DaySequence {
 		if (!created.isValid()) return null;
 		const text = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
 		const sources: unknown = frontmatter?.sources;
+		const title = text(frontmatter?.title) ?? file.basename.replace(NAME_DATE, "").trim();
+		const scope = text(frontmatter?.scope);
 		return {
 			file,
 			key: created.format("YYYY-MM-DD"),
 			time: created.valueOf(),
-			title: text(frontmatter?.title) ?? file.basename.replace(NAME_DATE, "").trim(),
+			title,
+			prompt: text(frontmatter?.prompt) ?? title,
+			preset: text(frontmatter?.preset),
+			scope: scope && STORED_SCOPES.has(scope) ? (scope as StoredScope) : null,
 			model: text(frontmatter?.model),
 			from: text(frontmatter?.from),
 			to: text(frontmatter?.to),
@@ -258,6 +277,22 @@ export class ReflectionStore extends Component implements DaySequence {
 		throw new Error(`Could not name a reflection after ${base}`);
 	}
 
+	/**
+	 * Rewrites a reflection note in place: its body through `edit`, keeping the
+	 * properties as written, then its properties through `properties`.
+	 */
+	async revise(
+		file: TFile,
+		edit: (body: string) => string,
+		properties: (frontmatter: Record<string, unknown>) => void,
+	): Promise<void> {
+		await this.app.vault.process(file, (text) => {
+			const start = getFrontMatterInfo(text).contentStart;
+			return `${text.slice(0, start)}${edit(text.slice(start)).trim()}\n`;
+		});
+		await this.app.fileManager.processFrontMatter(file, properties);
+	}
+
 	/** Deletes a reflection the way a note is deleted: asking first, if Obsidian is set to, into the trash. */
 	async delete(file: TFile): Promise<void> {
 		try {
@@ -290,6 +325,7 @@ function frontmatterFor(record: ReflectionRecord): string {
 		`title: ${yamlString(record.title)}`,
 		...(record.preset ? [`preset: ${record.preset}`] : []),
 		`prompt: ${yamlString(record.prompt)}`,
+		`scope: ${record.scope}`,
 		`model: ${yamlString(record.model)}`,
 		`from: ${record.from}`,
 		`to: ${record.to}`,

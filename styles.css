@@ -2195,6 +2195,137 @@ button.journal-appearance-settings-link:hover {
 	font-size: var(--font-ui-smaller);
 }
 
+/* The footer opens into the notes a reflection read, one chip per date. */
+.journal-reflection-sources-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	height: auto;
+	padding: 0;
+	border: none;
+	background-color: transparent;
+	box-shadow: none;
+	color: inherit;
+	font-size: inherit;
+	cursor: var(--cursor);
+}
+
+.journal-reflection-sources-toggle:hover {
+	color: var(--text-muted);
+}
+
+.journal-reflection-sources-chevron {
+	display: inline-flex;
+}
+
+.journal-reflection-sources-chevron svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+	transition: transform 120ms ease-in-out;
+}
+
+.journal-reflection-sources-toggle[aria-expanded="true"] .journal-reflection-sources-chevron svg {
+	transform: rotate(90deg);
+}
+
+.journal-reflection-sources {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-1);
+	margin-top: var(--size-4-2);
+}
+
+.journal-reflection-source {
+	height: auto;
+	padding: var(--size-2-1) var(--size-4-2);
+	border-radius: var(--radius-l);
+	background-color: var(--background-modifier-hover);
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.journal-reflection-source:hover {
+	background-color: var(--background-modifier-active-hover);
+	color: var(--text-normal);
+}
+
+.journal-reflection-source:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+/* A follow-up being answered, below the answer: its question as the callout
+   it is saved as, its state with Stop, then the answer as it streams. */
+.journal-reflection-follow-up {
+	margin-top: var(--size-4-3);
+}
+
+.journal-reflection-question > :first-child {
+	margin-top: 0;
+}
+
+.journal-reflection-question > :last-child {
+	margin-bottom: 0;
+}
+
+.journal-reflection-follow-up-status {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+	min-height: var(--size-4-6);
+	margin-top: var(--size-4-1);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.journal-reflection-follow-up-failed .journal-reflection-follow-up-line {
+	color: var(--text-error);
+}
+
+.journal-reflection-follow-up-actions {
+	display: flex;
+	align-items: center;
+	margin-inline-start: auto;
+}
+
+/* The follow-up box closes a saved reflection: one line that grows as it is typed in. */
+.journal-reflection-ask {
+	display: flex;
+	align-items: flex-end;
+	gap: var(--size-4-1);
+	margin-top: var(--size-4-3);
+	padding-top: var(--size-4-2);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+textarea.journal-reflection-ask-input {
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	max-height: 12em;
+	height: var(--journal-reflection-ask-height, auto);
+	padding: var(--size-2-2) 0;
+	border: none;
+	background-color: transparent;
+	box-shadow: none;
+	font-size: var(--font-ui-small);
+	line-height: var(--line-height-normal);
+	resize: none;
+}
+
+textarea.journal-reflection-ask-input:focus,
+textarea.journal-reflection-ask-input:focus-visible {
+	box-shadow: none;
+}
+
+.journal-reflection-follow-up[hidden],
+.journal-reflection-sources[hidden],
+.journal-reflection-ask[hidden] {
+	display: none;
+}
+
 .journal-reflection-skeleton {
 	display: flex;
 	flex-direction: column;

@@ -4,7 +4,9 @@ import type JournalViewPlugin from "../main";
 import type { Moment } from "../moment";
 import { editorBody } from "../noteBody";
 import { DAY_KEY_FORMAT } from "../noteIndex";
-import { REMINDER, SYSTEM_PROMPT } from "./presets";
+import { conversationMessages } from "./conversation";
+import type { Conversation } from "./conversation";
+import { QUESTION_FORMAT, REMINDER, SYSTEM_PROMPT } from "./presets";
 import type { ReflectionRequest, ReflectionScope } from "./presets";
 import { ProviderError } from "./provider";
 import type { ChatMessage } from "./provider";
@@ -273,12 +275,16 @@ export function contextLimit(contextLength: number | null, maxContext: number): 
  * When the notes do not fit the model's context, whole notes are dropped
  * evenly across the range. Throws `ProviderError("failed")` when no note in
  * scope could be read, since a model given none would invent them.
+ *
+ * With `followUp`, the reflection's answer and its follow-ups come after the
+ * request, then the new question; the notes make room for them.
  */
 export async function buildContext(
 	plugin: JournalViewPlugin,
 	preset: Pick<ReflectionRequest, "scope" | "prompt" | "format">,
 	today: Moment,
 	limits: { contextLength: number | null; maxContext: number; sourcePath: string },
+	followUp?: { conversation: Conversation; question: string },
 ): Promise<ReflectionContext> {
 	const { range: scoped, notes: inScope } = notesInScope(plugin, preset.scope, today);
 	const read = await Promise.all(inScope.map((note) => readNote(plugin, note, limits.sourcePath)));
@@ -311,11 +317,26 @@ export async function buildContext(
 	const sections = notes.map((note) => formatNote(note, withYear, shared));
 	const user = (kept: readonly number[]) =>
 		`${header(kept.length)}\n\n${kept.map((index) => sections[index]).join("\n\n")}\n\n---\n\n${task(notes[kept[0]].link)}`;
+	const after = (exampleLink: string): ChatMessage[] =>
+		followUp
+			? conversationMessages(
+					followUp.conversation,
+					followUp.question,
+					fill(`${QUESTION_FORMAT}\n\n${REMINDER}`, exampleLink),
+				)
+			: [];
+	const afterLength = (exampleLink: string) =>
+		after(exampleLink).reduce((sum, message) => sum + message.content.length, 0);
 
 	// Measured without building every candidate prompt: a long range can hold
 	// hundreds of notes, and the search may try many counts.
 	const limit = contextLimit(limits.contextLength, limits.maxContext);
-	const fixed = system(notes[0].link).length + task(notes[0].link).length + "\n\n".length + "\n\n---\n\n".length;
+	const fixed =
+		system(notes[0].link).length +
+		task(notes[0].link).length +
+		afterLength(notes[0].link) +
+		"\n\n".length +
+		"\n\n---\n\n".length;
 	const lengthOf = (kept: readonly number[]) =>
 		fixed +
 		header(kept.length).length +
@@ -348,8 +369,9 @@ export async function buildContext(
 	const messages: ChatMessage[] = [
 		{ role: "system", content: system(exampleLink) },
 		{ role: "user", content: user(kept) },
+		...after(exampleLink),
 	];
-	const estimate = estimateTokens(messages[0].content.length + messages[1].content.length);
+	const estimate = estimateTokens(messages.reduce((sum, message) => sum + message.content.length, 0));
 	return {
 		messages,
 		range,
