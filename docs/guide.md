@@ -142,8 +142,11 @@ Hover just below today's note (above it when the journal runs newest to oldest) 
 
 - Type a question and press Enter, or select **Reflect**. Shift+Enter starts a new line. What you
   typed is kept while Obsidian runs, so closing the window by accident loses nothing.
-- Choose what the question reads, and the model. The line below says how much that is, such as
+- Choose what the question reads. The line below says how much that is, such as
   `Reads 12 notes · ~3k words`.
+- The model reflections use is named at the top right, next to the settings button; select it to
+  change it in the settings. A red warning icon before it means Ollama is not answering or the model
+  is not installed: hover it for the reason, and the window shows what to do.
 - Select a preset to run it at once. Each shows how much it reads, so a slow run is no surprise. The
   bookmark button saves the question you typed, and what it reads, as a new preset.
 
@@ -202,7 +205,7 @@ Select the gear in the Reflect window for its settings. **Settings → Journal V
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Server | `http://127.0.0.1:11434` | Where Ollama answers. The notes a reflection reads are sent there, and nowhere else |
-| Model | The first installed | The model reflections use; choosing one in the Reflect window changes it too. Models that cannot use tools are marked |
+| Model | The first installed | The model reflections use, named at the top of the Reflect window. Models that cannot use tools are marked |
 | Folder | `Reflections` | Where reflection notes are saved. It cannot be the daily-note folder |
 | Maximum context | 32,768 tokens | The most a reflection asks the model to hold. More reads more notes at once but uses more memory; *Let the model choose* asks for all of it |
 | Presets | Six built in | Reorder, edit, delete, or add presets. **Restore built-in presets** brings back the built-in ones you edited or deleted, and keeps your own |

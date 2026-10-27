@@ -63,6 +63,7 @@ const SCOPE_CHOICES: Record<ScopeChoice, string> = {
 /** The setup steps' names and commands, written as they are. */
 const SETUP = {
 	install: "Install Ollama from ",
+	pull: "ollama pull ",
 	pullSmall: "ollama pull gemma4:e4b",
 	pullLarge: "ollama pull gemma4:26b",
 };
@@ -101,6 +102,8 @@ export class ReflectionModal extends Modal {
 	private closed = false;
 	/** Redraws what on the current page depends on the connection. */
 	private onConnection: (() => void) | null = null;
+	/** The model reflections use, beside the settings button on the first page. */
+	private modelBadge: HTMLElement | null = null;
 
 	constructor(
 		app: App,
@@ -132,6 +135,7 @@ export class ReflectionModal extends Modal {
 
 	private render(): void {
 		this.onConnection = null;
+		this.modelBadge = null;
 		this.contentEl.empty();
 		this.titleEl.empty();
 		this.modalEl.dataset.page = this.page.kind;
@@ -139,6 +143,7 @@ export class ReflectionModal extends Modal {
 			case "ask":
 				this.renderTitle("Reflect", null);
 				this.renderAsk();
+				this.syncModelBadge();
 				break;
 			case "settings":
 				this.renderTitle("Reflection settings", "ask");
@@ -159,8 +164,29 @@ export class ReflectionModal extends Modal {
 		}
 		title.createSpan({ cls: "journal-reflect-title-text", text });
 		if (!back) {
+			this.modelBadge = title.createEl("button", { cls: "journal-reflect-model", attr: { type: "button" } });
+			this.modelBadge.addEventListener("click", () => this.go({ kind: "settings" }));
 			this.iconButton(title, "settings", "Reflection settings", () => this.go({ kind: "settings" }));
 		}
+	}
+
+	/**
+	 * Shows the model reflections use, quietly, since it is changed in the
+	 * settings; with a warning while Ollama or the model cannot run one.
+	 */
+	private syncModelBadge(): void {
+		const badge = this.modelBadge;
+		if (!badge) return;
+		badge.empty();
+		const problem = this.problem();
+		const checking = this.connection.state === "checking";
+		badge.toggleClass("journal-reflect-model-warning", problem !== null);
+		if (problem) setIcon(badge.createSpan({ cls: "journal-reflect-model-icon" }), "alert-triangle");
+		const chosen = this.plugin.settings.reflectionModel;
+		const name = this.model?.name ?? (chosen || (checking ? "Connecting…" : "No model"));
+		badge.createSpan({ cls: "journal-reflect-model-name", text: name });
+		const tooltip = problem ?? (checking ? "Connecting to Ollama…" : `Reflections use ${name}. Change it in the settings.`);
+		setTooltip(badge, tooltip);
 	}
 
 	private iconButton(parent: HTMLElement, icon: string, label: string, onClick: () => void): HTMLButtonElement {
@@ -183,7 +209,7 @@ export class ReflectionModal extends Modal {
 	private async check(): Promise<void> {
 		const serial = ++this.checkSerial;
 		this.connection = { state: "checking" };
-		this.onConnection?.();
+		this.connectionChanged();
 		let next: Connection;
 		try {
 			const models = await this.plugin.reflectionProvider().listModels();
@@ -197,6 +223,11 @@ export class ReflectionModal extends Modal {
 		}
 		if (this.closed || serial !== this.checkSerial) return;
 		this.connection = next;
+		this.connectionChanged();
+	}
+
+	private connectionChanged(): void {
+		this.syncModelBadge();
 		this.onConnection?.();
 	}
 
@@ -204,10 +235,30 @@ export class ReflectionModal extends Modal {
 		return this.connection.state === "ready" ? this.connection.models : [];
 	}
 
-	/** The model a reflection would use: the chosen one while installed, otherwise the first. */
+	/**
+	 * The model a reflection would use, as the runner picks it: the chosen
+	 * one, or the first installed while none is chosen. Null while the chosen
+	 * one is not installed, which a reflection would fail on.
+	 */
 	private get model(): ModelInfo | null {
 		const models = this.models;
-		return models.find((model) => model.name === this.plugin.settings.reflectionModel) ?? models[0] ?? null;
+		const chosen = this.plugin.settings.reflectionModel;
+		return chosen ? (models.find((model) => model.name === chosen) ?? null) : (models[0] ?? null);
+	}
+
+	/** The chosen model, while the server answers without it. */
+	private get missingModel(): string | null {
+		const chosen = this.plugin.settings.reflectionModel;
+		return this.connection.state === "ready" && chosen && !this.model ? chosen : null;
+	}
+
+	/** Why a reflection cannot run now, or null when it can, or while that is not known yet. */
+	private problem(): string | null {
+		const { connection } = this;
+		if (connection.state === "checking") return null;
+		if (connection.state !== "ready") return this.connectionLine();
+		const missing = this.missingModel;
+		return missing ? `${missing} is not installed. Pull it, or choose another model in the settings.` : null;
 	}
 
 	/** The connection's one-line state, for the settings page. */
@@ -232,9 +283,17 @@ export class ReflectionModal extends Modal {
 	private renderSetup(el: HTMLElement): void {
 		el.empty();
 		const { connection } = this;
-		el.hidden = connection.state === "ready" || connection.state === "checking";
+		const missing = this.missingModel;
+		el.hidden = (connection.state === "ready" && !missing) || connection.state === "checking";
 		if (el.hidden) return;
-		if (connection.state === "failed") {
+		if (missing) {
+			el.createDiv({ cls: "journal-reflect-setup-title", text: `${missing} is not installed.` });
+			const steps = el.createEl("ol", { cls: "journal-reflect-setup-steps" });
+			const pull = steps.createEl("li", { text: "Pull it in a terminal: " });
+			pull.createEl("code").appendText(`${SETUP.pull}${missing}`);
+			pull.appendText(".");
+			steps.createEl("li", { text: "Or choose another model in the settings." });
+		} else if (connection.state === "failed") {
 			el.createDiv({ cls: "journal-reflect-setup-title", text: connection.message });
 		} else {
 			el.createDiv({
@@ -282,7 +341,6 @@ export class ReflectionModal extends Modal {
 		const row = composer.createDiv({ cls: "journal-reflect-composer-row" });
 		const scopeSelect = row.createEl("select", { cls: "dropdown", attr: { "aria-label": "Notes to read" } });
 		for (const [value, label] of Object.entries(SCOPE_CHOICES)) scopeSelect.createEl("option", { value, text: label });
-		const modelSelect = row.createEl("select", { cls: "dropdown", attr: { "aria-label": "Model" } });
 		row.createDiv({ cls: "journal-reflect-spacer" });
 		const save = this.iconButton(row, "bookmark-plus", "Save as preset", () => {
 			const question = input.value.trim();
@@ -367,15 +425,7 @@ export class ReflectionModal extends Modal {
 
 		const sync = (): void => {
 			this.renderSetup(setup);
-			const ready = this.connection.state === "ready";
-			// Models
-			modelSelect.empty();
-			for (const model of this.models) {
-				modelSelect.createEl("option", { value: model.name, text: modelLabel(model) });
-			}
-			if (!ready) modelSelect.createEl("option", { value: "", text: this.connectionLine() });
-			modelSelect.value = this.model?.name ?? "";
-			modelSelect.disabled = !ready;
+			const ready = this.connection.state === "ready" && this.model !== null;
 			// Scope
 			const modelOption = scopeSelect.querySelector<HTMLOptionElement>('option[value="model"]');
 			if (modelOption) {
@@ -421,10 +471,6 @@ export class ReflectionModal extends Modal {
 				measure();
 			});
 		}
-		modelSelect.addEventListener("change", () => {
-			this.setModel(modelSelect.value);
-			sync();
-		});
 		create.addEventListener("click", () => {
 			const current = scope();
 			const question = input.value.trim();
@@ -559,8 +605,11 @@ export class ReflectionModal extends Modal {
 			if (!select) return;
 			select.empty();
 			for (const model of this.models) select.createEl("option", { value: model.name, text: modelLabel(model) });
+			const missing = this.missingModel;
+			// Kept in the list, so the setting shows what reflections would ask for.
+			if (missing) select.createEl("option", { value: missing, text: `${missing} (not installed)` });
 			if (this.connection.state !== "ready") select.createEl("option", { value: "", text: "No models" });
-			select.value = this.model?.name ?? "";
+			select.value = this.model?.name ?? missing ?? "";
 			select.disabled = this.connection.state !== "ready";
 		};
 		this.onConnection();

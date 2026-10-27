@@ -65,8 +65,10 @@ Agreed with the user on 2026-10-19:
 
 - Today's day gets a handle: below its card when the journal runs oldest to newest, above it when it
   runs newest to oldest (`daySortDirection`, `src/settings.ts:15`).
-- Hovering, or focusing it with the keyboard, expands it into **Reflect**. Focus is a real path, not
-  only hover: it is a `<button>` with an accessible name.
+- Hovering, or focusing it with the keyboard, expands it into **Reflect**, a label without an icon.
+  Focus is a real path, not only hover: it is a `<button>` with an accessible name.
+- The pill sits about 8 px from the card, on the edge of its row facing the card, and grows away
+  from it, so the gap stays the same when it expands (changed on 2026-10-27; it sat 25 px away).
 - It follows the pattern of today's add-note button (`src/day.ts:115`), and only exists on desktop
   (`Platform.isDesktop`) while **Reflections** is on.
 
@@ -77,11 +79,11 @@ toolbar. The **Create reflection** command opens the same window. A gear at the 
 window into its settings page, and an arrow leads back.
 
 ```text
-Reflect                                              ⚙  ✕
+Reflect                                  gemma4:26b  ⚙  ✕
 ┌──────────────────────────────────────────────────────┐
 │ Ask your journal a question…                         │
 └──────────────────────────────────────────────────────┘
-[Let the model choose ▾] [gemma4:26b ▾]          🔖 [Reflect]
+[Let the model choose ▾]                         🔖 [Reflect]
 The model searches and reads your notes itself, which takes longer.
 
 Presets
@@ -97,8 +99,10 @@ Week in review                        7 days · ~620 words
   day over the years*, or *Dates…*, a from–to range. Under it, how much it reads: `Reads 12 notes ·
   ~3k words`. Without tool support, *Let the model choose* is disabled and says it needs a model with
   tools; a scope left at it falls back to *Last 14 days*.
-- **Model:** a dropdown of installed models, marking those without tools. The choice is the default
-  model, the same one the settings page sets.
+- **Model:** shown quietly beside the gear, and chosen only on the settings page (changed on
+  2026-10-27; the window had its own picker). While Ollama does not answer, or the chosen model is
+  not installed, a red warning icon comes before the name, its tooltip says why, and the setup box
+  above the question says what to do. Selecting the name opens the settings.
 - **Presets:** run at a click, each showing how much it would read, so a slow run is not a surprise.
   The bookmark button saves the typed question and its scope as a new preset.
 - Until Ollama answers, the window says so above the question, with the setup steps: install Ollama,
@@ -590,4 +594,4 @@ Not yet confirmed with the user; change them here if they turn out wrong.
   and read as of the reflection's own day.
 - **Find in journal** does not search reflections in the first version.
 - **Reflections** is on by default.
-- The window's model picker changes the default model rather than the model for one run.
+- There is one model for every reflection, chosen on the settings page; the window only shows it.

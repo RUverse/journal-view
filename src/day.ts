@@ -506,7 +506,7 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		for (const card of existing.values()) card.destroy();
 
 		const wantsButton = plugin.settings.reflectionsEnabled && this.isToday && Platform.isDesktop;
-		if (wantsButton && !this.reflectButton) this.reflectButton = new ReflectButton(plugin);
+		if (wantsButton && !this.reflectButton) this.reflectButton = new ReflectButton(plugin, this.newestFirst);
 		if (!wantsButton && this.reflectButton) {
 			this.reflectButton.destroy();
 			this.reflectButton = null;

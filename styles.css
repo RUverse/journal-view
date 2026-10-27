@@ -2045,7 +2045,7 @@ button.journal-appearance-settings-link:hover {
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-4-3);
-	margin: var(--size-4-3) 0;
+	margin: var(--size-4-2) 0;
 }
 
 .journal-reflections[hidden] {
@@ -2053,18 +2053,23 @@ button.journal-appearance-settings-link:hover {
 }
 
 /* Today's handle: a faint pill that grows into the Reflect button. Its row
-   keeps the button's full height, so hovering never moves the journal. */
+   keeps the button's full height, so hovering never moves the journal, and
+   the pill keeps to the edge facing the day's card, growing away from it. */
 .journal-reflect {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	justify-content: center;
-	min-height: var(--size-4-8);
+	min-height: var(--size-4-6);
+}
+
+.journal-reflect-above {
+	align-items: flex-end;
 }
 
 .journal-reflect-button {
 	display: inline-flex;
 	align-items: center;
-	gap: var(--size-4-1);
+	justify-content: center;
 	height: 6px;
 	max-width: 2.5rem;
 	min-width: 2.5rem;
@@ -2102,11 +2107,6 @@ button.journal-appearance-settings-link:hover {
 .journal-reflect-button:focus-visible > span,
 .journal-reflect-busy .journal-reflect-button > span {
 	opacity: 1;
-}
-
-.journal-reflect-icon svg {
-	width: var(--icon-xs);
-	height: var(--icon-xs);
 }
 
 .journal-reflection {
@@ -2196,7 +2196,7 @@ button.journal-appearance-settings-link:hover {
 }
 
 /* The footer opens into the notes a reflection read, one chip per date. */
-.journal-reflection-sources-toggle {
+button.journal-reflection-sources-toggle {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--size-2-1);
@@ -2210,7 +2210,7 @@ button.journal-appearance-settings-link:hover {
 	cursor: var(--cursor);
 }
 
-.journal-reflection-sources-toggle:hover {
+button.journal-reflection-sources-toggle:hover {
 	color: var(--text-muted);
 }
 
@@ -2224,7 +2224,7 @@ button.journal-appearance-settings-link:hover {
 	transition: transform 120ms ease-in-out;
 }
 
-.journal-reflection-sources-toggle[aria-expanded="true"] .journal-reflection-sources-chevron svg {
+button.journal-reflection-sources-toggle[aria-expanded="true"] .journal-reflection-sources-chevron svg {
 	transform: rotate(90deg);
 }
 
@@ -2235,7 +2235,7 @@ button.journal-appearance-settings-link:hover {
 	margin-top: var(--size-4-2);
 }
 
-.journal-reflection-source {
+button.journal-reflection-source {
 	height: auto;
 	padding: var(--size-2-1) var(--size-4-2);
 	border-radius: var(--radius-l);
@@ -2245,12 +2245,12 @@ button.journal-appearance-settings-link:hover {
 	font-size: var(--font-ui-smaller);
 }
 
-.journal-reflection-source:hover {
+button.journal-reflection-source:hover {
 	background-color: var(--background-modifier-active-hover);
 	color: var(--text-normal);
 }
 
-.journal-reflection-source:disabled {
+button.journal-reflection-source:disabled {
 	opacity: 0.5;
 	cursor: default;
 }
@@ -2377,6 +2377,48 @@ textarea.journal-reflection-ask-input:focus-visible {
 
 .journal-reflect-icon-button {
 	flex: none;
+}
+
+/* The model reflections use, beside the settings button: quiet, since it is
+   changed there, unless Ollama or the model cannot run a reflection. */
+button.journal-reflect-model {
+	display: inline-flex;
+	flex: 0 1 auto;
+	align-items: center;
+	gap: var(--size-2-2);
+	min-width: 0;
+	height: auto;
+	padding: var(--size-2-1) var(--size-2-3);
+	border: none;
+	background-color: transparent;
+	box-shadow: none;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-normal);
+	cursor: var(--cursor);
+}
+
+button.journal-reflect-model:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+.journal-reflect-model-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.journal-reflect-model-icon {
+	display: inline-flex;
+	flex: none;
+	color: var(--text-error);
+}
+
+.journal-reflect-model-icon svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
 }
 
 .journal-reflect-setup {
