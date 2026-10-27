@@ -2150,16 +2150,34 @@ button.journal-appearance-settings-link:hover {
    reflection being written keeps Stop in view. */
 .journal-reflection-actions {
 	display: flex;
+	flex: 0 0 auto;
 	align-items: center;
+	gap: var(--size-2-1);
 	opacity: 0;
 	transition: opacity 120ms ease-in-out;
 }
 
 .journal-reflection:hover .journal-reflection-actions,
-.journal-reflection:focus-within .journal-reflection-actions,
+.journal-reflection-actions:focus-within,
 .journal-reflection-pending .journal-reflection-actions,
 .journal-reflection-failed .journal-reflection-actions {
 	opacity: 1;
+}
+
+/* Regenerate and Delete wait for the header itself, as a note's Delete does,
+   rather than the whole card. Focus always reveals them. */
+@media (hover: hover) {
+	.journal-reflection-actions button.journal-reflection-header-action {
+		opacity: 0;
+		pointer-events: none;
+		transition: opacity 120ms ease-in-out;
+	}
+
+	.journal-reflection-header:hover button.journal-reflection-header-action,
+	button.journal-reflection-header-action:focus {
+		opacity: 1;
+		pointer-events: auto;
+	}
 }
 
 .journal-reflection-status {

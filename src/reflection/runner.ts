@@ -12,6 +12,7 @@ import { QUESTION_FORMAT, presetsOf } from "./presets";
 import type { ReflectionRequest, ReflectionScope } from "./presets";
 import { NO_MODELS_MESSAGE, ProviderError, describeProviderError } from "./provider";
 import type { ModelInfo } from "./provider";
+import { FOLLOW_UPS_PROPERTY, stringsOf } from "./store";
 import type { StoredReflection, StoredScope } from "./store";
 import { reflectWithTools } from "./tools";
 
@@ -322,7 +323,9 @@ export class ReflectionRunner extends Component {
 
 	/** A reflection note's answer and follow-ups, as they are now. */
 	private async conversationOf(file: TFile): Promise<Conversation> {
-		return parseConversation(noteBody(await this.plugin.app.vault.read(file)));
+		const { app } = this.plugin;
+		const questions = stringsOf(app.metadataCache.getFileCache(file)?.frontmatter?.[FOLLOW_UPS_PROPERTY]);
+		return parseConversation(noteBody(await app.vault.read(file)), questions);
 	}
 
 	/**
@@ -407,6 +410,7 @@ export class ReflectionRunner extends Component {
 						}
 						frontmatter.sources = links;
 						frontmatter.scope = storedScopeOf(run.request.scope);
+						delete frontmatter[FOLLOW_UPS_PROPERTY];
 					},
 				);
 			} else if (run.target && run.question !== null) {
@@ -415,10 +419,9 @@ export class ReflectionRunner extends Component {
 					run.target,
 					(body) => `${body.trimEnd()}\n\n${followUpMarkdown(question, text)}`,
 					(frontmatter) => {
+						frontmatter[FOLLOW_UPS_PROPERTY] = [...stringsOf(frontmatter[FOLLOW_UPS_PROPERTY]), question];
 						// The follow-up's notes join the reflection's, and widen its days.
-						const earlier: unknown[] = Array.isArray(frontmatter.sources) ? (frontmatter.sources as unknown[]) : [];
-						const kept = earlier.filter((link): link is string => typeof link === "string");
-						frontmatter.sources = [...new Set([...kept, ...links])];
+						frontmatter.sources = [...new Set([...stringsOf(frontmatter.sources), ...links])];
 						if (!run.range) return;
 						const { from, to } = frontmatter;
 						if (typeof from !== "string" || run.range.from < from) frontmatter.from = run.range.from;

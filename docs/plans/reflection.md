@@ -126,7 +126,9 @@ States, in order:
 3. **Ready:** the reflection renders as Markdown, read-only.
    - Cited dates such as `[[2026-10-05]]` move the journal to that day instead of opening the file.
    - A footer reads `From 9 notes · 5–19 Oct` and expands into date chips that do the same.
-   - Top right, matching a note's header buttons: **Regenerate** and **Delete**.
+   - Top right, matching a note's header buttons: **Regenerate**, **Delete**, and **Open note in a
+     tab**. As on a note, Open shows while the card is hovered, and the other two only while its
+     header is (changed on 2026-10-27; all three showed on card hover, without Open).
    - At the bottom, an **Ask a follow-up…** box continues the same conversation inside the card.
 4. **Error:** Ollama stopped answering, the model is missing, or the notes did not fit. The card
    says what happened and offers **Retry**. Nothing is saved unless some text arrived.
@@ -226,14 +228,18 @@ sources: ["[[2026-10-05]]", "[[2026-10-09]]", "[[2026-10-14]]"]
 ---
 ```
 
-- The body is the reflection. Each follow-up is appended as a question callout followed by its
-  answer, which renders well in Obsidian and can be read back into a conversation:
+- The body is the reflection. Each follow-up is appended as a plain quote of the question followed
+  by its answer, which reads quietly in Obsidian and can be read back into a conversation:
 
   ```markdown
-  > [!question] Say more about the second point
+  > Say more about the second point
 
   The answer…
   ```
+
+  An answer can quote the reader's notes the same way, so the questions are also listed, in order,
+  in a `follow-ups` property; only a quote matching the next one starts a follow-up. Until
+  2026-10-27 each question was a `> [!question]` callout instead, which still reads as one.
 
 - The day a reflection belongs to is the date in `created`.
 - `scope` is what Regenerate and follow-ups read again: `range` (the days from `from` to `to`),
@@ -242,8 +248,9 @@ sources: ["[[2026-10-05]]", "[[2026-10-09]]", "[[2026-10-14]]"]
 - The file is written once the stream ends, or on **Stop** if some text arrived. Regenerate rewrites
   the body in place with `vault.process` once the new answer is complete, and asks first when there
   are follow-ups, which it clears; **Stop** or an error keeps the old answer. It then rewrites
-  `model`, `from`, `to`, `sources` and `scope` with `processFrontMatter`. A follow-up adds its
-  callout and answer to the end, adds its notes to `sources`, and widens `from` and `to`.
+  `model`, `from`, `to`, `sources` and `scope` with `processFrontMatter`, and removes `follow-ups`.
+  A follow-up adds its quote and answer to the end, its question to `follow-ups`, and its notes to
+  `sources`, and widens `from` and `to`.
 - Delete reuses the note flow: `fileManager.promptForDeletion`, then `trashFile`
   (`src/entry.ts:1321`).
 
@@ -469,7 +476,7 @@ no answer saying the runs never resumed. Gemma writes several citations as `[[a]
 
 ### 5. Regenerate, follow-ups and sources
 
-- Regenerate, the follow-up box and its callouts, the sources footer, and citations that move the
+- Regenerate, the follow-up box and its quotes, the sources footer, and citations that move the
   journal.
 - The guide section.
 
@@ -486,7 +493,7 @@ again as of the reflection's own day, with the window's current model:
   it, the notes making room for them. With tools, the conversation follows the first question, and
   the model looks through the journal again, since what it read before is not kept: the guard that
   drops an answer written before looking applies to follow-ups too. A model without tools reads
-  the reflection's `from`–`to` instead. The question shows as its callout at the bottom of the
+  the reflection's `from`–`to` instead. The question shows as its quote at the bottom of the
   card, with its own status line, **Stop**, and on failure **Try again** and **Dismiss**, which puts
   the question back in the box.
 - The footer opens into a chip per source, sorted by date, that moves the journal there; a source

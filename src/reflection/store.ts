@@ -9,6 +9,8 @@ import type { DaySequence } from "../noteIndex";
 /** The property that marks a note as a reflection, and its value. */
 export const REFLECTION_PROPERTY = "journal-view";
 export const REFLECTION_VALUE = "reflection";
+/** The property listing a reflection's follow-up questions, which tells them from quotes in its answers. */
+export const FOLLOW_UPS_PROPERTY = "follow-ups";
 
 /** Reflection notes start with the day they were made: `2026-10-19 What I learned.md`. */
 const NAME_DATE = /^(\d{4}-\d{2}-\d{2})\b/;
@@ -45,6 +47,8 @@ export interface StoredReflection {
 	to: string | null;
 	/** Links to the notes it read, as written in the note. */
 	sources: string[];
+	/** The follow-up questions asked of it, in order. */
+	followUps: string[];
 }
 
 /** What a new reflection note records about how it was made. */
@@ -201,7 +205,6 @@ export class ReflectionStore extends Component implements DaySequence {
 		const created = createMoment(String(frontmatter?.created ?? named ?? ""), [CREATED_FORMAT, "YYYY-MM-DD"], true);
 		if (!created.isValid()) return null;
 		const text = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
-		const sources: unknown = frontmatter?.sources;
 		const title = text(frontmatter?.title) ?? file.basename.replace(NAME_DATE, "").trim();
 		const scope = text(frontmatter?.scope);
 		return {
@@ -215,7 +218,8 @@ export class ReflectionStore extends Component implements DaySequence {
 			model: text(frontmatter?.model),
 			from: text(frontmatter?.from),
 			to: text(frontmatter?.to),
-			sources: Array.isArray(sources) ? sources.filter((source): source is string => typeof source === "string") : [],
+			sources: stringsOf(frontmatter?.sources),
+			followUps: stringsOf(frontmatter?.[FOLLOW_UPS_PROPERTY]),
 		};
 	}
 
@@ -304,6 +308,11 @@ export class ReflectionStore extends Component implements DaySequence {
 			new Notice(`Journal View: could not delete ${file.path}`);
 		}
 	}
+}
+
+/** The strings in a list property, or none when it is not a list. */
+export function stringsOf(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 /** A title fit for a file name: no unsafe characters, and short. */

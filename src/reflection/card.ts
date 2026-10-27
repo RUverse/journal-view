@@ -1,9 +1,10 @@
 import { Component, MarkdownRenderer, Modal, Platform, TFile, setIcon, setTooltip } from "obsidian";
 import type { App } from "obsidian";
+import { openFileInTab } from "../entry";
 import type JournalViewPlugin from "../main";
 import { createMoment } from "../moment";
 import { noteBody } from "../noteBody";
-import { parseConversation, questionCallout } from "./conversation";
+import { parseConversation, questionQuote } from "./conversation";
 import type { ReflectionRun } from "./runner";
 import type { StoredReflection } from "./store";
 
@@ -231,12 +232,20 @@ export class ReflectionCard {
 		this.setState(null);
 		this.setTitle(reflection.title);
 		this.draw(this.actionsEl, "stored", () => {
+			// As on a note, what changes the reflection shows only while its header is hovered.
 			if (Platform.isDesktop) {
-				this.addAction(this.actionsEl, "refresh-cw", "Regenerate reflection", () => void this.regenerate());
+				this.addAction(this.actionsEl, "refresh-cw", "Regenerate reflection", () => void this.regenerate(), true);
 			}
-			this.addAction(this.actionsEl, "trash-2", "Delete reflection", () => {
-				if ("stored" in this.source) void this.host.plugin.reflections.delete(this.source.stored.file);
-			});
+			this.addAction(
+				this.actionsEl,
+				"trash-2",
+				"Delete reflection",
+				() => {
+					if ("stored" in this.source) void this.host.plugin.reflections.delete(this.source.stored.file);
+				},
+				true,
+			);
+			this.addOpenAction();
 		});
 		this.statusEl.hidden = true;
 		this.hideFollowUp();
@@ -267,7 +276,8 @@ export class ReflectionCard {
 		const { app, plugin } = this.host;
 		let followUps = 0;
 		try {
-			followUps = parseConversation(noteBody(await app.vault.cachedRead(reflection.file))).followUps.length;
+			const body = noteBody(await app.vault.cachedRead(reflection.file));
+			followUps = parseConversation(body, reflection.followUps).followUps.length;
 		} catch (error) {
 			console.error(`Journal View: could not read ${reflection.file.path}`, error);
 		}
@@ -389,8 +399,8 @@ export class ReflectionCard {
 	private showFollowUp(reflection: StoredReflection, run: ReflectionRun): void {
 		this.setState(null);
 		this.setTitle(reflection.title);
-		// Its buttons are by the question, near the answer they act on.
-		this.draw(this.actionsEl, "", () => {});
+		// Stop and the rest are by the question, near the answer they act on.
+		this.draw(this.actionsEl, "follow-up", () => this.addOpenAction());
 		this.statusEl.hidden = true;
 		this.renderFooter(reflection);
 		this.askEl.hidden = true;
@@ -398,7 +408,7 @@ export class ReflectionCard {
 
 		this.followUpEl.hidden = false;
 		this.followUpEl.toggleClass("journal-reflection-follow-up-failed", run.status === "failed");
-		void this.question.show(questionCallout(run.question ?? ""), reflection.file.path);
+		void this.question.show(questionQuote(run.question ?? ""), reflection.file.path);
 		this.followUpStatusText.setText(run.status === "writing" ? "" : run.statusLine);
 		this.addRunActions(this.followUpActionsEl, run);
 		if (run.status === "reading") this.answer.skeleton();
@@ -457,16 +467,33 @@ export class ReflectionCard {
 		fill();
 	}
 
-	private addAction(container: HTMLElement, icon: string, label: string, onClick: () => void): void {
+	/** Opens the reflection's note in a tab, as a note's own button does. */
+	private addOpenAction(): void {
+		this.addAction(this.actionsEl, "file-text", "Open note in a tab", (event) => {
+			if ("stored" in this.source) {
+				void openFileInTab(this.host.app, this.source.stored.file, event.ctrlKey || event.metaKey);
+			}
+		});
+	}
+
+	/** A button in the header; `headerOnly` ones show only while the header is hovered. */
+	private addAction(
+		container: HTMLElement,
+		icon: string,
+		label: string,
+		onClick: (event: MouseEvent) => void,
+		headerOnly = false,
+	): void {
 		const button = container.createEl("button", {
 			cls: "clickable-icon journal-reflection-action",
 			attr: { "aria-label": label },
 		});
+		button.toggleClass("journal-reflection-header-action", headerOnly);
 		setIcon(button, icon);
 		setTooltip(button, label);
 		button.addEventListener("click", (event) => {
 			event.stopPropagation();
-			onClick();
+			onClick(event);
 		});
 	}
 

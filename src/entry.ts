@@ -124,6 +124,26 @@ export interface EntryHost {
 	showFind(): void;
 }
 
+/**
+ * Opens a note in a tab: the tab already showing it in the main area when
+ * there is one, or a new tab when `newTab`.
+ */
+export async function openFileInTab(app: App, file: TFile, newTab: boolean): Promise<void> {
+	const { workspace } = app;
+	let existing: WorkspaceLeaf | undefined;
+	if (!newTab) {
+		existing = workspace
+			.getLeavesOfType("markdown")
+			.find((leaf) => leaf.getRoot() === workspace.rootSplit && leaf.getViewState().state?.file === file.path);
+	}
+	if (existing) {
+		await workspace.revealLeaf(existing);
+		workspace.setActiveLeaf(existing, { focus: true });
+		return;
+	}
+	await workspace.getLeaf(newTab ? "tab" : false).openFile(file);
+}
+
 function replaceNoteBody(content: string, body: string): string {
 	return content.slice(0, getFrontMatterInfo(content).contentStart) + body;
 }
@@ -1944,21 +1964,7 @@ export class NoteEntry {
 				return;
 			}
 		}
-		const { workspace } = this.host.app;
-		let existing: WorkspaceLeaf | undefined;
-		if (!newTab) {
-			existing = workspace.getLeavesOfType("markdown").find(
-				(leaf) =>
-					leaf.getRoot() === workspace.rootSplit &&
-					leaf.getViewState().state?.file === file.path,
-			);
-		}
-		if (existing) {
-			await workspace.revealLeaf(existing);
-			workspace.setActiveLeaf(existing, { focus: true });
-			return;
-		}
-		await workspace.getLeaf(newTab ? "tab" : false).openFile(file);
+		await openFileInTab(this.host.app, file, newTab);
 	}
 
 	destroy(): void {

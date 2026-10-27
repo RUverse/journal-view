@@ -173,12 +173,14 @@ unless some text arrived.
   the note in a new tab.
 - The line at the bottom, such as `From 9 notes · 5–19 Oct · gemma4:26b`, opens into the dates the
   reflection read; select one to move the journal there.
-- **Ask a follow-up…** at the bottom continues the conversation. The answer is added to the
-  reflection's note under the question, as a `[!question]` callout. A follow-up reads the same notes
-  as the reflection; when the model chose its own, it looks through the journal again.
-- **Regenerate**, at the top right, asks the same question again over the same notes, as of the day
-  the reflection was made, and replaces the answer once the new one is complete. **Stop** keeps the
-  old answer. When the reflection has follow-ups, you are asked first, since they are cleared.
+- **Ask a follow-up…** at the bottom continues the conversation. The question is added to the
+  reflection's note as a quote, with the answer below it. A follow-up reads the same notes as the
+  reflection; when the model chose its own, it looks through the journal again.
+- The buttons at the top right work as a note's do. **Open note in a tab** shows while you hover the
+  reflection; **Regenerate** and **Delete** show only while you hover its header.
+- **Regenerate** asks the same question again over the same notes, as of the day the reflection was
+  made, and replaces the answer once the new one is complete. **Stop** keeps the old answer. When
+  the reflection has follow-ups, you are asked first, since they are cleared.
 - **Delete** moves the reflection's note to the trash, as deleting a note does.
 
 A reflection keeps being written while you scroll away, and its box picks up where it is when you
@@ -189,7 +191,8 @@ come back.
 Reflections are saved in the **Reflections** folder, named after their day and question, such as
 `2026-10-19 What I learned.md`. Their properties record how they were made: `journal-view:
 reflection`, when they were `created` (which sets their day), the `title`, `prompt` and `preset`,
-what they read (`scope`, `from`, `to`), the `model`, and the `sources` they read, as links. They
+what they read (`scope`, `from`, `to`), the `model`, the `sources` they read, as links, and the
+questions in their `follow-ups`, which tell them from quotes in the answers. They
 are ordinary notes: you can open, link, search, and edit them, and the box shows the note's current
 text.
 
