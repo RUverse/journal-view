@@ -101,7 +101,7 @@ journal-wide mosaic of words used for the first time each month.
 (`context.ts`, `presets.ts`), or chooses its own through tools (`tools.ts`), and writes back a
 reflection note. `store.ts` indexes those notes by day, `runner.ts` holds the ones being written so
 they outlive their day's cards, `card.ts` is the card a day shows for each, and `modal.ts` is the
-Reflect window with its settings, opened by the button `day.ts` puts on today's card. `conversation.ts` reads a reflection's follow-ups back from its
+Reflect window with its settings, opened by the button `day.ts` puts in today's header. `conversation.ts` reads a reflection's follow-ups back from its
 note, for the next follow-up. `docs/plans/reflection.md` is the plan and the spikes' results.
 
 `src/datePicker.ts` is the toolbar's calendar: a scrolling column of months that

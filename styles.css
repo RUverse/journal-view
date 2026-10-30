@@ -397,6 +397,11 @@ button.journal-find-button.is-active {
 	flex: 0 0 auto;
 }
 
+/* Today's Reflect button, while Reflections is off. */
+.journal-day-actions > button[hidden] {
+	display: none;
+}
+
 /* The header's buttons belong to the note directly beneath it, so they show
    for that note - hovered or written in - rather than for the whole day. */
 .journal-day-header:hover .journal-day-actions,
@@ -493,28 +498,24 @@ button.journal-day-create:hover {
 	color: var(--text-normal);
 }
 
-/* Today's buttons - Reflect, and Add a note - sit in the room below its last
-   note, so the day is no taller for them. Like a note's buttons, they show
-   only while today is hovered or written in. */
-.journal-day-today-actions {
+/* Today's button that adds another note sits in the room below its last
+   note, so the day is no taller for it. Like a note's buttons, it shows only
+   while today is hovered or written in. */
+.journal-day-add {
 	position: absolute;
 	right: var(--size-4-2);
 	bottom: var(--size-4-2);
-	display: flex;
-	align-items: center;
-	gap: var(--size-2-1);
 	opacity: 0;
 	transition: opacity 120ms ease-in-out;
 }
 
-.journal-day:hover .journal-day-today-actions,
-.journal-day-focused .journal-day-today-actions,
-.journal-day-today-actions:focus-within {
+.journal-day:hover .journal-day-add,
+.journal-day-focused .journal-day-add,
+.journal-day-add:focus-within {
 	opacity: 1;
 }
 
-.journal-day-today-actions[hidden],
-.journal-day-today-actions > [hidden] {
+.journal-day-add[hidden] {
 	display: none;
 }
 

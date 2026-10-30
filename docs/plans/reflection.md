@@ -64,14 +64,16 @@ Agreed with the user on 2026-10-19:
 
 ### The button
 
-- An icon button (`mirror-rectangular`, tooltip *Reflect on your notes*) at the bottom right of
-  today's card, left of **Add a note to today**, in the room below the last note. Like that button
-  and a note's own buttons, it shows while today is hovered or written in, and keyboard focus
-  reaches it.
-- It shows whether or not today has a note yet, only on desktop (`Platform.isDesktop`), and only
-  while **Reflections** is on.
+- An icon button (`mirror-rectangular`, tooltip *Reflect on your notes*) in today's header, among
+  the buttons of the note beneath it: left of **Open note in a tab**, or of **Create note** while
+  today has no note. It shows with **Open note in a tab**, while that note is hovered or written in,
+  and keyboard focus reaches it.
+- It belongs to the day, not the note: it stays in the header when the lead note changes, and a
+  further note's own buttons never carry it. Desktop only (`Platform.isDesktop`), and only while
+  **Reflections** is on.
 - Changed on 2026-10-30. Until then today had a handle outside its card: a faint pill below it
-  (above it, newest first) that grew into a **Reflect** label on hover, as drafted above.
+  (above it, newest first) that grew into a **Reflect** label on hover, as drafted above. For a
+  while that day it sat at the card's bottom right, beside **Add a note to today**.
 
 ### The Reflect window
 

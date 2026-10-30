@@ -65,11 +65,9 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 	private noteLabelEl: HTMLElement;
 	private actionsEl: HTMLElement;
 	private entriesEl: HTMLElement;
-	/** Today's buttons, in the corner below its last note. */
-	private todayActionsEl: HTMLElement | null = null;
-	/** Opens the Reflect window, on desktop while Reflections is on. */
+	/** Today's button that opens the Reflect window, in its header, on desktop. */
 	private reflectEl: HTMLElement | null = null;
-	/** Adds another note, while the day can hold several. */
+	/** Today's button that adds another note, while the day can hold several. */
 	private addNoteEl: HTMLElement | null = null;
 	/** The files from this date, while the journal lists them. */
 	private files: DayFilesList | null;
@@ -126,30 +124,28 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 			this.titleEl.createSpan({ cls: "journal-day-badge", text: relative });
 		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
+		if (this.isToday && Platform.isDesktop) {
+			this.reflectEl = createEl("button", {
+				cls: "clickable-icon journal-day-action",
+				attr: { "aria-haspopup": "dialog" },
+			});
+			setIcon(this.reflectEl, "mirror-rectangular");
+			setTooltip(this.reflectEl, "Reflect on your notes");
+			this.reflectEl.addEventListener("click", (event) => {
+				event.stopPropagation();
+				this.host.plugin.openReflectModal();
+			});
+		}
 		this.entriesEl = this.cardEl.createDiv({ cls: "journal-day-entries" });
-		if (this.isToday) {
-			this.todayActionsEl = this.cardEl.createDiv({ cls: "journal-day-today-actions" });
-			if (Platform.isDesktop) {
-				this.reflectEl = this.todayActionsEl.createEl("button", {
-					cls: "clickable-icon",
-					attr: { "aria-haspopup": "dialog" },
-				});
-				setIcon(this.reflectEl, "mirror-rectangular");
-				setTooltip(this.reflectEl, "Reflect on your notes");
-				this.reflectEl.addEventListener("click", (event) => {
-					event.stopPropagation();
-					this.host.plugin.openReflectModal();
-				});
-			}
-			if (this.host.plugin.settings.multipleNotesPerDay) {
-				this.addNoteEl = this.todayActionsEl.createEl("button", { cls: "clickable-icon" });
-				setIcon(this.addNoteEl, "file-plus");
-				setTooltip(this.addNoteEl, "Add a note to today");
-				this.addNoteEl.addEventListener("click", (event) => {
-					event.stopPropagation();
-					void this.addNote();
-				});
-			}
+		if (this.isToday && this.host.plugin.settings.multipleNotesPerDay) {
+			this.addNoteEl = this.cardEl.createDiv({ cls: "journal-day-add" });
+			const add = this.addNoteEl.createEl("button", { cls: "clickable-icon journal-day-add-button" });
+			setIcon(add, "file-plus");
+			setTooltip(add, "Add a note to today");
+			add.addEventListener("click", (event) => {
+				event.stopPropagation();
+				void this.addNote();
+			});
 		}
 		this.reflectionsEl = createDiv({ cls: "journal-reflections" });
 		this.reflectionsEl.hidden = true;
@@ -335,17 +331,9 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		this.el.toggleClass("journal-day-today", this.isToday);
 		this.el.toggleClass("journal-day-empty", !this.exists);
 		this.el.toggleClass("journal-day-future", this.offset > 0);
-		this.refreshTodayActions();
+		if (this.addNoteEl) this.addNoteEl.hidden = !this.exists;
 		for (const entry of this.entries) entry.refreshState();
 		this.refreshVisibility(true);
-	}
-
-	/** Shows today's buttons that apply: Add a note once today has one, Reflect while Reflections is on. */
-	private refreshTodayActions(): void {
-		if (!this.todayActionsEl) return;
-		if (this.addNoteEl) this.addNoteEl.hidden = !this.exists;
-		if (this.reflectEl) this.reflectEl.hidden = !this.host.plugin.settings.reflectionsEnabled;
-		this.todayActionsEl.hidden = [this.reflectEl, this.addNoteEl].every((button) => !button || button.hidden);
 	}
 
 	/**
@@ -382,6 +370,8 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		this.actionsEl.empty();
 		setTooltip(this.titleEl, lead.path, { placement: "right" });
 		lead.renderActions(this.actionsEl);
+		// Today's Reflect button goes left of the note's last one: Open note in a tab, or Create note.
+		if (this.reflectEl) this.actionsEl.insertBefore(this.reflectEl, this.actionsEl.lastElementChild);
 		const label = this.labelFor(lead, false);
 		renderNoteLabel(this.noteLabelEl, label ?? { text: null, title: null }, this.retitler(lead));
 		this.noteLabelEl.hidden = label === null;
@@ -529,7 +519,7 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		});
 		for (const card of existing.values()) card.destroy();
 
-		this.refreshTodayActions();
+		if (this.reflectEl) this.reflectEl.hidden = !plugin.settings.reflectionsEnabled;
 
 		const elements = this.reflectionCards.map((card) => card.el);
 		const current = Array.from(this.reflectionsEl.children);
