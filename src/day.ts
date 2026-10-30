@@ -7,7 +7,6 @@ import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { INVALID_TITLE_CHARACTERS, renderNoteLabel } from "./noteLabel";
 import type { NoteLabel } from "./noteLabel";
-import { ReflectButton } from "./reflection/button";
 import { ReflectionCard, reflectionIdentity } from "./reflection/card";
 import type { ReflectionCardHost, ReflectionCardSource } from "./reflection/card";
 
@@ -66,18 +65,21 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 	private noteLabelEl: HTMLElement;
 	private actionsEl: HTMLElement;
 	private entriesEl: HTMLElement;
-	/** Today's button that adds another note, while the day can hold several. */
+	/** Today's buttons, in the corner below its last note. */
+	private todayActionsEl: HTMLElement | null = null;
+	/** Opens the Reflect window, on desktop while Reflections is on. */
+	private reflectEl: HTMLElement | null = null;
+	/** Adds another note, while the day can hold several. */
 	private addNoteEl: HTMLElement | null = null;
 	/** The files from this date, while the journal lists them. */
 	private files: DayFilesList | null;
 	/**
-	 * The reflections made on this date, and today's Reflect button. They sit
-	 * after the card when the journal runs oldest first and before it when it
-	 * runs newest first, so a new reflection always lands next to the button.
+	 * The reflections made on this date. They sit after the card when the
+	 * journal runs oldest first and before it when it runs newest first, so
+	 * they keep to the journal's order.
 	 */
 	private reflectionsEl: HTMLElement;
 	private reflectionCards: ReflectionCard[] = [];
-	private reflectButton: ReflectButton | null = null;
 	private destroyed = false;
 	/** Set while entries are reconciled, which refreshes the day once at the end. */
 	private syncing = false;
@@ -125,15 +127,29 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
 		this.entriesEl = this.cardEl.createDiv({ cls: "journal-day-entries" });
-		if (this.isToday && this.host.plugin.settings.multipleNotesPerDay) {
-			this.addNoteEl = this.cardEl.createDiv({ cls: "journal-day-add" });
-			const add = this.addNoteEl.createEl("button", { cls: "clickable-icon journal-day-add-button" });
-			setIcon(add, "file-plus");
-			setTooltip(add, "Add a note to today");
-			add.addEventListener("click", (event) => {
-				event.stopPropagation();
-				void this.addNote();
-			});
+		if (this.isToday) {
+			this.todayActionsEl = this.cardEl.createDiv({ cls: "journal-day-today-actions" });
+			if (Platform.isDesktop) {
+				this.reflectEl = this.todayActionsEl.createEl("button", {
+					cls: "clickable-icon",
+					attr: { "aria-haspopup": "dialog" },
+				});
+				setIcon(this.reflectEl, "mirror-rectangular");
+				setTooltip(this.reflectEl, "Reflect on your notes");
+				this.reflectEl.addEventListener("click", (event) => {
+					event.stopPropagation();
+					this.host.plugin.openReflectModal();
+				});
+			}
+			if (this.host.plugin.settings.multipleNotesPerDay) {
+				this.addNoteEl = this.todayActionsEl.createEl("button", { cls: "clickable-icon" });
+				setIcon(this.addNoteEl, "file-plus");
+				setTooltip(this.addNoteEl, "Add a note to today");
+				this.addNoteEl.addEventListener("click", (event) => {
+					event.stopPropagation();
+					void this.addNote();
+				});
+			}
 		}
 		this.reflectionsEl = createDiv({ cls: "journal-reflections" });
 		this.reflectionsEl.hidden = true;
@@ -319,9 +335,17 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		this.el.toggleClass("journal-day-today", this.isToday);
 		this.el.toggleClass("journal-day-empty", !this.exists);
 		this.el.toggleClass("journal-day-future", this.offset > 0);
-		if (this.addNoteEl) this.addNoteEl.hidden = !this.exists;
+		this.refreshTodayActions();
 		for (const entry of this.entries) entry.refreshState();
 		this.refreshVisibility(true);
+	}
+
+	/** Shows today's buttons that apply: Add a note once today has one, Reflect while Reflections is on. */
+	private refreshTodayActions(): void {
+		if (!this.todayActionsEl) return;
+		if (this.addNoteEl) this.addNoteEl.hidden = !this.exists;
+		if (this.reflectEl) this.reflectEl.hidden = !this.host.plugin.settings.reflectionsEnabled;
+		this.todayActionsEl.hidden = [this.reflectEl, this.addNoteEl].every((button) => !button || button.hidden);
 	}
 
 	/**
@@ -482,7 +506,7 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 	/**
 	 * Brings the day's reflection cards in line with its reflection notes and
 	 * the reflections being written, keeping every card that still applies,
-	 * and shows today's Reflect button while it is wanted.
+	 * and shows today's Reflect button while Reflections is on.
 	 */
 	refreshReflections(): void {
 		const { plugin } = this.host;
@@ -505,16 +529,9 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		});
 		for (const card of existing.values()) card.destroy();
 
-		const wantsButton = plugin.settings.reflectionsEnabled && this.isToday && Platform.isDesktop;
-		if (wantsButton && !this.reflectButton) this.reflectButton = new ReflectButton(plugin, this.newestFirst);
-		if (!wantsButton && this.reflectButton) {
-			this.reflectButton.destroy();
-			this.reflectButton = null;
-		}
+		this.refreshTodayActions();
 
-		const cards = this.reflectionCards.map((card) => card.el);
-		const button = this.reflectButton ? [this.reflectButton.el] : [];
-		const elements = this.newestFirst ? [...button, ...cards] : [...cards, ...button];
+		const elements = this.reflectionCards.map((card) => card.el);
 		const current = Array.from(this.reflectionsEl.children);
 		if (current.length !== elements.length || current.some((el, index) => el !== elements[index])) {
 			this.reflectionsEl.append(...elements);
@@ -609,7 +626,6 @@ export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 		this.destroyed = true;
 		for (const entry of this.entries) entry.destroy();
 		for (const card of this.reflectionCards) card.destroy();
-		this.reflectButton?.destroy();
 		this.el.remove();
 	}
 

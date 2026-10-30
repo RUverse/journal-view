@@ -52,7 +52,7 @@ Some options are only available in the customization menu, opened from the journ
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
-| Reflections | On | Shows the Reflect button under today on desktop, the **Create reflection** command, and the reflections on each day; see [Reflections](#reflections) |
+| Reflections | On | Shows the Reflect button on today's card on desktop, the **Create reflection** command, and the reflections on each day; see [Reflections](#reflections) |
 
 ## Several notes a day
 
@@ -61,7 +61,7 @@ A day can hold more than one note in two ways, and Journal View shows all of the
 - **Text after the date.** Turn on **Multiple notes per day** to also include notes whose names go
   on after the date, such as `2026-08-16 Birthday`. The text has to be set off from the date by a
   space or punctuation. Once today has a note, the bottom right of its card has an **Add a note to
-  today** button that creates a note named after the date and the current time, such as
+  today** button, next to the Reflect button, that creates a note named after the date and the current time, such as
   `2026-08-16 14-30`, and puts the cursor in it. A second note in the same minute becomes
   `2026-08-16 14-30-1`, then `-2`, and so on. Select the text after a note's date, in the day's
   header or above the note, to rename the note: `14-30` can become `Lunch`, and links to the note
@@ -137,8 +137,8 @@ Reflect window shows these steps.
 
 ### Asking
 
-Hover just below today's note (above it when the journal runs newest to oldest) and select
-**Reflect**, or run **Journal View: Create reflection**. The Reflect window opens:
+Hover today and select the Reflect button, a mirror at the bottom right of its card, or run
+**Journal View: Create reflection**. The Reflect window opens:
 
 - Type a question and press Enter, or select **Reflect**. Shift+Enter starts a new line. What you
   typed is kept while Obsidian runs, so closing the window by accident loses nothing.
@@ -164,8 +164,8 @@ reads while it reads them.
 
 ### Reading a reflection
 
-The reflection appears next to the Reflect button with a line saying what it reads, or what the
-model is looking up, then the answer as it is written. **Stop** keeps what has been written so far.
+The reflection appears under today's card (above it when the journal runs newest to oldest) with a
+line saying what it reads, or what the model is looking up, then the answer as it is written. **Stop** keeps what has been written so far.
 If something goes wrong, the box says what happened and offers **Try again**; nothing is saved
 unless some text arrived.
 

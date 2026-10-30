@@ -36,7 +36,8 @@ show the journal column of each:
 | ![Resting](reflection/1-resting.png) | ![Hovered](reflection/2-hovered.png) | ![Preset menu sketch](reflection/3-preset-menu-sketch.png) | ![Generating](reflection/4-generating.png) | ![Ready](reflection/5-ready.png) |
 
 1. **Resting:** a faint pill below today's card.
-2. **Hovered:** the pill grows into a **Reflect** button.
+2. **Hovered:** the pill grows into a **Reflect** button. Since 2026-10-30, an icon button in
+   today's card replaces the pill; see [The button](#the-button).
 3. **Preset menu:** a rough sketch of a short list of presets (*this day over years*, *summarize*,
    *?*). The Reflect window below replaces it.
 4. **Generating:** a card with a thin border and no fill, titled **Reflection**, with skeleton lines.
@@ -55,7 +56,7 @@ Agreed with the user on 2026-10-19:
 | Days | A day with reflections stays in the journal when it has no note, even with **Only show days that have a note** on. Decided 2026-10-20 | A reflection made yesterday must not vanish because yesterday had no note |
 | Card | Read-only Markdown with linked source dates, **Regenerate**, **Ask a follow-up**, and **Delete** | Lets the reader check a reflection against what they wrote and keep talking to it |
 | Generating | The drafted skeleton until the first words arrive, then streamed text with **Stop** | A local model reading two weeks of notes can take 30 s or more |
-| Newest first | The whole stack flips: button, reflections (newest first), then the day's card | A new reflection always appears next to the button that made it |
+| Newest first | The stack flips: reflections (newest first), then the day's card. Until 2026-10-30 the button flipped with it, at the far end | Reflections keep to the journal's order, as the days do |
 | Provider | Ollama only, behind a provider interface | Room for LM Studio or llama.cpp later without key storage now |
 | Platform | Desktop only for now: hidden on mobile, `isDesktopOnly` stays `false` | Ollama usually runs on the same computer as Obsidian |
 
@@ -63,14 +64,14 @@ Agreed with the user on 2026-10-19:
 
 ### The button
 
-- Today's day gets a handle: below its card when the journal runs oldest to newest, above it when it
-  runs newest to oldest (`daySortDirection`, `src/settings.ts:15`).
-- Hovering, or focusing it with the keyboard, expands it into **Reflect**, a label without an icon.
-  Focus is a real path, not only hover: it is a `<button>` with an accessible name.
-- The pill sits about 8 px from the card, on the edge of its row facing the card, and grows away
-  from it, so the gap stays the same when it expands (changed on 2026-10-27; it sat 25 px away).
-- It follows the pattern of today's add-note button (`src/day.ts:115`), and only exists on desktop
-  (`Platform.isDesktop`) while **Reflections** is on.
+- An icon button (`mirror-rectangular`, tooltip *Reflect on your notes*) at the bottom right of
+  today's card, left of **Add a note to today**, in the room below the last note. Like that button
+  and a note's own buttons, it shows while today is hovered or written in, and keyboard focus
+  reaches it.
+- It shows whether or not today has a note yet, only on desktop (`Platform.isDesktop`), and only
+  while **Reflections** is on.
+- Changed on 2026-10-30. Until then today had a handle outside its card: a faint pill below it
+  (above it, newest first) that grew into a **Reflect** label on hover, as drafted above.
 
 ### The Reflect window
 
@@ -183,7 +184,6 @@ stays behind small host interfaces, as with the view's other collaborators.
 | `store.ts` | Indexes the Reflections folder by date, follows vault events, creates, rewrites and trashes reflection files |
 | `card.ts` | The bordered card: skeleton, streaming, Stop, Regenerate, follow-ups, sources, errors |
 | `conversation.ts` | A reflection's follow-ups as its note keeps them, read back into a conversation |
-| `button.ts` | Today's handle, which opens the Reflect window |
 | `modal.ts` | The Reflect window: the question, its scope and model, the presets, and the settings page with the connection and preset management |
 
 Changes to existing code:
@@ -191,8 +191,8 @@ Changes to existing code:
 - `src/settings.ts`: the server address, default model, folder (default `Reflections`), maximum
   context size and presets (null until edited: the built-in ones), and **Reflections**, the one
   toggle the settings tab shows.
-- `src/day.ts`: a reflections element on every day, placed by sort direction, and the handle on
-  today.
+- `src/day.ts`: a reflections element on every day, placed by sort direction, and the Reflect
+  button on today's card.
 - `src/dayFiles.ts`: leave the Reflections folder out of file history, next to the template folders
   (`src/dayFiles.ts:229`).
 - `src/main.ts`: create the store as a child component, like `FindCorpus`

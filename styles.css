@@ -493,24 +493,28 @@ button.journal-day-create:hover {
 	color: var(--text-normal);
 }
 
-/* Today's button that adds another note sits in the room below its last
-   note, so the day is no taller for it. Like a note's buttons, it shows only
-   while today is hovered or written in. */
-.journal-day-add {
+/* Today's buttons - Reflect, and Add a note - sit in the room below its last
+   note, so the day is no taller for them. Like a note's buttons, they show
+   only while today is hovered or written in. */
+.journal-day-today-actions {
 	position: absolute;
 	right: var(--size-4-2);
 	bottom: var(--size-4-2);
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-1);
 	opacity: 0;
 	transition: opacity 120ms ease-in-out;
 }
 
-.journal-day:hover .journal-day-add,
-.journal-day-focused .journal-day-add,
-.journal-day-add:focus-within {
+.journal-day:hover .journal-day-today-actions,
+.journal-day-focused .journal-day-today-actions,
+.journal-day-today-actions:focus-within {
 	opacity: 1;
 }
 
-.journal-day-add[hidden] {
+.journal-day-today-actions[hidden],
+.journal-day-today-actions > [hidden] {
 	display: none;
 }
 
@@ -2050,63 +2054,6 @@ button.journal-appearance-settings-link:hover {
 
 .journal-reflections[hidden] {
 	display: none;
-}
-
-/* Today's handle: a faint pill that grows into the Reflect button. Its row
-   keeps the button's full height, so hovering never moves the journal, and
-   the pill keeps to the edge facing the day's card, growing away from it. */
-.journal-reflect {
-	display: flex;
-	align-items: flex-start;
-	justify-content: center;
-	min-height: var(--size-4-6);
-}
-
-.journal-reflect-above {
-	align-items: flex-end;
-}
-
-.journal-reflect-button {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	height: 6px;
-	max-width: 2.5rem;
-	min-width: 2.5rem;
-	padding: 0;
-	overflow: hidden;
-	border: none;
-	border-radius: var(--radius-l);
-	background-color: var(--background-modifier-border);
-	box-shadow: none;
-	color: var(--text-muted);
-	font-size: var(--font-ui-small);
-	white-space: nowrap;
-	transition:
-		max-width 160ms ease-in-out,
-		height 160ms ease-in-out,
-		background-color 120ms ease-in-out;
-}
-
-.journal-reflect-button > span {
-	display: inline-flex;
-	opacity: 0;
-	transition: opacity 120ms ease-in-out;
-}
-
-.journal-reflect:hover .journal-reflect-button,
-.journal-reflect-button:focus-visible,
-.journal-reflect-busy .journal-reflect-button {
-	height: var(--size-4-6);
-	max-width: 10rem;
-	padding: 0 var(--size-4-3);
-	background-color: var(--interactive-normal);
-}
-
-.journal-reflect:hover .journal-reflect-button > span,
-.journal-reflect-button:focus-visible > span,
-.journal-reflect-busy .journal-reflect-button > span {
-	opacity: 1;
 }
 
 .journal-reflection {
