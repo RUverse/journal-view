@@ -7,6 +7,7 @@ How Journal View works in detail. For an overview, see the [README](../README.md
 - [Several notes a day](#several-notes-a-day)
 - [File modification history](#file-modification-history)
 - [Filters](#filters)
+- [Reflections](#reflections)
 - [Statistics](#statistics)
 
 ## Navigation
@@ -51,6 +52,7 @@ Some options are only available in the customization menu, opened from the journ
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
+| Reflections | On | Shows the Reflect button in today's header on desktop, the **Create reflection** command, and the reflections on each day; see [Reflections](#reflections) |
 
 ## Several notes a day
 
@@ -121,6 +123,98 @@ all includes. On a day with several notes, the day appears when any of them matc
 that do not match are hidden within it. The funnel uses the accent color whenever a tag or property filter is active; the
 note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, **Random entry** picks
 only from the notes currently included, and **Find in journal** searches only those notes.
+
+## Reflections
+
+On desktop, a model running on your own computer can read your journal and write back what it
+notices: what you learned over the last two weeks, what this date looked like in past years, or the
+answer to a question of your own. Each reflection is saved as a note and shown on the day it was
+made, in a bordered box that sets it apart from what you wrote.
+
+Reflections run through [Ollama](https://ollama.com). Install it, start it, and pull a model:
+`gemma4:26b` with 32 GB of memory or more, or `gemma4:e4b` with 16 GB. Until Ollama answers, the
+Reflect window shows these steps.
+
+### Asking
+
+Hover today's note and select the Reflect button, a mirror in the day's header to the left of **Open
+note in a tab** (or of **Create note**, before today has a note), or run **Journal View: Create
+reflection**. The Reflect window opens:
+
+- Type a question and press Enter, or select **Reflect**. Shift+Enter starts a new line. What you
+  typed is kept while Obsidian runs, so closing the window by accident loses nothing.
+- Choose what the question reads. The line below says how much that is, such as
+  `Reads 12 notes · ~3k words`.
+- The model reflections use is named at the top right, next to the settings button; select it to
+  change it in the settings. A red warning icon before it means Ollama is not answering or the model
+  is not installed: hover it for the reason, and the window shows what to do.
+- Select a preset to run it at once. Each shows how much it reads, so a slow run is no surprise. The
+  bookmark button saves the question you typed, and what it reads, as a new preset.
+
+| Reads | What the model is given |
+| --- | --- |
+| Let the model choose | The model searches, lists and reads your notes itself, which takes longer. It needs a model that can use tools; any other reads the last 14 days instead, and says so |
+| Last 7, 14, 30 or 90 days | The notes from those days, today included |
+| This day over the years | This date in every earlier year, and today |
+| Dates… | The notes between two dates |
+
+A reflection reads only the notes the journal's [filters](#filters) let through, so a rule such as
+excluding `#private` keeps those notes from the model. When the notes do not fit the model's
+context, whole notes are left out evenly across the range, and the reflection says how many it
+reads while it reads them.
+
+### Reading a reflection
+
+The reflection appears under today's card (above it when the journal runs newest to oldest) with a
+line saying what it reads, or what the model is looking up, then the answer as it is written. **Stop** keeps what has been written so far.
+If something goes wrong, the box says what happened and offers **Try again**; nothing is saved
+unless some text arrived.
+
+- Select a date the reflection cites to move the journal to that day. Ctrl/Cmd-select it to open
+  the note in a new tab.
+- The line at the bottom, such as `From 9 notes · 5–19 Oct · gemma4:26b`, opens into the dates the
+  reflection read; select one to move the journal there.
+- **Ask a follow-up…** at the bottom continues the conversation. The question is added to the
+  reflection's note as a quote, with the answer below it. A follow-up reads the same notes as the
+  reflection; when the model chose its own, it looks through the journal again.
+- The buttons at the top right work as a note's do. **Open note in a tab** shows while you hover the
+  reflection; **Regenerate** and **Delete** show only while you hover its header.
+- **Regenerate** asks the same question again over the same notes, as of the day the reflection was
+  made, and replaces the answer once the new one is complete. **Stop** keeps the old answer. When
+  the reflection has follow-ups, you are asked first, since they are cleared.
+- **Delete** moves the reflection's note to the trash, as deleting a note does.
+
+A reflection keeps being written while you scroll away, and its box picks up where it is when you
+come back.
+
+### Reflection notes
+
+Reflections are saved in the **Reflections** folder, named after their day and question, such as
+`2026-10-19 What I learned.md`. Their properties record how they were made: `journal-view:
+reflection`, when they were `created` (which sets their day), the `title`, `prompt` and `preset`,
+what they read (`scope`, `from`, `to`), the `model`, the `sources` they read, as links, and the
+questions in their `follow-ups`, which tell them from quotes in the answers. They
+are ordinary notes: you can open, link, search, and edit them, and the box shows the note's current
+text.
+
+A day with reflections stays in the journal even when it has no note and **Only show days that have
+a note** is on. Reflection notes are never listed in [file history](#file-modification-history), and
+**Find in journal** does not search them.
+
+### Reflection settings
+
+Select the gear in the Reflect window for its settings. **Settings → Journal View** keeps only the
+**Reflections** toggle, which turns the whole feature off.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Server | `http://127.0.0.1:11434` | Where Ollama answers. The notes a reflection reads are sent there, and nowhere else |
+| Model | The first installed | The model reflections use, named at the top of the Reflect window. Models that cannot use tools are marked |
+| Folder | `Reflections` | Where reflection notes are saved. It cannot be the daily-note folder |
+| Maximum context | 32,768 tokens | The most a reflection asks the model to hold. More reads more notes at once but uses more memory; *Let the model choose* asks for all of it |
+| Presets | Six built in | Reorder, edit, delete, or add presets. **Restore built-in presets** brings back the built-in ones you edited or deleted, and keeps your own |
+
+On a computer without a capable GPU, a 90-day preset can take minutes.
 
 ## Statistics
 

@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, requireApiVersion } from "obsidian";
 import type { SettingDefinition, SettingDefinitionItem, ToggleComponent } from "obsidian";
 import type { VaultDailyConfig } from "./dailyNotes";
+import type { ReflectionPreset } from "./reflection/presets";
 import type JournalViewPlugin from "./main";
 
 export const MIN_SAVE_DELAY = 200;
@@ -10,6 +11,10 @@ export const MIN_LOADED_DAYS = 20;
 export const MAX_LOADED_DAYS = 120;
 const LOADED_DAYS_STEP = 5;
 export const MONTH_SEPARATOR_DAY_FORMAT = "dddd, D";
+export const DEFAULT_REFLECTION_SERVER = "http://127.0.0.1:11434";
+export const MIN_REFLECTION_CONTEXT = 4096;
+export const MAX_REFLECTION_CONTEXT = 131072;
+export const REFLECTION_CONTEXT_STEP = 4096;
 export const LEGACY_FULL_HEADER_FORMAT = "dddd, D MMMM YYYY";
 
 export type DaySortDirection = "ascending" | "descending";
@@ -82,6 +87,21 @@ export interface JournalViewSettings {
 	dayFilesAttachments: boolean;
 	/** Comma-separated folders whose files are left out of the lists. */
 	dayFilesExcluded: string;
+	/**
+	 * Reflection: today's Reflect button, on desktop, and the reflections in
+	 * the journal. The rest of its settings are set in the Reflect window.
+	 */
+	reflectionsEnabled: boolean;
+	/** Where Ollama answers, which reflections send the notes they read to. */
+	reflectionServer: string;
+	/** The model reflections use. Empty = the first installed one. */
+	reflectionModel: string;
+	/** Folder that holds the reflection notes. */
+	reflectionFolder: string;
+	/** The most context a reflection asks a model for, in tokens. */
+	reflectionMaxContext: number;
+	/** The presets, in order. Null until the reader changes them: the built-in ones, as shipped. */
+	reflectionPresets: ReflectionPreset[] | null;
 }
 
 export const DEFAULT_SETTINGS: JournalViewSettings = {
@@ -111,6 +131,12 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	dayFilesProperty: "",
 	dayFilesAttachments: false,
 	dayFilesExcluded: "",
+	reflectionsEnabled: true,
+	reflectionServer: DEFAULT_REFLECTION_SERVER,
+	reflectionModel: "",
+	reflectionFolder: "Reflections",
+	reflectionMaxContext: 32768,
+	reflectionPresets: null,
 };
 
 export const YEAR_PROGRESS_OPTIONS: Record<YearProgressMode, string> = {
@@ -136,7 +162,8 @@ type ToggleSettingKey =
 	| "showMonthSeparators"
 	| "groupDaysByYear"
 	| "showDayFiles"
-	| "dayFilesAttachments";
+	| "dayFilesAttachments"
+	| "reflectionsEnabled";
 
 interface JournalSettingBase {
 	name: string;
@@ -433,6 +460,20 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			},
 			{
 				type: "group",
+				heading: "Reflections",
+				items: [
+					{
+						name: "Reflections",
+						desc:
+							"A Reflect button under today asks a model on your computer to reflect on your notes, " +
+							"and each reflection is saved as a note and shown on its day. The button is desktop " +
+							"only; its window holds the server, model and presets.",
+						control: { type: "toggle", key: "reflectionsEnabled" },
+					},
+				],
+			},
+			{
+				type: "group",
 				heading: "Startup",
 				items: [
 					{
@@ -558,6 +599,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 			case "groupDaysByYear":
 			case "showDayFiles":
 			case "dayFilesAttachments":
+			case "reflectionsEnabled":
 				if (typeof value === "boolean") {
 					this.plugin.settings[key] = value;
 					changed = true;
@@ -688,6 +730,21 @@ export function clampSaveDelay(value: number): number {
 	return Math.max(MIN_SAVE_DELAY, Math.min(MAX_SAVE_DELAY, value));
 }
 
+export function clampReflectionContext(value: number): number {
+	const clamped = Math.max(MIN_REFLECTION_CONTEXT, Math.min(MAX_REFLECTION_CONTEXT, value));
+	return Math.round(clamped / REFLECTION_CONTEXT_STEP) * REFLECTION_CONTEXT_STEP;
+}
+
+/** A server address without trailing slashes, the default when left empty. */
+export function reflectionServerSetting(value: string): string {
+	return value.trim().replace(/\/+$/, "") || DEFAULT_REFLECTION_SERVER;
+}
+
+/** A folder path without leading or trailing slashes, `Reflections` when left empty. */
+export function reflectionFolderSetting(value: string): string {
+	return value.trim().replace(/^\/+|\/+$/g, "") || DEFAULT_SETTINGS.reflectionFolder;
+}
+
 export function clampLoadedDays(value: number): number {
 	const clamped = Math.max(MIN_LOADED_DAYS, Math.min(MAX_LOADED_DAYS, value));
 	return Math.round(clamped / LOADED_DAYS_STEP) * LOADED_DAYS_STEP;
@@ -695,4 +752,9 @@ export function clampLoadedDays(value: number): number {
 
 function showLegacySliderTooltip(slider: unknown): void {
 	(slider as LegacySliderTooltip).setDynamicTooltip();
+}
+
+/** Shows a slider's value while it is dragged; Obsidian 1.13 does that itself. */
+export function showSliderTooltip(slider: unknown): void {
+	if (!requireApiVersion("1.13.0")) showLegacySliderTooltip(slider);
 }
