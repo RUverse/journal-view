@@ -207,6 +207,13 @@ button.journal-find-button.is-active {
 	);
 	width: 100%;
 	box-sizing: border-box;
+	/* The scroller's `overflow-x: hidden` only hides a sideways scrollbar:
+	   anything wider than the timeline still lets the browser scroll it
+	   sideways to bring a caret into view, and nothing scrolls it back. Text
+	   that Gboard's clipboard chip pastes onto an empty bullet lands, for a
+	   moment, inside the list marker, which does not wrap. Clipping here leaves
+	   the scroller nothing to scroll sideways to. */
+	overflow-x: clip;
 }
 
 .journal-days > .journal-day + .journal-day {
