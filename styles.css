@@ -1026,6 +1026,23 @@ button.journal-day-metadata-value-button:focus-visible,
 	font-family: var(--font-text);
 	font-size: var(--font-text-size);
 	line-height: var(--line-height-normal);
+	/* Obsidian's reading view breaks a word too long for the line, such as a
+	   bare link, but its rule hangs off .markdown-preview-view, which this
+	   container is not. Without it the word runs past the column, where the
+	   timeline clips it. */
+	overflow-wrap: break-word;
+}
+
+/* A table wider than the note scrolls on its own (see scrollTablesSideways),
+   since the timeline is clipped at the column. The scroller takes over the
+   table's own margins so they still collapse with the paragraphs around it. */
+.journal-table-scroll {
+	overflow-x: auto;
+	margin-block: var(--p-spacing);
+}
+
+.journal-day-preview .journal-table-scroll > table {
+	margin-block: 0;
 }
 
 .journal-day-preview > :first-child,

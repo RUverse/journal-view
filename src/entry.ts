@@ -266,6 +266,20 @@ function sameFindRanges(left: FindRange[], right: FindRange[]): boolean {
 }
 
 /**
+ * Obsidian's reading view scrolls sideways as a whole when a table is wider
+ * than the note, and a live editor puts each table in a widget that scrolls on
+ * its own. A preview has neither, and the timeline is clipped at the column,
+ * so each of its tables gets a scroller of its own.
+ */
+function scrollTablesSideways(container: HTMLElement): void {
+	for (const table of Array.from(container.querySelectorAll("table"))) {
+		const scroller = createDiv({ cls: "journal-table-scroll" });
+		table.replaceWith(scroller);
+		scroller.appendChild(table);
+	}
+}
+
+/**
  * One note in the journal, written under its day. An entry has two modes:
  *
  * - Edit: a real editor. Every entry the reader can see is in this mode, so
@@ -1494,6 +1508,7 @@ export class NoteEntry {
 		const body = noteBody(content);
 		try {
 			await MarkdownRenderer.render(this.host.app, body, container, this.path, component);
+			scrollTablesSideways(container);
 		} catch (error) {
 			console.error(`Journal View: could not render ${this.path}`, error);
 			container.setText(body);
