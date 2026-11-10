@@ -114,6 +114,8 @@ const MESSAGE_OVERHEAD = 16;
  * it is this many characters long, rather than written out and dropped.
  */
 const DOOMED_LENGTH = 240;
+/** What closes a model's reasoning, when it leaks into its answer. */
+const REASONING_END = "</think>";
 /**
  * The share of the whole context a search or a list may take. They are for
  * finding what to read, so they leave the room to read it in.
@@ -457,6 +459,16 @@ function callsInText(text: string): ToolCall[] {
  */
 function hasText(text: string): boolean {
 	return text.replace(/<\|?[a-z_]+\|?>/g, "").trim() !== "";
+}
+
+/**
+ * What a model wrote, without the reasoning before it. Told not to think,
+ * `qwen3.8` still drafts its answer now and then, closes the draft with
+ * `</think>`, and writes the answer again: only what follows counts.
+ */
+function withoutReasoning(text: string): string {
+	const end = text.lastIndexOf(REASONING_END);
+	return end === -1 ? text : text.slice(end + REASONING_END.length).trimStart();
 }
 
 /** The link text inside `[[…]]`. */
@@ -1281,6 +1293,8 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 	const send = async (tools: ToolDefinition[] | undefined, live: boolean, doomed = false) => {
 		let streamed = false;
 		let text = "";
+		/** What the card has been given of `text`. */
+		let shown = "";
 		const length = conversationLength(messages, tools);
 		const cut = new AbortController();
 		const stop = () => cut.abort();
@@ -1298,15 +1312,28 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 					if (doomed && text.length > DOOMED_LENGTH && !text.trimStart().startsWith("{")) cut.abort();
 					if (!live) return;
 					streamed = true;
-					options.onText(delta);
+					// A draft that turns out to be reasoning is taken back from the card.
+					const visible = withoutReasoning(text);
+					if (!visible.startsWith(shown)) {
+						options.onReset();
+						shown = "";
+					}
+					if (visible.length > shown.length) options.onText(visible.slice(shown.length));
+					shown = visible;
 				},
 			});
 			if (result.promptTokens) ratio = Math.max(ratio, result.promptTokens / estimateTokens(length));
-			return { result, streamed };
+			return { result: { ...result, text: withoutReasoning(result.text) }, streamed };
 		} catch (error) {
 			if (signal.aborted || !cut.signal.aborted) throw error;
 			// Stopped here, not by the reader: what it wrote so far stands for the answer.
-			const result: ChatResult = { text, promptTokens: null, doneReason: null, streamed: true, toolCalls: [] };
+			const result: ChatResult = {
+				text: withoutReasoning(text),
+				promptTokens: null,
+				doneReason: null,
+				streamed: true,
+				toolCalls: [],
+			};
 			return { result, streamed };
 		} finally {
 			signal.removeEventListener("abort", stop);
