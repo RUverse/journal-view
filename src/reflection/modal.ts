@@ -3,7 +3,6 @@ import type { App } from "obsidian";
 import type JournalViewPlugin from "../main";
 import { createMoment } from "../moment";
 import type { Moment } from "../moment";
-import { DAY_KEY_FORMAT } from "../noteIndex";
 import {
 	DEFAULT_REFLECTION_SERVER,
 	MAX_REFLECTION_CONTEXT,
@@ -14,17 +13,9 @@ import {
 	reflectionServerSetting,
 	showSliderTooltip,
 } from "../settings";
-import { summarizeScope } from "./context";
-import {
-	canRestoreBuiltIns,
-	presetRequest,
-	presetsOf,
-	questionRequest,
-	restoreBuiltIns,
-	scopeLabel,
-} from "./presets";
-import type { ReflectionPreset, ReflectionRequest, ReflectionScope } from "./presets";
-import { NO_MODELS_MESSAGE, ProviderError, describeProviderError } from "./provider";
+import { canRestoreBuiltIns, presetRequest, presetsOf, questionRequest, restoreBuiltIns } from "./presets";
+import type { ReflectionPreset, ReflectionRequest } from "./presets";
+import { NO_MODELS_MESSAGE, ProviderError, SUGGESTED_MODEL, defaultModel, describeProviderError } from "./provider";
 import type { ModelInfo } from "./provider";
 
 export interface ReflectionModalOptions {
@@ -47,56 +38,30 @@ type Connection =
 	| { state: "no-models" }
 	| { state: "failed"; message: string };
 
-/** A question's choice of notes, as the scope picker names it. */
-type ScopeChoice = "model" | "days:7" | "days:14" | "days:30" | "days:90" | "this-day" | "range";
-
-const SCOPE_CHOICES: Record<ScopeChoice, string> = {
-	model: "Let the model choose",
-	"days:7": "Last 7 days",
-	"days:14": "Last 14 days",
-	"days:30": "Last 30 days",
-	"days:90": "Last 90 days",
-	"this-day": "This day over the years",
-	range: "Dates…",
-};
-
 /** The setup steps' names and commands, written as they are. */
 const SETUP = {
 	install: "Install Ollama from ",
 	pull: "ollama pull ",
-	pullSmall: "ollama pull gemma4:e4b",
-	pullLarge: "ollama pull gemma4:26b",
 };
-
-/** What a model without tools reads for a question, and a preset saved from a range. */
-const DEFAULT_CHOICE: ScopeChoice = "days:14";
 
 /**
  * The question being written, kept while the plugin runs, so closing the
  * window by accident does not lose it. Cleared once it is asked.
  */
-const draft: { question: string; choice: ScopeChoice | null; from: string | null; to: string | null } = {
-	question: "",
-	choice: null,
-	from: null,
-	to: null,
-};
+const draft = { question: "" };
 
 /**
  * The Reflect window, opened from today's button and the Create reflection
- * command. It asks a question of the reader's own over notes they choose,
- * or runs a preset at a click; its settings page holds the connection, the
- * model, the folder and the presets, which the plugin's settings tab leaves
- * to it.
+ * command. It asks a question of the reader's own, or runs a preset at a
+ * click; either way the model finds the notes the question is about. Its
+ * settings page holds the connection, the model, the folder and the
+ * presets, which the plugin's settings tab leaves to it.
  */
 export class ReflectionModal extends Modal {
 	private page: Page = { kind: "ask" };
-	/** The scope chosen on the ask page. */
-	private choice: ScopeChoice = DEFAULT_CHOICE;
 	private connection: Connection = { state: "checking" };
 	/** Bumped by every check, so an older answer arriving late is dropped. */
 	private checkSerial = 0;
-	private sizeSerial = 0;
 	private readonly today: Moment = createMoment().startOf("day");
 	private saving: Promise<void> = Promise.resolve();
 	private closed = false;
@@ -237,13 +202,24 @@ export class ReflectionModal extends Modal {
 
 	/**
 	 * The model a reflection would use, as the runner picks it: the chosen
-	 * one, or the first installed while none is chosen. Null while the chosen
-	 * one is not installed, which a reflection would fail on.
+	 * one, or while none is chosen the default among those installed. Null
+	 * while the chosen one is not installed, which a reflection would fail on.
 	 */
 	private get model(): ModelInfo | null {
 		const models = this.models;
 		const chosen = this.plugin.settings.reflectionModel;
-		return chosen ? (models.find((model) => model.name === chosen) ?? null) : (models[0] ?? null);
+		return chosen ? (models.find((model) => model.name === chosen) ?? null) : defaultModel(models);
+	}
+
+	/** The model a reflection would use, while it cannot use tools and so cannot read the journal. */
+	private get toollessModel(): string | null {
+		const model = this.model;
+		return model && !model.tools ? model.name : null;
+	}
+
+	/** True once a reflection can run: Ollama answers, and the model is installed and can use tools. */
+	private get ready(): boolean {
+		return this.connection.state === "ready" && !!this.model?.tools;
 	}
 
 	/** The chosen model, while the server answers without it. */
@@ -258,7 +234,11 @@ export class ReflectionModal extends Modal {
 		if (connection.state === "checking") return null;
 		if (connection.state !== "ready") return this.connectionLine();
 		const missing = this.missingModel;
-		return missing ? `${missing} is not installed. Pull it, or choose another model in the settings.` : null;
+		if (missing) return `${missing} is not installed. Pull it, or choose another model in the settings.`;
+		const toolless = this.toollessModel;
+		return toolless
+			? `${toolless} cannot use tools, which a reflection needs to read your journal. Choose another model in the settings.`
+			: null;
 	}
 
 	/** The connection's one-line state, for the settings page. */
@@ -277,15 +257,20 @@ export class ReflectionModal extends Modal {
 	}
 
 	/**
-	 * What to do while the server cannot run a reflection: install and start
-	 * Ollama, pull a model, try again. Empty once it can.
+	 * What to do while a reflection cannot run: install and start Ollama, pull
+	 * a model, choose one that can use tools, try again. Empty once it can.
 	 */
 	private renderSetup(el: HTMLElement): void {
 		el.empty();
 		const { connection } = this;
 		const missing = this.missingModel;
-		el.hidden = (connection.state === "ready" && !missing) || connection.state === "checking";
+		const toolless = this.toollessModel;
+		el.hidden = (connection.state === "ready" && !missing && !toolless) || connection.state === "checking";
 		if (el.hidden) return;
+		const suggest = (item: HTMLElement): void => {
+			item.createEl("code").appendText(`${SETUP.pull}${SUGGESTED_MODEL}`);
+			item.appendText(", which suits 32 GB of memory or more. Smaller models find and read notes less reliably.");
+		};
 		if (missing) {
 			el.createDiv({ cls: "journal-reflect-setup-title", text: `${missing} is not installed.` });
 			const steps = el.createEl("ol", { cls: "journal-reflect-setup-steps" });
@@ -293,6 +278,13 @@ export class ReflectionModal extends Modal {
 			pull.createEl("code").appendText(`${SETUP.pull}${missing}`);
 			pull.appendText(".");
 			steps.createEl("li", { text: "Or choose another model in the settings." });
+		} else if (toolless) {
+			el.createDiv({ cls: "journal-reflect-setup-title", text: `${toolless} cannot use tools.` });
+			const steps = el.createEl("ol", { cls: "journal-reflect-setup-steps" });
+			steps.createEl("li", {
+				text: `A reflection's model finds and reads your notes through tools. Choose a model that has them ${this.page.kind === "ask" ? "in the settings" : "below"}.`,
+			});
+			suggest(steps.createEl("li", { text: "Or pull one in a terminal: " }));
 		} else if (connection.state === "failed") {
 			el.createDiv({ cls: "journal-reflect-setup-title", text: connection.message });
 		} else {
@@ -310,11 +302,7 @@ export class ReflectionModal extends Modal {
 				install.createEl("a", { text: "ollama.com", href: "https://ollama.com" });
 				install.appendText(", and start it.");
 			}
-			const pull = steps.createEl("li", { text: "Pull a model in a terminal: " });
-			pull.createEl("code").appendText(SETUP.pullSmall);
-			pull.appendText(" for 16 GB of memory, or ");
-			pull.createEl("code").appendText(SETUP.pullLarge);
-			pull.appendText(" for 32 GB or more.");
+			suggest(steps.createEl("li", { text: "Pull a model in a terminal: " }));
 		}
 		const actions = el.createDiv({ cls: "journal-reflect-setup-actions" });
 		const retry = actions.createEl("button", { text: "Try again", attr: { type: "button" } });
@@ -339,9 +327,11 @@ export class ReflectionModal extends Modal {
 		input.value = draft.question;
 
 		const row = composer.createDiv({ cls: "journal-reflect-composer-row" });
-		const scopeSelect = row.createEl("select", { cls: "dropdown", attr: { "aria-label": "Notes to read" } });
-		for (const [value, label] of Object.entries(SCOPE_CHOICES)) scopeSelect.createEl("option", { value, text: label });
-		row.createDiv({ cls: "journal-reflect-spacer" });
+		// Where the notes to read used to be chosen: the question says it now.
+		row.createDiv({
+			cls: "journal-reflect-hint",
+			text: "The model finds the notes itself: name a time, a person or a subject.",
+		});
 		const save = this.iconButton(row, "bookmark-plus", "Save as preset", () => {
 			const question = input.value.trim();
 			if (!question) return;
@@ -349,104 +339,32 @@ export class ReflectionModal extends Modal {
 				kind: "preset",
 				isNew: true,
 				back: "ask",
-				preset: {
-					id: newPresetId(),
-					name: presetName(question),
-					prompt: question,
-					format: "",
-					scope: choiceScope(this.choice === "range" ? DEFAULT_CHOICE : this.choice, this.today, null),
-				},
+				preset: { id: newPresetId(), name: presetName(question), prompt: question, format: "" },
 			});
 		});
 		const create = row.createEl("button", { cls: "mod-cta", text: "Reflect", attr: { type: "button" } });
 
-		const range = composer.createDiv({ cls: "journal-reflect-range" });
-		range.createSpan({ text: "From" });
-		const from = range.createEl("input", { attr: { type: "date", "aria-label": "From" } });
-		range.createSpan({ text: "to" });
-		const to = range.createEl("input", { attr: { type: "date", "aria-label": "To" } });
-		from.value = draft.from ?? this.today.clone().subtract(13, "days").format(DAY_KEY_FORMAT);
-		to.value = draft.to ?? this.today.format(DAY_KEY_FORMAT);
-		const hint = composer.createDiv({ cls: "journal-reflect-hint" });
-
 		contentEl.createDiv({ cls: "journal-reflect-section-title", text: "Presets" });
 		const list = contentEl.createDiv({ cls: "journal-reflect-presets" });
 		const presets = presetsOf(this.plugin.settings.reflectionPresets);
-		const rows = presets.map((preset) => {
+		const buttons = presets.map((preset) => {
 			const button = list.createEl("button", { cls: "journal-reflect-preset", attr: { type: "button" } });
 			button.createSpan({ cls: "journal-reflect-preset-name", text: preset.name });
-			const meta = button.createSpan({ cls: "journal-reflect-preset-meta", text: scopeLabel(preset.scope) });
+			// The question says what it reads, such as "over the last two weeks".
+			button.createSpan({ cls: "journal-reflect-preset-meta", text: preset.prompt });
 			button.addEventListener("click", () => this.start(presetRequest(preset)));
-			return { preset, button, meta, notes: null as number | null };
+			return button;
 		});
 		if (!presets.length) {
 			list.createDiv({ cls: "journal-reflect-empty", text: "No presets. Add one in the settings." });
 		}
-		void Promise.all(
-			rows.map(async (entry) => {
-				if (entry.preset.scope.kind === "model") return;
-				const summary = await summarizeScope(this.plugin, entry.preset.scope, this.today).catch(() => null);
-				if (this.closed || !summary) return;
-				entry.notes = summary.notes;
-				entry.meta.setText(presetMeta(entry.preset.scope, summary));
-				sync();
-			}),
-		);
-
-		// The scope starts as last chosen; letting the model choose waits for the model.
-		this.choice = draft.choice ?? DEFAULT_CHOICE;
-		scopeSelect.value = this.choice;
-		const canChoose = () => !!this.model?.tools;
-
-		const scope = (): ReflectionScope | null => {
-			if (this.choice !== "range") return choiceScope(this.choice, this.today, null);
-			if (!isKey(from.value) || !isKey(to.value)) return null;
-			return choiceScope("range", this.today, { from: from.value, to: to.value });
-		};
-
-		let size: { notes: number; words: number } | null = null;
-		let sizing = false;
-		const measure = (): void => {
-			const serial = ++this.sizeSerial;
-			const current = scope();
-			size = null;
-			sizing = !!current && current.kind !== "model";
-			sync();
-			if (!current || current.kind === "model") return;
-			void summarizeScope(this.plugin, current, this.today)
-				.catch(() => null)
-				.then((summary) => {
-					if (this.closed || serial !== this.sizeSerial) return;
-					size = summary;
-					sizing = false;
-					sync();
-				});
-		};
 
 		const sync = (): void => {
 			this.renderSetup(setup);
-			const ready = this.connection.state === "ready" && this.model !== null;
-			// Scope
-			const modelOption = scopeSelect.querySelector<HTMLOptionElement>('option[value="model"]');
-			if (modelOption) {
-				const blocked = ready && !canChoose();
-				modelOption.disabled = blocked;
-				modelOption.text = blocked ? `${SCOPE_CHOICES.model} (needs a model with tools)` : SCOPE_CHOICES.model;
-			}
-			if (ready && this.choice === "model" && !canChoose()) {
-				this.choice = DEFAULT_CHOICE;
-				scopeSelect.value = this.choice;
-				measure();
-				return;
-			}
-			range.hidden = this.choice !== "range";
-			const current = scope();
-			hint.setText(this.hintFor(current, size, sizing));
-			hint.toggleClass("journal-reflect-hint-warning", !current || size?.notes === 0);
 			const question = input.value.trim();
-			create.disabled = !ready || !question || !current || size?.notes === 0;
+			create.disabled = !this.ready || !question;
 			save.disabled = !question;
-			for (const entry of rows) entry.button.disabled = !ready || entry.notes === 0;
+			for (const button of buttons) button.disabled = !this.ready;
 		};
 
 		input.addEventListener("input", () => {
@@ -458,48 +376,16 @@ export class ReflectionModal extends Modal {
 			event.preventDefault();
 			if (!create.disabled) create.click();
 		});
-		scopeSelect.addEventListener("change", () => {
-			this.choice = scopeSelect.value as ScopeChoice;
-			draft.choice = this.choice;
-			measure();
-			if (this.choice === "range") from.focus();
-		});
-		for (const field of [from, to]) {
-			field.addEventListener("change", () => {
-				draft.from = from.value;
-				draft.to = to.value;
-				measure();
-			});
-		}
 		create.addEventListener("click", () => {
-			const current = scope();
 			const question = input.value.trim();
-			if (!current || !question) return;
+			if (!question) return;
 			draft.question = "";
-			this.start(questionRequest(question, current));
+			this.start(questionRequest(question));
 		});
 
-		this.onConnection = () => {
-			// The first answer settles a scope that was waiting for the model.
-			if (this.connection.state === "ready" && draft.choice === null && canChoose()) {
-				this.choice = "model";
-				scopeSelect.value = this.choice;
-			}
-			sync();
-		};
-		measure();
+		this.onConnection = sync;
+		sync();
 		window.setTimeout(() => input.focus(), 0);
-	}
-
-	private hintFor(scope: ReflectionScope | null, size: { notes: number; words: number } | null, sizing: boolean): string {
-		if (!scope) return "Choose the first and last day to read.";
-		if (scope.kind === "model") {
-			return "The model searches and reads your notes itself, which takes longer.";
-		}
-		if (sizing) return "Counting the notes…";
-		if (!size) return "";
-		if (!size.notes) return "There are no notes to read there.";
-		return `Reads ${size.notes} ${size.notes === 1 ? "note" : "notes"} · ~${roundWords(size.words)} words`;
 	}
 
 	private start(request: ReflectionRequest): void {
@@ -550,8 +436,8 @@ export class ReflectionModal extends Modal {
 		new Setting(contentEl)
 			.setName("Model")
 			.setDesc(
-				"Gemma 4 26B suits 32 GB of memory or more, and Gemma 4 E4B suits 16 GB. Only models with tools " +
-					"can choose which notes to read.",
+				"A reflection's model finds and reads your notes through tools, so it has to support them. " +
+					"Gemma 4 26B suits 32 GB of memory or more; smaller models find and read notes less reliably.",
 			)
 			.addDropdown((dropdown) => {
 				modelSelect = dropdown.selectEl;
@@ -580,8 +466,8 @@ export class ReflectionModal extends Modal {
 		new Setting(contentEl)
 			.setName("Maximum context")
 			.setDesc(
-				"The most a reflection asks the model to hold, in tokens. Larger reads more notes before leaving " +
-					"some out, and uses more memory.",
+				"The most a reflection asks the model to hold, in tokens. Larger lets it read more notes for one " +
+					"answer, and uses more memory.",
 			)
 			.addSlider((slider) => {
 				slider
@@ -604,7 +490,11 @@ export class ReflectionModal extends Modal {
 			const select = modelSelect;
 			if (!select) return;
 			select.empty();
-			for (const model of this.models) select.createEl("option", { value: model.name, text: modelLabel(model) });
+			for (const model of this.models) {
+				const option = select.createEl("option", { value: model.name, text: modelLabel(model) });
+				// Kept in the list, so it is clear why it cannot be chosen.
+				option.disabled = !model.tools;
+			}
 			const missing = this.missingModel;
 			// Kept in the list, so the setting shows what reflections would ask for.
 			if (missing) select.createEl("option", { value: missing, text: `${missing} (not installed)` });
@@ -619,7 +509,7 @@ export class ReflectionModal extends Modal {
 		el.empty();
 		const presets = [...presetsOf(this.plugin.settings.reflectionPresets)];
 		presets.forEach((preset, index) => {
-			const row = new Setting(el).setName(preset.name).setDesc(scopeName(preset.scope));
+			const row = new Setting(el).setName(preset.name).setDesc(preset.prompt);
 			row.settingEl.addClass("journal-reflect-preset-row");
 			row.addExtraButton((button) =>
 				button
@@ -671,7 +561,7 @@ export class ReflectionModal extends Modal {
 							kind: "preset",
 							isNew: true,
 							back: "settings",
-							preset: { id: newPresetId(), name: "", prompt: "", format: "", scope: { kind: "days", days: 14 } },
+							preset: { id: newPresetId(), name: "", prompt: "", format: "" },
 						}),
 					),
 			);
@@ -699,11 +589,16 @@ export class ReflectionModal extends Modal {
 				}),
 		);
 
-		const question = new Setting(contentEl).setName("Question").setDesc("What the model is asked.");
+		const question = new Setting(contentEl)
+			.setName("Question")
+			.setDesc(
+				"What the model is asked. Say which notes it is about, such as the last two weeks, a person or a " +
+					"subject: the model finds them itself.",
+			);
 		question.settingEl.addClass("journal-reflect-wide-setting");
 		question.addTextArea((text) =>
 			text
-				.setPlaceholder("What changed for me this month, and why?")
+				.setPlaceholder("What changed for me over the last month, and why?")
 				.setValue(preset.prompt)
 				.onChange((value) => {
 					preset.prompt = value;
@@ -726,22 +621,6 @@ export class ReflectionModal extends Modal {
 					preset.format = value;
 				}),
 		);
-
-		const options: Record<string, string> = {};
-		for (const scope of PRESET_SCOPES) options[scopeKey(scope)] = scopeName(scope);
-		options[scopeKey(preset.scope)] = scopeName(preset.scope);
-		new Setting(contentEl)
-			.setName("Reads")
-			.setDesc("The notes it reads, counted back from the day it is made.")
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions(options)
-					.setValue(scopeKey(preset.scope))
-					.onChange((value) => {
-						const scope = scopeFromKey(value);
-						if (scope) preset.scope = scope;
-					}),
-			);
 
 		let saveButton: HTMLButtonElement | null = null;
 		const actions = new Setting(contentEl);
@@ -801,90 +680,9 @@ export class ReflectionModal extends Modal {
 	}
 }
 
-/** The ranges a preset can read, as the preset editor offers them. */
-const PRESET_SCOPES: readonly ReflectionScope[] = [
-	{ kind: "model" },
-	{ kind: "days", days: 7 },
-	{ kind: "days", days: 14 },
-	{ kind: "days", days: 30 },
-	{ kind: "days", days: 30, beforeToday: true },
-	{ kind: "days", days: 90 },
-	{ kind: "this-day" },
-];
-
-function scopeKey(scope: ReflectionScope): string {
-	switch (scope.kind) {
-		case "days":
-			return `${scope.beforeToday ? "before" : "days"}:${scope.days}`;
-		case "range":
-			return `range:${scope.from}:${scope.to}`;
-		default:
-			return scope.kind;
-	}
-}
-
-function scopeFromKey(key: string): ReflectionScope | null {
-	if (key === "model" || key === "this-day") return { kind: key };
-	const [kind, first, second] = key.split(":");
-	if (kind === "range" && isKey(first) && isKey(second)) return { kind: "range", from: first, to: second };
-	const days = Number(first);
-	if (!Number.isInteger(days) || days < 1) return null;
-	if (kind === "days") return { kind: "days", days };
-	if (kind === "before") return { kind: "days", days, beforeToday: true };
-	return null;
-}
-
-/** "Last 14 days", "The 30 days before today", "This day over the years". */
-function scopeName(scope: ReflectionScope): string {
-	switch (scope.kind) {
-		case "model":
-			return SCOPE_CHOICES.model;
-		case "this-day":
-			return "This date in every earlier year, and today";
-		case "range":
-			return `${scope.from} – ${scope.to}`;
-		case "days":
-			if (scope.beforeToday) return `The ${scope.days} days before today`;
-			return scope.days === 1 ? "Today" : `Last ${scope.days} days`;
-	}
-}
-
-/** The scope a choice on the ask page reads. */
-function choiceScope(choice: ScopeChoice, today: Moment, range: { from: string; to: string } | null): ReflectionScope {
-	switch (choice) {
-		case "model":
-			return { kind: "model" };
-		case "this-day":
-			return { kind: "this-day" };
-		case "range": {
-			const key = today.format(DAY_KEY_FORMAT);
-			return { kind: "range", from: range?.from ?? key, to: range?.to ?? key };
-		}
-		default:
-			return { kind: "days", days: Number(choice.slice("days:".length)) };
-	}
-}
-
-function isKey(value: string | undefined): value is string {
-	return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && createMoment(value, DAY_KEY_FORMAT, true).isValid();
-}
-
-/** A model's name in a picker, saying when it cannot choose its own notes. */
+/** A model's name in a picker, saying when it cannot read the journal. */
 function modelLabel(model: ModelInfo): string {
-	return model.tools ? model.name : `${model.name} (no tools)`;
-}
-
-/** "14 days · ~3k words", or "4 notes" for this date over the years. */
-function presetMeta(scope: ReflectionScope, summary: { notes: number; words: number }): string {
-	const parts = [scopeLabel(scope)].filter(Boolean);
-	if (scope.kind === "this-day") parts.push(summary.notes === 1 ? "1 note" : `${summary.notes} notes`);
-	else parts.push(summary.notes === 0 ? "no notes" : `~${roundWords(summary.words)} words`);
-	return parts.join(" · ");
-}
-
-function roundWords(words: number): string {
-	if (words < 1000) return String(Math.max(10, Math.round(words / 10) * 10));
-	return `${Math.round(words / 1000)}k`;
+	return model.tools ? model.name : `${model.name} (cannot use tools)`;
 }
 
 /** A preset's name from the question it saves: its first few words. */

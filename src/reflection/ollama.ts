@@ -1,6 +1,6 @@
 import { requestUrl } from "obsidian";
 import type { RequestUrlParam, RequestUrlResponse } from "obsidian";
-import { ProviderError } from "./provider";
+import { NO_TOOLS_MESSAGE, ProviderError } from "./provider";
 import type { ChatMessage, ChatRequest, ChatResult, ModelInfo, ReflectionProvider, ToolCall } from "./provider";
 
 /**
@@ -175,10 +175,7 @@ function chatError(status: number | null, body: unknown): ProviderError {
 	const message = errorOf(body);
 	// Such as "registry.ollama.ai/library/gemma3:4b does not support tools".
 	if (message && /does not support tools/i.test(message)) {
-		return new ProviderError(
-			"no-tools",
-			"This model cannot choose its own notes. Pick the notes it reads, or a model that supports tools.",
-		);
+		return new ProviderError("no-tools", NO_TOOLS_MESSAGE);
 	}
 	if (message && /not found/i.test(message)) return new ProviderError("model-missing", message);
 	return new ProviderError("failed", message ?? `Ollama answered with status ${status ?? "unknown"}`);

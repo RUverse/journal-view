@@ -19,14 +19,6 @@ const CREATED_FORMAT = "YYYY-MM-DDTHH:mm";
 /** Characters a file name cannot hold, replaced when a title becomes one. */
 const UNSAFE_NAME = /[\\/:*?"<>|#^[\]]/g;
 
-/**
- * What a reflection read, so Regenerate and follow-ups read it again: the
- * days from `from` to `to`, this date over the years, or what the model chose.
- */
-export type StoredScope = "range" | "this-day" | "model";
-
-const STORED_SCOPES: ReadonlySet<string> = new Set<StoredScope>(["range", "this-day", "model"]);
-
 /** One reflection note, as the journal lists it under the day it was made. */
 export interface StoredReflection {
 	file: TFile;
@@ -39,10 +31,8 @@ export interface StoredReflection {
 	/** The question itself, and the preset it came from. */
 	prompt: string;
 	preset: string | null;
-	/** Null in notes written before it was recorded. */
-	scope: StoredScope | null;
 	model: string | null;
-	/** The range it read, as `YYYY-MM-DD` keys. */
+	/** The days the notes it read span, as `YYYY-MM-DD` keys. */
 	from: string | null;
 	to: string | null;
 	/** Links to the notes it read, as written in the note. */
@@ -57,7 +47,6 @@ export interface ReflectionRecord {
 	title: string;
 	preset: string | null;
 	prompt: string;
-	scope: StoredScope;
 	model: string;
 	from: string;
 	to: string;
@@ -206,7 +195,6 @@ export class ReflectionStore extends Component implements DaySequence {
 		if (!created.isValid()) return null;
 		const text = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
 		const title = text(frontmatter?.title) ?? file.basename.replace(NAME_DATE, "").trim();
-		const scope = text(frontmatter?.scope);
 		return {
 			file,
 			key: created.format("YYYY-MM-DD"),
@@ -214,7 +202,6 @@ export class ReflectionStore extends Component implements DaySequence {
 			title,
 			prompt: text(frontmatter?.prompt) ?? title,
 			preset: text(frontmatter?.preset),
-			scope: scope && STORED_SCOPES.has(scope) ? (scope as StoredScope) : null,
 			model: text(frontmatter?.model),
 			from: text(frontmatter?.from),
 			to: text(frontmatter?.to),
@@ -334,7 +321,6 @@ function frontmatterFor(record: ReflectionRecord): string {
 		`title: ${yamlString(record.title)}`,
 		...(record.preset ? [`preset: ${record.preset}`] : []),
 		`prompt: ${yamlString(record.prompt)}`,
-		`scope: ${record.scope}`,
 		`model: ${yamlString(record.model)}`,
 		`from: ${record.from}`,
 		`to: ${record.to}`,

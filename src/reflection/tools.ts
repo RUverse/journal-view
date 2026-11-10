@@ -1,55 +1,80 @@
-import { getAllTags } from "obsidian";
-import type { TFile } from "obsidian";
-import { normalizeFilterTag } from "../filter";
-import type JournalViewPlugin from "../main";
-import { createMoment } from "../moment";
-import type { Moment } from "../moment";
-import { DAY_KEY_FORMAT } from "../noteIndex";
 import {
 	ANSWER_TOKENS,
 	CHARS_PER_TOKEN,
 	ESTIMATE_MARGIN,
 	MONTHS,
+	addDays,
 	contextLimit,
+	dayKey,
+	demoteHeadings,
 	estimateTokens,
 	formatNote,
 	longDate,
-	notesInScope,
+	monthEnd,
+	monthsBefore,
 	onThisDay,
-	propertiesOf,
 	propertyLine,
-	readNote,
 	spreadEvenly,
 } from "./context";
-import type { ReadNote, ReflectionSource, ScopeRange } from "./context";
+import type { DayRange, ReflectionSource } from "./context";
 import { conversationMessages } from "./conversation";
 import type { Conversation } from "./conversation";
 import { QUESTION_FORMAT, REMINDER } from "./presets";
 import { ProviderError } from "./provider";
 import type { ChatMessage, ChatResult, ModelInfo, ReflectionProvider, ToolCall, ToolDefinition } from "./provider";
+import { SearchIndex, excerptsOf, parseQuery } from "./search";
+import type { AlternativeCount } from "./search";
 
 /*
- * The tools, their descriptions, the prompts and the loop were tuned against
- * local models with scripts/reflection-tools-spike.mjs, which mirrors this
- * file; change them there first.
+ * How a model reads the journal: the tools it is offered, what each returns,
+ * and the loop that runs them until it answers. Every reflection goes
+ * through here, so the model decides which notes a question needs.
+ *
+ * Nothing in this file touches Obsidian: the journal comes in as a
+ * `JournalSource` (journal.ts builds the vault's), so
+ * scripts/reflection-spike.mjs runs this very code against local models.
+ * Tune the tools, their descriptions and the prompts with it.
  */
 
-/** What a question the model answers with tools needs. */
+/** A note the tools can reach. */
+export interface JournalNote extends ReflectionSource {
+	/** The file name, which a property can restate. */
+	name: string;
+	properties: Map<string, string[]>;
+	/** Its tags as filters compare them, such as `work` or `family/mina`. */
+	tags: string[];
+}
+
+/** The journal as a run reads it. */
+export interface JournalSource {
+	/** Every note the journal's filters let through, up to the run's day, oldest first. */
+	notes: readonly JournalNote[];
+	/** A note's text as an editor holds it, or null when it cannot be read. */
+	body(note: JournalNote): Promise<string | null>;
+}
+
+/** What a question needs to be answered. */
 export interface ToolRunOptions {
-	plugin: JournalViewPlugin;
+	journal: JournalSource;
 	provider: ReflectionProvider;
 	/** The model's name and what it supports; it has to list `tools`. */
 	model: ModelInfo;
 	/** The reader's question. */
 	question: string;
-	/** A follow-up to the answer `question` already has, and the follow-ups before it. */
-	followUp?: { conversation: Conversation; question: string };
-	/** The day the reflection belongs to. */
-	today: Moment;
-	/** The Maximum context setting, in tokens, and where links are written from. */
+	/** The shape its answer takes: a preset's own, or the one for questions. */
+	format: string;
+	/**
+	 * A follow-up to the answer `question` already has, the follow-ups before
+	 * it, and the links of the notes those answers drew on.
+	 */
+	followUp?: { conversation: Conversation; question: string; sources: readonly string[] };
+	/** The day the reflection belongs to, `YYYY-MM-DD`: nothing after it is read. */
+	today: string;
+	/** The Maximum context setting, in tokens. */
 	maxContext: number;
-	sourcePath: string;
 	signal: AbortSignal;
+	/** "5 Oct", or "5 Oct 2026", for the card's status line, in the app's language. English when left out. */
+	shortDate?: (key: string, withYear: boolean) => string;
 	/** The card's status line: each tool call as it happens, such as `Searching for "running"`. */
 	onStatus: (line: string) => void;
 	/** The answer as it streams. */
@@ -60,7 +85,7 @@ export interface ToolRunOptions {
 	 * The notes passed whole so far, and the days they span, after each round
 	 * of calls: what a run stopped before its answer has read.
 	 */
-	onSources?: (sources: ReflectionSource[], range: ScopeRange | null) => void;
+	onSources?: (sources: ReflectionSource[], range: DayRange | null) => void;
 }
 
 export interface ToolRunResult {
@@ -71,11 +96,11 @@ export interface ToolRunResult {
 	 */
 	sources: ReflectionSource[];
 	/** The days those notes span, or null when it read none. */
-	range: ScopeRange | null;
+	range: DayRange | null;
 }
 
 /** Rounds that may call tools, before the model is asked for its answer. */
-const MAX_ROUNDS = 6;
+const MAX_ROUNDS = 8;
 /** Calls answered in one round; the rest are told to ask again. */
 const MAX_CALLS_PER_ROUND = 8;
 /** Kept free after a tool result, for the next call and its arguments. */
@@ -84,17 +109,53 @@ const ROUND_RESERVE = 512;
 const MIN_RESULT_TOKENS = 256;
 /** Added per message for the chat template's own markup. */
 const MESSAGE_OVERHEAD = 16;
+/**
+ * An answer that is going to be sent back whatever it says is stopped once
+ * it is this many characters long, rather than written out and dropped.
+ */
+const DOOMED_LENGTH = 240;
+/**
+ * The share of the whole context a search or a list may take. They are for
+ * finding what to read, so they leave the room to read it in.
+ */
+const GLANCE_SHARE = 0.3;
 /** A list of more notes than this is given by month instead. */
 const MAX_LISTED_NOTES = 120;
 /** The most notes one read considers; a longer range is thinned before anything is read. */
 const MAX_READ_CANDIDATES = 300;
 /** Characters of a note's opening, in a list. */
 const PREVIEW_LENGTH = 90;
-/** Notes a search shows, the excerpts of each, and the characters around each match. */
-const MAX_SEARCH_NOTES = 30;
-const EXCERPTS_PER_NOTE = 2;
-const EXCERPT_BEFORE = 90;
-const EXCERPT_AFTER = 150;
+/** A search that finds this few notes, too far apart to read the days between, shows them whole when they fit. */
+const WHOLE_SEARCH_NOTES = 6;
+/** Notes a search shows excerpts of: the ones that match best. */
+const MAX_SEARCH_NOTES = 20;
+/** Notes scoring at least this share of the best one are where a subject is, whatever else mentions it in passing. */
+const STRONG_SHARE = 0.5;
+/**
+ * A way of saying a thing that this share of the notes use, at most, is one
+ * of the subject's own words, as `reorg` is and `work` beside it is not.
+ */
+const NARROW_SHARE = 0.15;
+/**
+ * The most a search passes whole as one story, from a subject's first
+ * mention to its last: this many notes, and this share of the whole context
+ * for all the stories of a run together, so that several wide searches at
+ * once cannot fill it.
+ */
+const MAX_STORY_NOTES = 60;
+const STORY_SHARE = 0.35;
+/** A story names the notes that mention its subject while they are this few. */
+const MAX_NAMED_MENTIONS = 12;
+/**
+ * The excerpts of each note a search shows, and the characters of each, from
+ * the roomiest to the tightest: tried in turn until the result fits.
+ */
+const EXCERPT_SIZES: ReadonlyArray<{ excerpts: number; width: number }> = [
+	{ excerpts: 2, width: 320 },
+	{ excerpts: 2, width: 220 },
+	{ excerpts: 1, width: 220 },
+	{ excerpts: 1, width: 150 },
+];
 /** Notes read at once, between checks that the run has not been stopped. */
 const READ_BATCH = 32;
 /** Values held by at least this share of the journal's notes are left out of each note's properties. */
@@ -104,10 +165,54 @@ const DATE_ARGUMENT = "written YYYY-MM-DD";
 
 /**
  * The tools a model is offered. Their descriptions say when each is worth
- * calling; the results then say what to call next, which small models follow
- * far better than any instruction up front.
+ * calling; the results then say what to call next, which models follow far
+ * better than any instruction up front.
  */
 const TOOLS: ToolDefinition[] = [
+	{
+		name: "search_journal",
+		description:
+			'Find the notes that mention a word, a name or a phrase, in any of its forms: run also finds running and runs. Returns the notes that match best, each with its date, its link and the sentences around the match. Several words find the notes about all of them; commas separate other ways of saying it, such as "anxious, worried, nervous"; quotes keep words together. Use it for a question about a person, a place or a subject, then read the notes that matter with read_notes.',
+		parameters: {
+			type: "object",
+			properties: {
+				query: { type: "string", description: "What to find: a word, a name, a short phrase, or several separated by commas." },
+				from: { type: "string", description: `The first day to search, ${DATE_ARGUMENT}. Optional.` },
+				to: { type: "string", description: `The last day to search, ${DATE_ARGUMENT}. Optional.` },
+			},
+			required: ["query"],
+		},
+	},
+	{
+		name: "read_notes",
+		description:
+			"Read chosen notes in full by their dates: the ones a search or a list showed that the question needs. Each comes under a heading with the link to cite it by.",
+		parameters: {
+			type: "object",
+			properties: {
+				dates: {
+					type: "array",
+					items: { type: "string" },
+					description: `The dates of the notes to read, each ${DATE_ARGUMENT}.`,
+				},
+			},
+			required: ["dates"],
+		},
+	},
+	{
+		name: "read_journal",
+		description:
+			"Read every note in a range of days in full, oldest first, each under a heading with the link to cite it by. Use it for a question about a period, such as the last two weeks or the last three months, and to follow how something went from day to day. When a range holds more than fits, notes are left out evenly across it and you are told which.",
+		parameters: {
+			type: "object",
+			properties: {
+				from: { type: "string", description: `The first day, ${DATE_ARGUMENT}.` },
+				to: { type: "string", description: `The last day, ${DATE_ARGUMENT}.` },
+				tag: { type: "string", description: "Only the notes with this tag, such as work. Optional." },
+			},
+			required: ["from", "to"],
+		},
+	},
 	{
 		name: "list_journal",
 		description:
@@ -117,20 +222,6 @@ const TOOLS: ToolDefinition[] = [
 			properties: {
 				from: { type: "string", description: `The first day, ${DATE_ARGUMENT}.` },
 				to: { type: "string", description: `The last day, ${DATE_ARGUMENT}.` },
-			},
-			required: ["from", "to"],
-		},
-	},
-	{
-		name: "read_journal",
-		description:
-			"Read the notes in a range of days in full, oldest first, each under a heading with the link to cite it by. A long range may not fit; read a few weeks at a time, or only the notes with a tag.",
-		parameters: {
-			type: "object",
-			properties: {
-				from: { type: "string", description: `The first day, ${DATE_ARGUMENT}.` },
-				to: { type: "string", description: `The last day, ${DATE_ARGUMENT}.` },
-				tag: { type: "string", description: "Only the notes with this tag, such as work. Optional." },
 			},
 			required: ["from", "to"],
 		},
@@ -148,32 +239,17 @@ const TOOLS: ToolDefinition[] = [
 			},
 		},
 	},
-	{
-		name: "search_journal",
-		description:
-			"Find the notes that mention a word or phrase, with a short excerpt around each mention, oldest first. Ignores case and matches the start of words, so run finds running and runs. Use it to find when something came up.",
-		parameters: {
-			type: "object",
-			properties: {
-				query: { type: "string", description: "A word or short phrase, such as a name, a place or an activity." },
-				from: { type: "string", description: `The first day to search, ${DATE_ARGUMENT}. Optional.` },
-				to: { type: "string", description: `The last day to search, ${DATE_ARGUMENT}. Optional.` },
-			},
-			required: ["query"],
-		},
-	},
 ];
 
 const TOOL_NAMES = new Set(TOOLS.map((tool) => tool.name));
 
 /**
- * The rules of presets.ts's `SYSTEM_PROMPT`, for a model that reads through
- * tools: it has to look before it answers, and read in full rather than
- * answer from excerpts. `{exampleLink}` becomes the latest note's link.
+ * The rules every reflection is written by. `{exampleLink}` becomes the
+ * latest note's link, so the example matches the vault's own date format.
  */
-const TOOLS_SYSTEM_PROMPT = `You answer questions about someone's private journal, which you can only see by reading it with the tools.
+const SYSTEM_PROMPT = `You answer questions about someone's private journal, which you can only see by reading it with the tools.
 
-- Before you answer, look: search or list the journal to find the notes the question needs, then read them in full. Excerpts and lists alone are too thin to answer from. Write dates as YYYY-MM-DD.
+- Before you answer, look. For a question about a period, such as the last two weeks or the last three months, read those days with read_journal, however many they are: what the period holds is for the notes to say, not for you to guess and search for. For a question about a person, a place or a subject, find the notes with search_journal, then read the ones that matter in full with read_notes, or the days between them when the question is how something went. Excerpts and lists alone are too thin to answer from.
 - Ground every point in specific notes, and cite each one with the exact link shown in its heading or line in the tool results, such as {exampleLink}.
 - When the notes do not answer the question, say so instead of filling the gap.
 - No praise, no generic advice, no therapy-speak.
@@ -181,7 +257,7 @@ const TOOLS_SYSTEM_PROMPT = `You answer questions about someone's private journa
 - Keep it to about 150–300 words unless the question asks otherwise.
 - Never mention the tools, or suggest reading more: answer from what you have read.`;
 
-/** After the question, in place of presets.ts's `REMINDER`, since the notes come later. */
+/** After the question and the shape of its answer, since the notes come later. */
 const TOOLS_REMINDER =
 	'Write to me as "you". Cite only with the links exactly as the tool results show them, such as {exampleLink}, one note per link. Use only what the notes say. No praise, no advice, no closing summary.';
 
@@ -195,23 +271,16 @@ const LOOK_FIRST =
 
 /**
  * Sent instead of an answer written from search excerpts or a list alone,
- * which miss what the notes around them say: small models otherwise answer
- * from the first excerpts they get. Not after a search that found nothing,
- * when the answer cites nothing: sent back after saying that no note
- * mentions Lisbon, `qwen3:8b` read the whole journal and found a dream about it.
+ * which miss what the notes around them say. Not after a search that found
+ * nothing, when the answer cites nothing: sent back after saying that no
+ * note mentions Lisbon, `qwen3:8b` read the whole journal and found a dream
+ * about it.
  */
 const READ_FIRST =
-	"Excerpts and lists are too thin to answer from. Read the notes that matter in full with read_journal first, then answer.";
+	"Excerpts and lists are too thin to answer from. Read the notes that matter in full with read_notes first, then answer.";
 
 /** Asks for the answer once the tools are taken away, followed by the question again. */
 const ANSWER_NOW = "Answer my question now, from the notes above.";
-
-/** A note the tools can reach: one the journal's filters let through, up to the run's day. */
-interface JournalNote extends Omit<ReadNote, "body"> {
-	file: TFile;
-	/** Its tags as filters compare them, such as `work` or `family/mina`. */
-	tags: string[];
-}
 
 interface ToolOutcome {
 	/** The card's status line, or null when the call was refused before it ran. */
@@ -238,54 +307,89 @@ function stringArgument(value: unknown): string {
 	return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 }
 
-const pad = (value: number) => String(value).padStart(2, "0");
+/**
+ * A list argument as models write them: a list of strings, or one string
+ * holding several, split at commas, semicolons and line breaks.
+ */
+function listArgument(value: unknown): string[] {
+	const items: unknown[] = Array.isArray(value) ? value : [value];
+	return items
+		.flatMap((item) => stringArgument(item).split(/[,;\n]/))
+		.map((item) => item.trim())
+		.filter(Boolean);
+}
 
-/** A day as a key, or null when it does not exist, such as 31 February. */
-function keyOf(year: number, month: number, day: number): string | null {
-	const date = new Date(year, month - 1, day);
-	if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
-	return `${String(year).padStart(4, "0")}-${pad(month)}-${pad(day)}`;
+/** Removes Obsidian's display prefix and produces the comparison form of a tag, as the journal's filters do. */
+function normalizeTag(value: string): string {
+	return value.trim().replace(/^#+/, "").replace(/\/+$/g, "").toLocaleLowerCase();
+}
+
+const NUMBER_WORDS: Record<string, number> = {
+	a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+	seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+};
+
+/** The month a name or its first letters stand for, from 1, or 0. */
+function monthNamed(name: string): number {
+	const lower = name.toLowerCase().replace(/\.$/, "");
+	if (lower.length < 3) return 0;
+	return MONTHS.findIndex((candidate) => candidate.toLowerCase().startsWith(lower)) + 1;
 }
 
 /**
- * Reads a date argument: `YYYY-MM-DD`, or a date and time starting with one.
- * Given a year, a month and day alone, `MM-DD`, fall in it. The error says
- * how to call the tool again, which small models need spelled out.
+ * Reads a day as models write them. `YYYY-MM-DD` is what they are asked
+ * for, perhaps with a time after it; they also write `today`, `yesterday`,
+ * `2 weeks ago`, `19 October`, and a month or a year alone, of which `edge`
+ * says which end is meant. Null when it is none of these.
  */
-function parseDate(text: string, name: string, tool: string, year: number | null = null): { key: string } | { error: string } {
+function parseDay(text: string, today: string, edge: "from" | "to"): string | null {
+	const value = text.trim().toLowerCase();
+	const full = /^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/.exec(value);
+	if (full) return dayKey(Number(full[1]), Number(full[2]), Number(full[3]));
+	if (value === "today" || value === "now") return today;
+	if (value === "yesterday") return addDays(today, -1);
+	const ago = /^(\d+|[a-z]+)\s+(day|week|month|year)s?\s+ago$/.exec(value);
+	if (ago) {
+		const count = /^\d+$/.test(ago[1]) ? Number(ago[1]) : NUMBER_WORDS[ago[1]];
+		if (!count || count > 10000) return null;
+		if (ago[2] === "day") return addDays(today, -count);
+		if (ago[2] === "week") return addDays(today, -7 * count);
+		return monthsBefore(today, ago[2] === "month" ? count : 12 * count);
+	}
+	const year = Number(today.slice(0, 4));
+	const month = /^(\d{4})-(\d{1,2})$/.exec(value);
+	if (month) {
+		const number = Number(month[2]);
+		if (number < 1 || number > 12) return null;
+		return edge === "from" ? dayKey(Number(month[1]), number, 1) : monthEnd(Number(month[1]), number);
+	}
+	if (/^\d{4}$/.test(value)) return edge === "from" ? `${value}-01-01` : `${value}-12-31`;
+	const named = /^([a-z]+)\.?,?\s+(\d{4})$/.exec(value);
+	if (named && monthNamed(named[1])) {
+		return edge === "from" ? dayKey(Number(named[2]), monthNamed(named[1]), 1) : monthEnd(Number(named[2]), monthNamed(named[1]));
+	}
+	// "19 October", "Oct 19" or "October 19, 2024", in this year unless it names one.
+	const written = /^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)|([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?)\.?,?(?:\s+(\d{4}))?$/.exec(value);
+	if (written) {
+		const number = monthNamed(written[2] ?? written[3]);
+		if (number) return dayKey(written[5] ? Number(written[5]) : year, number, Number(written[1] ?? written[4]));
+	}
+	// A month and day alone, `10-19` or `--10-19`, fall in this year.
+	const short = /^-{0,2}(\d{1,2})-(\d{1,2})$/.exec(value);
+	return short ? dayKey(year, Number(short[1]), Number(short[2])) : null;
+}
+
+/** What a tool answers when a date cannot be read: how to call it again, which models need spelled out. */
+function dateError(text: string, name: string, tool: string): string {
 	const example = `such as "${name}": "2026-10-05"`;
-	if (!text) return { error: `"${name}" is missing. Call ${tool} again with a date ${DATE_ARGUMENT}, ${example}.` };
-	const full = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(text);
-	const short = year === null ? null : /^-{0,2}(\d{1,2})-(\d{1,2})$/.exec(text);
-	const key = full
-		? keyOf(Number(full[1]), Number(full[2]), Number(full[3]))
-		: short && year !== null
-			? keyOf(year, Number(short[1]), Number(short[2]))
-			: null;
-	if (key) return { key };
-	return { error: `"${name}" must be a date ${DATE_ARGUMENT}, not "${text}". Call ${tool} again with one, ${example}.` };
+	if (!text) return `"${name}" is missing. Call ${tool} again with a date ${DATE_ARGUMENT}, ${example}.`;
+	return `"${name}" must be a date ${DATE_ARGUMENT}, not "${text}". Call ${tool} again with one, ${example}.`;
 }
 
-/** "19 October", "Oct 19" or "October 19, 2024", in `year` unless it names one. */
-function monthDayOf(text: string, year: number): string | null {
-	const match =
-		/^(?:(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)|([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?)\.?,?(?:\s+(\d{4}))?$/i.exec(text);
-	if (!match) return null;
-	const name = (match[2] ?? match[3]).toLowerCase();
-	const month = MONTHS.findIndex((candidate) => name.length >= 3 && candidate.toLowerCase().startsWith(name));
-	if (month === -1) return null;
-	return keyOf(match[5] ? Number(match[5]) : year, month + 1, Number(match[1] ?? match[4]));
-}
-
-/** "5 Oct", in the app's language as the card's other lines are, with the year when it is not this one. */
-function shortDate(key: string, withYear: boolean): string {
-	return createMoment(key, DAY_KEY_FORMAT, true).format(withYear ? "D MMM YYYY" : "D MMM");
-}
-
-/** "5 Oct – 19 Oct", with years when the range leaves this year. */
-function spanLabel(from: string, to: string, today: string): string {
-	const withYear = from.slice(0, 4) !== today.slice(0, 4) || to.slice(0, 4) !== today.slice(0, 4);
-	return from === to ? shortDate(from, withYear) : `${shortDate(from, withYear)} – ${shortDate(to, withYear)}`;
+/** "5 Oct", and its year when asked: the status line in English, when the caller gives no way of its own. */
+function englishShortDate(key: string, withYear: boolean): string {
+	const text = `${Number(key.slice(8, 10))} ${MONTHS[Number(key.slice(5, 7)) - 1].slice(0, 3)}`;
+	return withYear ? `${text} ${key.slice(0, 4)}` : text;
 }
 
 /** Items joined with commas, the long tail counted rather than written out. */
@@ -295,80 +399,16 @@ function listOf(items: readonly string[], max = 20): string {
 }
 
 /** A note's first words, for a list, without its headings or list markers. */
-function preview(body: string): string {
+function preview(body: string, length = PREVIEW_LENGTH): string {
 	const text = body
 		.replace(/^#+\s+.*$/gm, " ")
 		.replace(/^\s*[-*+]\s+(\[.\]\s+)?/gm, "")
 		.replace(/\s+/g, " ")
 		.trim();
-	return text.length > PREVIEW_LENGTH ? `${text.slice(0, PREVIEW_LENGTH).replace(/\s+\S*$/, "")}…` : text;
+	return text.length > length ? `${text.slice(0, length).replace(/\s+\S*$/, "")}…` : text;
 }
 
-function escapeRegExp(text: string): string {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** A word cut back to what its forms share, so running finds run and runs, and worries finds worried. */
-function stemOf(word: string): string {
-	const lower = word.toLocaleLowerCase().replace(/['’]s$/, "");
-	let stem = lower;
-	if (lower.length > 5 && lower.endsWith("ing")) stem = lower.slice(0, -3);
-	else if (lower.length > 4 && /ie[sd]$/.test(lower)) return lower.slice(0, -3);
-	else if (lower.length > 4 && lower.endsWith("ed")) stem = lower.slice(0, -2);
-	else if (lower.length > 4 && /(s|x|z|ch|sh)es$/.test(lower)) return lower.slice(0, -2);
-	else if (lower.length > 3 && lower.endsWith("s") && !lower.endsWith("ss")) return lower.slice(0, -1);
-	// The consonant that -ing and -ed doubled: runn, stopp.
-	return stem !== lower && /([b-df-hj-km-np-rtv-z])\1$/.test(stem) ? stem.slice(0, -1) : stem;
-}
-
-const wordsOf = (phrase: string): string[] => phrase.match(/[\p{L}\p{N}]+/gu) ?? [];
-
-/**
- * A phrase at the start of a word, ignoring case, each word in any of its
- * forms. The character before it is matched rather than looked behind at,
- * since lookbehind is missing on iOS before 16.4.
- */
-function phrasePattern(phrase: string): RegExp {
-	const body = wordsOf(phrase)
-		.map((word) => `${escapeRegExp(stemOf(word))}[\\p{L}\\p{N}'’]*`)
-		.join("[^\\p{L}\\p{N}]+");
-	return new RegExp(`(^|[^\\p{L}\\p{N}_])(${body})`, "giu");
-}
-
-/** What a query asks for: alternatives split by OR, `|` or commas, as models write them. */
-function alternativesOf(query: string): string[] {
-	return query
-		.split(/\s+OR\s+|\||,/)
-		.map((part) => part.trim())
-		.filter((part) => wordsOf(part).length > 0);
-}
-
-/** Up to `limit` stretches of `body` around what `patterns` match, as one line each. */
-function excerptsOf(body: string, patterns: readonly RegExp[], limit: number): string[] {
-	const text = body.replace(/\s+/g, " ");
-	const found: number[] = [];
-	for (const pattern of patterns) {
-		pattern.lastIndex = 0;
-		let match: RegExpExecArray | null;
-		while ((match = pattern.exec(text)) && found.length < 20) found.push(match.index + match[1].length);
-	}
-	found.sort((left, right) => left - right);
-	const excerpts: string[] = [];
-	let end = -1;
-	for (const index of found) {
-		if (index < end || excerpts.length >= limit) continue;
-		let start = Math.max(0, index - EXCERPT_BEFORE);
-		let stop = Math.min(text.length, index + EXCERPT_AFTER);
-		if (start > 0) start = text.indexOf(" ", start) + 1 || start;
-		if (stop < text.length) {
-			const space = text.lastIndexOf(" ", stop);
-			if (space > index) stop = space;
-		}
-		excerpts.push(`${start > 0 ? "…" : ""}${text.slice(start, stop).trim()}${stop < text.length ? "…" : ""}`);
-		end = stop;
-	}
-	return excerpts;
-}
+const wordCount = (body: string): number => body.match(/\S+/g)?.length ?? 0;
 
 /** Where the JSON object opening at `start` closes, or -1. */
 function closingBrace(text: string, start: number): number {
@@ -421,7 +461,8 @@ function hasText(text: string): boolean {
 
 /** The link text inside `[[…]]`. */
 function linkText(link: string): string {
-	return link.startsWith("[[") && link.endsWith("]]") ? link.slice(2, -2) : link;
+	const text = link.trim();
+	return text.startsWith("[[") && text.endsWith("]]") ? text.slice(2, -2) : text;
 }
 
 /** True when `text` cites a note, by its link or by its link text alone, which `repairCitations` links. */
@@ -429,17 +470,58 @@ function cites(text: string, note: JournalNote): boolean {
 	return text.includes(linkText(note.link));
 }
 
+/** What a search was asked, as it is told back: `"mina" or "sister"`. */
+function quotedQuery(counts: readonly AlternativeCount[]): string {
+	return counts.map((count) => `"${count.text.replace(/["“”]/g, "")}"`).join(" or ");
+}
+
 /**
- * The journal as a run's tools read it: every note the filters let through,
- * up to the run's day, and what the model has been shown of each. Note
- * bodies come through `FindCorpus` for lists and searches, which the run
- * keeps for its length, and through `readNote` when passed whole, so they
- * are formatted exactly as a preset's are.
+ * Which words of a query found what, when that says more than the count of
+ * notes does: a search for `trip to Lisbon` that finds a note about tripping
+ * has to say that no note mentions Lisbon, and one for several ways of
+ * saying a thing which of them the notes use. Empty otherwise.
+ */
+function wordCounts(counts: readonly AlternativeCount[], found: number): string {
+	const seen = new Set<string>();
+	const words = counts
+		.flatMap((count) => count.parts.filter((part) => !part.common))
+		.filter((word) => !seen.has(word.text) && seen.add(word.text));
+	if (words.length < 2 || words.every((word) => word.notes === found)) return "";
+	const texts = words.map((word) => `"${word.text}" is in ${word.notes ? plural(word.notes, "note") : "no note at all"}`);
+	return `By word: ${texts.join(", ")}.`;
+}
+
+/** Where notes fall in time, such as `by month: Aug 2026 (6), Sep 2026 (1)`, by year once they span many months. */
+function spreadOf(keys: readonly string[]): string {
+	const months = new Map<string, number>();
+	for (const key of keys) months.set(key.slice(0, 7), (months.get(key.slice(0, 7)) ?? 0) + 1);
+	if (months.size <= 18) {
+		const counts = [...months].map(
+			([month, count]) => `${MONTHS[Number(month.slice(5)) - 1].slice(0, 3)} ${month.slice(0, 4)} (${count})`,
+		);
+		return `by month: ${counts.join(", ")}`;
+	}
+	const years = new Map<string, number>();
+	for (const key of keys) years.set(key.slice(0, 4), (years.get(key.slice(0, 4)) ?? 0) + 1);
+	return `by year: ${[...years].map(([year, count]) => `${year} (${count})`).join(", ")}`;
+}
+
+/** What the search index holds for a note beside its text: its name past the date, its tags and its properties. */
+function extraOf(note: JournalNote, shared: Map<string, Set<string>>): string {
+	const parts = [note.name.replace(/^\d{4}-\d{2}-\d{2}/, ""), ...note.tags];
+	for (const [key, values] of note.properties) {
+		for (const value of values) if (!shared.get(key)?.has(value)) parts.push(value);
+	}
+	return parts.join(" ");
+}
+
+/**
+ * The journal as a run's tools read it: every note the source holds, and
+ * what the model has been shown of each. Note texts are read once and kept
+ * for the run; the search index is built the first time a search needs it.
  */
 class JournalReader {
-	/** The run's day, `YYYY-MM-DD`: nothing after it is read. */
-	readonly today: string;
-	readonly notes: JournalNote[];
+	readonly notes: readonly JournalNote[];
 	/** Per property, the values nearly every note holds, such as `type: daily`, which tell the model nothing. */
 	readonly shared: Map<string, Set<string>>;
 	/** Notes whose whole body was passed, by path. */
@@ -450,33 +532,23 @@ class JournalReader {
 	private readonly hits = new Set<string>();
 	/** Searches run, whether or not they found anything. */
 	private searches = 0;
+	/** Characters passed as stories so far, against what a run may spend on them. */
+	private storyLength = 0;
 	private readonly first: string;
+	private readonly bodies = new Map<string, Promise<string | null>>();
+	private searchable: Promise<{ index: SearchIndex; texts: string[] }> | null = null;
 
 	constructor(
-		private readonly plugin: JournalViewPlugin,
-		day: Moment,
-		private readonly sourcePath: string,
+		private readonly source: JournalSource,
+		/** The run's day, `YYYY-MM-DD`: nothing after it is read. */
+		readonly today: string,
+		/** The characters the model's whole context holds, which bounds what a search or a list returns. */
+		private readonly capacity: number,
+		private readonly shortDate: (key: string, withYear: boolean) => string,
 		private readonly signal: AbortSignal,
 	) {
-		const { app } = plugin;
-		this.today = day.format(DAY_KEY_FORMAT);
-		const earliest = plugin.index.range()?.first ?? this.today;
-		const from = earliest < this.today ? earliest : this.today;
-		// The journal's own filters, as a preset's notes are chosen.
-		const { notes } = notesInScope(plugin, { kind: "range", from, to: this.today }, day);
-		this.notes = notes.map(({ key, file }) => {
-			const cache = app.metadataCache.getFileCache(file);
-			return {
-				key,
-				file,
-				path: file.path,
-				link: `[[${app.metadataCache.fileToLinktext(file, sourcePath)}]]`,
-				name: file.basename,
-				properties: propertiesOf(cache?.frontmatter),
-				tags: [...new Set((getAllTags(cache ?? {}) ?? []).map(normalizeFilterTag))],
-			};
-		});
-		this.first = this.notes[0]?.key ?? this.today;
+		this.notes = source.notes.filter((note) => note.key <= today);
+		this.first = this.notes[0]?.key ?? today;
 		this.shared = sharedAcross(this.notes);
 	}
 
@@ -500,22 +572,24 @@ class JournalReader {
 		return false;
 	}
 
-	/** Runs one call, whose arguments are as the model wrote them. */
+	/** Runs one call, whose arguments are as the model wrote them, within `room` characters. */
 	async run(call: ToolCall, room: number): Promise<ToolOutcome> {
 		const args = call.arguments;
 		switch (call.name) {
-			case "list_journal":
-				return this.list(args, room);
-			case "read_journal":
-				return this.readRange(args, room);
-			case "on_this_day":
-				return this.onThisDay(args, room);
 			case "search_journal":
 				return this.search(args, room);
+			case "read_notes":
+				return this.readNotes(args, room);
+			case "read_journal":
+				return this.readRange(args, room);
+			case "list_journal":
+				return this.list(args, Math.min(room, this.capacity * GLANCE_SHARE));
+			case "on_this_day":
+				return this.onThisDay(args, room);
 			default:
 				return {
 					status: null,
-					content: `There is no tool named "${call.name}". The tools are list_journal, read_journal, on_this_day and search_journal.`,
+					content: `There is no tool named "${call.name}". The tools are ${[...TOOL_NAMES].join(", ")}.`,
 				};
 		}
 	}
@@ -527,6 +601,250 @@ class JournalReader {
 		return notes.sort((left, right) => left.key.localeCompare(right.key) || left.path.localeCompare(right.path));
 	}
 
+	/** The days of the notes among `links` that the journal still holds, oldest first. */
+	daysOf(links: readonly string[]): string[] {
+		const wanted = new Set(links.map(linkText));
+		return [...new Set(this.notes.filter((note) => wanted.has(linkText(note.link))).map((note) => note.key))];
+	}
+
+	private async search(args: Record<string, unknown>, room: number): Promise<ToolOutcome> {
+		this.searches++;
+		// Models pass several words as a list as often as in one string.
+		const asked = listArgument(args.query ?? args.q ?? args.keywords ?? args.words).join(", ");
+		const alternatives = parseQuery(asked);
+		if (!alternatives.length) {
+			return {
+				status: null,
+				content: `"query" is empty. Call search_journal again with a word, a name or a short phrase to find.`,
+			};
+		}
+		const range = this.range(args, "search_journal", true);
+		if ("error" in range) return { status: null, content: range.error };
+		const { from, to, notices } = range;
+		const withYear = this.withYear(from, to);
+		// What excerpts may take: they are for finding what to read, so they leave the room to read it in.
+		const glance = Math.min(room, this.capacity * GLANCE_SHARE);
+		// Said only for a search that was given days: without them it is the whole journal.
+		const span =
+			from === this.first && to === this.today ? "" : ` from ${longDate(from, withYear)} to ${longDate(to, withYear)}`;
+		const { index, texts } = await this.index();
+		const result = index.search(alternatives, (doc) => this.notes[doc].key >= from && this.notes[doc].key <= to);
+		const quoted = quotedQuery(result.counts);
+		const status = `Searching for ${quoted}`;
+		if (!result.hits.length) {
+			return {
+				status,
+				content: [
+					...notices,
+					`No note${span} mentions ${quoted}. Try another word for it, such as a synonym, a name or a shorter form, or list_journal to see what the notes cover.`,
+				].join("\n"),
+			};
+		}
+		const found = result.hits.map((hit) => ({ ...hit, note: this.notes[hit.doc], body: texts[hit.doc] }));
+		const foundPaths = new Set(found.map((hit) => hit.note.path));
+		for (const path of foundPaths) this.hits.add(path);
+		const byWord = wordCounts(result.counts, found.length);
+		// A query of several words is matched by a note holding some of them, which "mentions" would overstate.
+		const several = result.counts.some((count) => count.parts.filter((part) => !part.common).length > 1);
+		const verb = several ? (found.length === 1 ? "matches" : "match") : found.length === 1 ? "mentions" : "mention";
+
+		const lineFor = (hit: (typeof found)[number], excerpts: number, width: number) => {
+			const parts = [hit.note.link, longDate(hit.note.key, withYear)];
+			const properties = propertyLine(hit.note, this.shared);
+			if (properties) parts.push(properties);
+			const stretches = excerptsOf(hit.body, result.locate(hit.body), excerpts, width);
+			// Found by a tag, a property or its name, which its text does not show.
+			const text = stretches.length ? stretches.join(" ") : preview(hit.body, width);
+			return `- ${parts.join(" · ")}: ${text}`;
+		};
+
+		// What happened to a subject is as often in the days between its mentions,
+		// in notes that never name it, which no search for it finds. So when the
+		// days from its first mention to its last are few enough to read, they
+		// are all passed, whole. Failing that, the days of the notes that use
+		// the subject's own words are, when the query also holds a word half the
+		// journal uses; and failing that the days of the notes that match best,
+		// which leaves out a stray mention years away.
+		const story = (docs: readonly number[]): JournalNote[] | null => {
+			// Not `Math.min(...docs)`: a name can be in more notes than a call takes arguments.
+			let earliest = docs[0];
+			let latest = docs[0];
+			for (const doc of docs) {
+				if (doc < earliest) earliest = doc;
+				if (doc > latest) latest = doc;
+			}
+			const first = this.notes[earliest].key;
+			const last = this.notes[latest].key;
+			const notes: JournalNote[] = [];
+			// Only what was not passed yet takes room: those notes are named, not repeated.
+			let length = 0;
+			let mentions = 0;
+			for (const [doc, note] of this.notes.entries()) {
+				if (note.key < first || note.key > last) continue;
+				notes.push(note);
+				if (!this.read.has(note.path)) length += texts[doc].length + 160;
+				if (foundPaths.has(note.path)) mentions++;
+			}
+			const allowed = Math.min(room * 0.9, this.capacity * STORY_SHARE - this.storyLength);
+			if (notes.length <= mentions || mentions < 2 || notes.length > MAX_STORY_NOTES || !length || length > allowed) return null;
+			this.storyLength += length;
+			return notes;
+		};
+		// Not for a query that the notes meet only in part: the days around
+		// `holiday` are not the story of a holiday in Lisbon that no note mentions.
+		const met = new Set(
+			result.counts.flatMap((count, at) => (count.parts.every((part) => part.common || part.notes > 0) ? [at] : [])),
+		);
+		const told = found.filter((hit) => hit.matched.some((at) => met.has(at)));
+		const searched = this.notesIn(from, to).length;
+		const narrow = new Set(
+			result.counts.flatMap((count, at) => (count.notes <= Math.max(3, searched * NARROW_SHARE) ? [at] : [])),
+		);
+		const own = told.filter((hit) => hit.matched.some((at) => narrow.has(at))).map((hit) => hit.doc);
+		const days = !told.length
+			? null
+			: (story(told.map((hit) => hit.doc)) ??
+				(own.length && own.length < told.length ? story(own) : null) ??
+				story(told.filter((hit) => hit.score >= told[0].score * STRONG_SHARE).map((hit) => hit.doc)));
+		if (days) {
+			const first = days[0].key;
+			const last = days[days.length - 1].key;
+			const inside = found.filter((hit) => hit.note.key >= first && hit.note.key <= last);
+			const between = `between ${longDate(first, withYear)} and ${longDate(last, withYear)}`;
+			// The ones left out match least: a word in passing, far from the rest.
+			const where =
+				inside.length === found.length ? `all ${between}` : `most strongly ${between}, where ${inside.length} of them are`;
+			const mentions = [...inside].sort((left, right) => left.doc - right.doc).map((hit) => hit.note.link);
+			const content = await this.pass(days, withYear, room, (passed, total) =>
+				[
+					...notices,
+					`${plural(found.length, "note")}${span} ${verb} ${quoted}, ${where}.${byWord ? ` ${byWord}` : ""}`,
+					// Which of the days below name it, while that is few enough to be worth saying.
+					...(mentions.length <= MAX_NAMED_MENTIONS ? [`They are ${mentions.join(", ")}.`] : []),
+					`What happened is as often in the days between, in notes that never name it, so here is every note of those days in full, oldest first (${counted(passed, total)}):`,
+				].join("\n"),
+			);
+			return { status, content };
+		}
+
+		// A handful of short notes is shown whole: reading them would be the next call anyway.
+		const whole = found.reduce((sum, hit) => sum + hit.body.length + 160, 0);
+		if (found.length <= WHOLE_SEARCH_NOTES && whole <= glance * 0.9) {
+			const notes = [...found].sort((left, right) => left.doc - right.doc).map((hit) => hit.note);
+			const content = await this.pass(notes, withYear, glance, () =>
+				[
+					...notices,
+					`Only ${plural(found.length, "note")}${span} ${verb} ${quoted}${byWord ? `. ${byWord}` : "."} ${found.length === 1 ? "Here it is in full:" : "Here they are in full, oldest first:"}`,
+				].join("\n"),
+			);
+			return { status, content };
+		}
+
+		/** The `count` best notes, and always the first and the last mention, in the journal's order. */
+		const shown = (count: number) => {
+			const best = found.slice(0, count);
+			if (count < found.length && count >= 3) {
+				const byDay = [...found].sort((left, right) => left.doc - right.doc);
+				for (const edge of [byDay[0], byDay[byDay.length - 1]]) {
+					if (best.includes(edge)) continue;
+					// In place of the weakest shown that is not itself an edge.
+					for (let index = best.length - 1; index >= 0; index--) {
+						if (best[index] === byDay[0] || best[index] === byDay[byDay.length - 1]) continue;
+						best[index] = edge;
+						break;
+					}
+				}
+			}
+			return best.sort((left, right) => left.doc - right.doc);
+		};
+		const compose = (count: number, excerpts: number, width: number) => {
+			const notes = shown(count);
+			const some = notes.length < found.length;
+			const best = found.filter((hit) => notes.includes(hit)).slice(0, 2);
+			const example = best.sort((left, right) => left.doc - right.doc).map((hit) => `"${hit.note.key}"`);
+			return [
+				...notices,
+				`${plural(found.length, "note")}${span} ${verb} ${quoted}${some ? `; the ${notes.length} that match best are shown` : ""}, oldest first.`,
+				...(byWord ? [byWord] : []),
+				...(some ? [`All of them, ${spreadOf(found.map((hit) => hit.note.key).sort())}. Search a shorter range to see the others.`] : []),
+				"",
+				...notes.map((hit) => lineFor(hit, excerpts, width)),
+				"",
+				`These are only excerpts, and only of the notes that use these words: too thin to answer from. Now read the notes that matter in full, with read_notes and their dates, such as {"dates": [${example.join(", ")}]}.`,
+			].join("\n");
+		};
+		let count = Math.min(found.length, MAX_SEARCH_NOTES);
+		let size = 0;
+		let content = compose(count, EXCERPT_SIZES[size].excerpts, EXCERPT_SIZES[size].width);
+		while (content.length > glance && size < EXCERPT_SIZES.length - 1) {
+			size++;
+			content = compose(count, EXCERPT_SIZES[size].excerpts, EXCERPT_SIZES[size].width);
+		}
+		while (content.length > glance && count > 1) {
+			count--;
+			content = compose(count, EXCERPT_SIZES[size].excerpts, EXCERPT_SIZES[size].width);
+		}
+		this.glimpse(shown(count).map((hit) => hit.note));
+		return { status, content };
+	}
+
+	private async readNotes(args: Record<string, unknown>, room: number): Promise<ToolOutcome> {
+		const given = listArgument(args.dates ?? args.date ?? args.notes ?? args.days);
+		if (!given.length) {
+			return {
+				status: null,
+				content: `"dates" is missing. Call read_notes again with the dates of the notes to read, such as {"dates": ["${this.latest?.key ?? this.today}"]}.`,
+			};
+		}
+		const wanted = new Map<string, JournalNote>();
+		const missing: string[] = [];
+		for (const item of given) {
+			const text = linkText(item);
+			const key = parseDay(text, this.today, "from");
+			const notes = key
+				? this.notesIn(key, key)
+				: this.notes.filter((note) => linkText(note.link) === text || note.name === text);
+			if (!notes.length) missing.push(key ?? text);
+			for (const note of notes) wanted.set(note.path, note);
+		}
+		const notes = [...wanted.values()].sort(
+			(left, right) => left.key.localeCompare(right.key) || left.path.localeCompare(right.path),
+		);
+		const notices = missing.length ? [`There is no note on ${listOf(missing)}.${this.nearest(missing)}`] : [];
+		if (!notes.length) return { status: null, content: notices.join("\n") };
+		const from = notes[0].key;
+		const to = notes[notes.length - 1].key;
+		const withYear = this.withYear(from, to);
+		const status =
+			notes.length === 1
+				? `Reading ${this.shortDate(from, withYear)}`
+				: `Reading ${plural(notes.length, "note")} · ${this.spanLabel(from, to)}`;
+		const content = await this.pass(notes, withYear, room, (passed, total) =>
+			[...notices, `${counted(passed, total)} in full, oldest first:`].join("\n"),
+		);
+		return { status, content };
+	}
+
+	/** The notes on either side of days that hold none, to read instead. */
+	private nearest(missing: readonly string[]): string {
+		const near = new Set<string>();
+		for (const key of missing) {
+			if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+			let before: string | null = null;
+			let after: string | null = null;
+			for (const note of this.notes) {
+				if (note.key < key) before = note.key;
+				else if (note.key > key) {
+					after = note.key;
+					break;
+				}
+			}
+			if (before) near.add(before);
+			if (after) near.add(after);
+		}
+		return near.size ? ` The nearest notes are on ${listOf([...near].sort(), 8)}.` : "";
+	}
+
 	private async list(args: Record<string, unknown>, room: number): Promise<ToolOutcome> {
 		const range = this.range(args, "list_journal", true);
 		if ("error" in range) return { status: null, content: range.error };
@@ -534,24 +852,21 @@ class JournalReader {
 		const notes = this.notesIn(from, to);
 		const withYear = this.withYear(from, to);
 		const span = `${longDate(from, withYear)} to ${longDate(to, withYear)}`;
-		const status = `Listing ${spanLabel(from, to, this.today)}`;
+		const status = `Listing ${this.spanLabel(from, to)}`;
 		if (!notes.length) return { status, content: [...notices, `There are no notes from ${span}.`].join("\n") };
 		if (notes.length <= MAX_LISTED_NOTES) {
 			const lines = await this.inBatches(notes, async (note) => {
-				const [body, count] = await Promise.all([
-					this.plugin.findCorpus.read(note.file),
-					this.plugin.statistics.count(note.file, () => !this.signal.aborted),
-				]);
-				const properties = propertyLine({ ...note, body: "" }, this.shared);
+				const body = await this.bodyOf(note);
+				const properties = propertyLine(note, this.shared);
 				const parts = [note.link, longDate(note.key, withYear)];
-				if (count?.status === "ready") parts.push(plural(count.words, "word"));
+				if (body !== null) parts.push(plural(wordCount(body), "word"));
 				if (properties) parts.push(properties);
 				const opening = body ? preview(body) : "";
 				return `- ${parts.join(" · ")}${opening ? `: ${opening}` : ""}`;
 			});
 			const content = [
 				...notices,
-				`${plural(notes.length, "note")} from ${span}, oldest first. Read them with read_journal, or find words in them with search_journal.`,
+				`${plural(notes.length, "note")} from ${span}, oldest first. Read the ones that matter with read_notes, or all of them with read_journal.`,
 				"",
 				...lines,
 			].join("\n");
@@ -577,10 +892,10 @@ class JournalReader {
 		const range = this.range(args, "read_journal", false);
 		if ("error" in range) return { status: null, content: range.error };
 		const { from, to, notices } = range;
-		const tag = normalizeFilterTag(stringArgument(args.tag));
+		const tag = normalizeTag(stringArgument(args.tag));
 		const withYear = this.withYear(from, to);
 		const span = `${longDate(from, withYear)} to ${longDate(to, withYear)}`;
-		const status = `Reading ${spanLabel(from, to, this.today)}${tag ? ` · #${tag}` : ""}`;
+		const status = `Reading ${this.spanLabel(from, to)}${tag ? ` · #${tag}` : ""}`;
 		const inRange = this.notesIn(from, to);
 		if (!inRange.length) return { status, content: [...notices, `There are no notes from ${span}.`].join("\n") };
 		let notes = tag
@@ -604,10 +919,8 @@ class JournalReader {
 
 	private async onThisDay(args: Record<string, unknown>, room: number): Promise<ToolOutcome> {
 		const asked = stringArgument(args.date);
-		const year = Number(this.today.slice(0, 4));
-		const parsed = asked ? parseDate(asked, "date", "on_this_day", year) : { key: this.today };
 		// Models often write the date out, "19 October": read it, or fall back to today.
-		const key = "key" in parsed ? parsed.key : monthDayOf(asked, year);
+		const key = asked ? parseDay(asked, this.today, "from") : this.today;
 		const notices: string[] = key ? [] : [`"${asked}" is not a date written YYYY-MM-DD, so today's date was used.`];
 		// Only the month and day count: models pass the first year as often as today.
 		const date = key ?? this.today;
@@ -615,7 +928,7 @@ class JournalReader {
 		const status =
 			date.slice(5) === this.today.slice(5)
 				? "Looking at this date in earlier years"
-				: `Looking at ${shortDate(date, false)} in earlier years`;
+				: `Looking at ${this.shortDate(date, false)} in earlier years`;
 		const found = this.notes.filter((note) => onThisDay(note.key, date));
 		if (!found.length) {
 			return {
@@ -632,104 +945,12 @@ class JournalReader {
 		return { status, content };
 	}
 
-	private async search(args: Record<string, unknown>, room: number): Promise<ToolOutcome> {
-		this.searches++;
-		const alternatives = alternativesOf(stringArgument(args.query));
-		if (!alternatives.length) {
-			return {
-				status: null,
-				content: `"query" is empty. Call search_journal again with a word or short phrase to find, such as a name.`,
-			};
-		}
-		const range = this.range(args, "search_journal", true);
-		if ("error" in range) return { status: null, content: range.error };
-		const { from, to, notices } = range;
-		const withYear = this.withYear(from, to);
-		const span = `${longDate(from, withYear)} to ${longDate(to, withYear)}`;
-		const quoted = `"${alternatives.join('" or "')}"`;
-		const status = `Searching for ${quoted}`;
-		const patterns = alternatives.map(phrasePattern);
-		// A note tagged `running` is about running, whatever its words.
-		const tagStems = alternatives
-			.filter((part) => wordsOf(part).length === 1)
-			.map((part) => stemOf(wordsOf(part)[0]))
-			.filter((stem) => stem.length >= 3);
-		const notes = this.notesIn(from, to);
-		const bodies = await this.inBatches(notes, (note) => this.plugin.findCorpus.read(note.file));
-		const matches = (body: string) =>
-			patterns.some((pattern) => {
-				pattern.lastIndex = 0;
-				return pattern.test(body);
-			});
-		const hits: Array<{ note: JournalNote; body: string }> = [];
-		for (const [index, note] of notes.entries()) {
-			const body = bodies[index] ?? "";
-			if (matches(body) || note.tags.some((tag) => tagStems.some((stem) => tag.startsWith(stem)))) {
-				hits.push({ note, body });
-			}
-		}
-		if (!hits.length) {
-			return {
-				status,
-				content: [
-					...notices,
-					`No note from ${span} mentions ${quoted}. Try another word for it, or list_journal to see what the notes cover.`,
-				].join("\n"),
-			};
-		}
-		const first = hits[0].note.key;
-		const last = hits[hits.length - 1].note.key;
-		// Small models read on when told exactly what to call; the range between
-		// the first and last mention holds what happened in between.
-		const next =
-			first === last
-				? `To read it in full: read_journal with {"from": "${first}", "to": "${last}"}.`
-				: `To follow it from first mention to last, read that range in full: read_journal with {"from": "${first}", "to": "${last}"}.`;
-		const lineFor = ({ note, body }: { note: JournalNote; body: string }, limit: number) => {
-			const excerpts = excerptsOf(body, patterns, limit);
-			const text = excerpts.length ? excerpts.join(" ") : `(tagged) ${preview(body)}`;
-			return `- ${note.link} · ${longDate(note.key, withYear)}: ${text}`;
-		};
-		const compose = (shown: readonly number[], limit: number) => {
-			const left = hits.filter((_, index) => !shown.includes(index));
-			const shownText = shown.length < hits.length ? `; ${shown.length} shown` : "";
-			return [
-				...notices,
-				`${plural(hits.length, "note")} from ${span} ${hits.length === 1 ? "mentions" : "mention"} ${quoted}, oldest first${shownText}. These are only excerpts: read the notes that matter in full with read_journal before you answer.`,
-				"",
-				...shown.map((index) => lineFor(hits[index], limit)),
-				...(left.length
-					? [
-							"",
-							`Also mentioned, not shown for want of room: ${listOf(left.map(({ note }) => note.key))}. Search a shorter range to see them.`,
-						]
-					: []),
-				"",
-				next,
-			].join("\n");
-		};
-		let limit = EXCERPTS_PER_NOTE;
-		let count = Math.min(hits.length, MAX_SEARCH_NOTES);
-		let content = compose(spreadEvenly(hits.length, count), limit);
-		if (content.length > room) {
-			limit = 1;
-			content = compose(spreadEvenly(hits.length, count), limit);
-		}
-		while (count > 1 && content.length > room) {
-			count--;
-			content = compose(spreadEvenly(hits.length, count), limit);
-		}
-		for (const { note } of hits) this.hits.add(note.path);
-		this.glimpse(spreadEvenly(hits.length, count).map((index) => hits[index].note));
-		return { status, content };
-	}
-
 	/**
 	 * Passes `notes` whole within `room` characters. Notes already passed are
 	 * named rather than repeated. When the rest do not fit, whole notes are
 	 * dropped evenly across them, keeping first the ones a search found, and
 	 * the dropped ones are named as plain dates, not links, so the model can
-	 * read them by a narrower range but not cite what it has not read.
+	 * read them by themselves but not cite what it has not read.
 	 */
 	private async pass(
 		notes: readonly JournalNote[],
@@ -742,15 +963,21 @@ class JournalReader {
 		const already = repeated.length
 			? `Already shown above, so not repeated: ${listOf(repeated.map((note) => note.link))}.`
 			: "";
-		if (!unread.length) return `${already} Answer from them, or read another range.`;
+		if (!unread.length) return `${already} Answer from them, or read other notes.`;
 		// A range of years is thinned before anything is read: far fewer fit.
 		const fresh =
 			unread.length > MAX_READ_CANDIDATES
 				? this.prioritized(unread, MAX_READ_CANDIDATES).map((index) => unread[index])
 				: unread;
-		const read = await this.inBatches(fresh, (note) => readNote(this.plugin, note, this.sourcePath));
-		const readable = fresh.filter((_, index) => read[index] !== null);
-		const sections = read.filter((note): note is ReadNote => note !== null).map((note) => formatNote(note, withYear, this.shared));
+		const bodies = await this.inBatches(fresh, (note) => this.bodyOf(note));
+		const readable: JournalNote[] = [];
+		const sections: string[] = [];
+		for (const [index, note] of fresh.entries()) {
+			const body = bodies[index];
+			if (body === null) continue;
+			readable.push(note);
+			sections.push(formatNote({ ...note, body: demoteHeadings(body.trim()) }, withYear, this.shared));
+		}
 		const total = unread.length;
 		const compose = (kept: readonly number[]) => {
 			const keptPaths = new Set(kept.map((index) => readable[index].path));
@@ -761,7 +988,7 @@ class JournalReader {
 			else if (readable.length) parts.push("None of them fit in the room left. Answer from the notes above.");
 			if (left.length) {
 				parts.push(
-					`Not shown, for want of room: ${listOf(left.map((note) => note.key))}. Read a shorter range, or search for what you need, to see them.`,
+					`Not shown, for want of room: ${listOf(left.map((note) => note.key))}. To see them, read fewer days at a time, or only the ones you need with read_notes.`,
 				);
 			}
 			return parts.join("\n\n");
@@ -806,13 +1033,13 @@ class JournalReader {
 	private range(args: Record<string, unknown>, tool: string, optional: boolean): RangeArgument {
 		const fromText = stringArgument(args.from);
 		const toText = stringArgument(args.to);
-		const from = fromText || !optional ? parseDate(fromText, "from", tool) : { key: this.first };
-		if ("error" in from) return from;
-		const to = toText || !optional ? parseDate(toText, "to", tool) : { key: this.today };
-		if ("error" in to) return to;
+		const from = fromText || !optional ? parseDay(fromText, this.today, "from") : this.first;
+		if (!from) return { error: dateError(fromText, "from", tool) };
+		const to = toText || !optional ? parseDay(toText, this.today, "to") : this.today;
+		if (!to) return { error: dateError(toText, "to", tool) };
 		const notices: string[] = [];
-		let start = from.key;
-		let end = to.key;
+		let start = from;
+		let end = to;
 		if (start > end) {
 			[start, end] = [end, start];
 			notices.push(`"from" was after "to", so they were swapped.`);
@@ -829,13 +1056,49 @@ class JournalReader {
 		return this.notes.filter((note) => note.key >= from && note.key <= to);
 	}
 
-	/** Headings carry the year when the range leaves this year, as a preset's do when it spans two. */
+	/** Headings carry the year when the range leaves this year. */
 	private withYear(from: string, to: string): boolean {
 		return from.slice(0, 4) !== to.slice(0, 4) || to.slice(0, 4) !== this.today.slice(0, 4);
 	}
 
+	/** "5 Oct – 19 Oct", with years when the range leaves this year. */
+	private spanLabel(from: string, to: string): string {
+		const withYear = this.withYear(from, to);
+		return from === to
+			? this.shortDate(from, withYear)
+			: `${this.shortDate(from, withYear)} – ${this.shortDate(to, withYear)}`;
+	}
+
 	private glimpse(notes: readonly JournalNote[]): void {
 		for (const note of notes) if (!this.read.has(note.path)) this.glimpsed.set(note.path, note);
+	}
+
+	/** A note's text, read once for the run. */
+	private bodyOf(note: JournalNote): Promise<string | null> {
+		let body = this.bodies.get(note.path);
+		if (!body) this.bodies.set(note.path, (body = this.source.body(note)));
+		return body;
+	}
+
+	/**
+	 * Every note's text, indexed for search, the first time a search asks.
+	 * Notes are read and indexed a batch at a time, so a long journal does
+	 * not hold the app up while it is indexed.
+	 */
+	private index(): Promise<{ index: SearchIndex; texts: string[] }> {
+		this.searchable ??= (async () => {
+			const index = new SearchIndex();
+			const texts = await this.inBatches(this.notes, async (note) => (await this.bodyOf(note)) ?? "");
+			for (const [at, note] of this.notes.entries()) {
+				index.add({ body: texts[at], extra: extraOf(note, this.shared) });
+				if (at % READ_BATCH === READ_BATCH - 1) {
+					await Promise.resolve();
+					if (this.signal.aborted) throw aborted();
+				}
+			}
+			return { index, texts };
+		})();
+		return this.searchable;
 	}
 
 	/** Maps `notes` a batch at a time, stopping between batches when the run is stopped. */
@@ -856,10 +1119,9 @@ function counted(passed: number, total: number): string {
 }
 
 /**
- * Per property, the values held by nearly every note in the journal. A
- * preset leaves out what every note in its range shares; across a whole
- * journal one odd note would keep `type: daily` on every other, so nearly
- * every note is enough.
+ * Per property, the values held by nearly every note in the journal, such as
+ * `type: daily`. One odd note would keep it on every other, so nearly every
+ * note is enough.
  */
 function sharedAcross(notes: readonly JournalNote[]): Map<string, Set<string>> {
 	const shared = new Map<string, Set<string>>();
@@ -881,7 +1143,7 @@ function sharedAcross(notes: readonly JournalNote[]): Map<string, Set<string>> {
 
 /** The tags notes hold, most used first, such as `work (8), family (5)`, leaving out those nearly every note holds. */
 function tagCounts(notes: readonly JournalNote[], shared: Map<string, Set<string>>, max: number): string {
-	const common = new Set([...(shared.get("tags") ?? [])].map(normalizeFilterTag));
+	const common = new Set([...(shared.get("tags") ?? [])].map(normalizeTag));
 	const counts = new Map<string, number>();
 	for (const note of notes) {
 		for (const tag of note.tags) if (!common.has(tag)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
@@ -908,6 +1170,19 @@ function byMonth(notes: readonly JournalNote[], shared: Map<string, Set<string>>
 	});
 }
 
+/**
+ * Today, and the days that the usual ways of asking for a period start on.
+ * Models cannot count back from today, so the dates are written in, as the
+ * tools take them.
+ */
+function dateTable(today: string): string {
+	const began = (days: number) => addDays(today, 1 - days);
+	return [
+		`Today is ${longDate(today, true)} (${today}), and yesterday was ${addDays(today, -1)}.`,
+		`Counting today, the last week (7 days) began on ${began(7)}, the last two weeks (14 days) on ${began(14)}, the last month (30 days) on ${began(30)}, the last three months (90 days) on ${began(90)}, and the last year on ${addDays(monthsBefore(today, 12), 1)}.`,
+	].join(" ");
+}
+
 /** How long a conversation is in characters, tools included, to estimate its tokens. */
 function conversationLength(messages: readonly ChatMessage[], tools: readonly ToolDefinition[] | undefined): number {
 	let length = tools ? JSON.stringify(tools).length : 0;
@@ -920,8 +1195,9 @@ function conversationLength(messages: readonly ChatMessage[], tools: readonly To
 
 /**
  * Answers a question by letting the model read the journal through tools:
- * listing, reading and searching notes, and this date over the years. Stops
- * offering tools after a few rounds and asks for the answer.
+ * searching it, reading the notes it picks or a range of days, listing a
+ * period, and reading this date over the years. Stops offering tools after
+ * a few rounds and asks for the answer.
  *
  * The context is asked for whole, since how much the model will read is not
  * known up front, and every result is cut to the room the conversation has
@@ -933,58 +1209,93 @@ function conversationLength(messages: readonly ChatMessage[], tools: readonly To
  * answer.
  */
 export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRunResult> {
-	const { plugin, provider, model, signal } = options;
+	const { provider, model, signal } = options;
 	if (signal.aborted) throw aborted();
-	const release = plugin.findCorpus.retain();
-	try {
-		const journal = new JournalReader(plugin, options.today, options.sourcePath, signal);
-		const latest = journal.latest;
-		if (!latest) throw new ProviderError("failed", "There are no notes to read yet");
-		const fill = (text: string) => text.replace(/\{exampleLink\}/g, latest.link);
-		const system = [
-			fill(TOOLS_SYSTEM_PROMPT),
-			"",
-			// Also as the tools take dates, so ranges can be counted from it.
-			`Today is ${longDate(journal.today, true)} (${journal.today}). The journal holds ${plural(journal.notes.length, "note")}, from ${longDate(journal.notes[0].key, true)} to ${longDate(latest.key, true)}.`,
-		].join("\n");
-		const closing = `${QUESTION_FORMAT}\n\n${fill(TOOLS_REMINDER)}`;
-		const messages: ChatMessage[] = [
-			{ role: "system", content: system },
-			{ role: "user", content: `${options.question}\n\n${closing}` },
-		];
-		const { followUp } = options;
-		// The notes read for earlier answers are not kept, so a follow-up looks again.
-		if (followUp) messages.push(...conversationMessages(followUp.conversation, followUp.question, closing));
-		const question = followUp?.question ?? options.question;
+	// The whole context from the first round: changing it between rounds
+	// would make Ollama load the model again each time.
+	const limit = contextLimit(model.contextLength, options.maxContext);
+	const journal = new JournalReader(
+		options.journal,
+		options.today,
+		limit * CHARS_PER_TOKEN,
+		options.shortDate ?? englishShortDate,
+		signal,
+	);
+	const latest = journal.latest;
+	if (!latest) throw new ProviderError("failed", "There are no notes to read yet");
+	// Models cannot count back from today, so a date a preset's shape names is written in.
+	const twoWeeksAgo = longDate(addDays(journal.today, -14), true);
+	const fill = (text: string) =>
+		text.replace(/\{(exampleLink|twoWeeksAgo)\}/g, (_match, name: string) =>
+			name === "exampleLink" ? latest.link : twoWeeksAgo,
+		);
+	const system = [
+		fill(SYSTEM_PROMPT),
+		"",
+		dateTable(journal.today),
+		`The journal holds ${plural(journal.notes.length, "note")}, from ${longDate(journal.notes[0].key, true)} to ${longDate(latest.key, true)}.`,
+	].join("\n");
+	const messages: ChatMessage[] = [
+		{ role: "system", content: system },
+		{ role: "user", content: fill(`${options.question}\n\n${options.format}\n\n${TOOLS_REMINDER}`) },
+	];
+	const { followUp } = options;
+	if (followUp) {
+		// The notes read for earlier answers are not kept, so a follow-up is told where they were.
+		const days = journal.daysOf(followUp.sources);
+		const before = days.length
+			? `The answers above drew on my notes from ${listOf(days, 40)}. Those notes are no longer in front of you: read the ones this needs again with read_notes, or look further.\n\n`
+			: "";
+		messages.push(
+			...conversationMessages(followUp.conversation, followUp.question, fill(`${before}${QUESTION_FORMAT}\n\n${TOOLS_REMINDER}`)),
+		);
+	}
+	const question = followUp?.question ?? options.question;
+	const format = followUp ? QUESTION_FORMAT : options.format;
+	// After each round's results, where a model still attends to it: by the
+	// time the notes are in, the question and its shape are far above them.
+	const task = fill(
+		`\n\n---\n\nOnce you have read the notes it needs, answer my question: ${question}\n\n${format}\n\n${TOOLS_REMINDER}`,
+	);
 
-		// The whole context from the first round: changing it between rounds
-		// would make Ollama load the model again each time.
-		const limit = contextLimit(model.contextLength, options.maxContext);
-		/** Tokens the server counts per estimated token, raised whenever it counts more. */
-		let ratio = ESTIMATE_MARGIN;
-		/** The characters a tool result may take: what is left once the answer and the next call have room. */
-		const room = () => {
-			const used = estimateTokens(conversationLength(messages, TOOLS) + MESSAGE_OVERHEAD) * ratio;
-			return Math.floor(((limit - used - ANSWER_TOKENS - ROUND_RESERVE) / ratio) * CHARS_PER_TOKEN);
-		};
-		if (room() < MIN_RESULT_TOKENS * CHARS_PER_TOKEN) {
-			throw new ProviderError(
-				"failed",
-				"The model's context is too small to read the journal through tools. Raise Maximum context, or pick the notes it reads.",
-			);
-		}
+	/** Tokens the server counts per estimated token, raised whenever it counts more. */
+	let ratio = ESTIMATE_MARGIN;
+	/** The characters a tool result may take: what is left once the answer and the next call have room. */
+	const room = () => {
+		const used = estimateTokens(conversationLength(messages, TOOLS) + MESSAGE_OVERHEAD) * ratio;
+		return Math.floor(((limit - used - ANSWER_TOKENS - ROUND_RESERVE) / ratio) * CHARS_PER_TOKEN);
+	};
+	if (room() < MIN_RESULT_TOKENS * CHARS_PER_TOKEN) {
+		throw new ProviderError(
+			"failed",
+			"The model's context is too small to read the journal. Raise Maximum context in the Reflect window's settings.",
+		);
+	}
 
-		/** One request; its text is streamed to the card only when `live`. */
-		const send = async (tools: ToolDefinition[] | undefined, live: boolean) => {
-			let streamed = false;
-			const length = conversationLength(messages, tools);
+	/**
+	 * One request; its text is streamed to the card only when `live`. A
+	 * `doomed` one is stopped as soon as it is plainly an answer rather than
+	 * a call, since that answer would be dropped: a model that answers from
+	 * excerpts otherwise spends seconds writing what nobody reads.
+	 */
+	const send = async (tools: ToolDefinition[] | undefined, live: boolean, doomed = false) => {
+		let streamed = false;
+		let text = "";
+		const length = conversationLength(messages, tools);
+		const cut = new AbortController();
+		const stop = () => cut.abort();
+		signal.addEventListener("abort", stop, { once: true });
+		try {
 			const result: ChatResult = await provider.chat({
 				model: model.name,
 				messages,
 				numCtx: limit,
-				signal,
+				signal: cut.signal,
 				tools,
 				onText: (delta) => {
+					text += delta;
+					// Not a call written out as text, which starts with its brace.
+					if (doomed && text.length > DOOMED_LENGTH && !text.trimStart().startsWith("{")) cut.abort();
 					if (!live) return;
 					streamed = true;
 					options.onText(delta);
@@ -992,100 +1303,104 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 			});
 			if (result.promptTokens) ratio = Math.max(ratio, result.promptTokens / estimateTokens(length));
 			return { result, streamed };
-		};
-
-		const asked = new Set<string>();
-		const nudged = new Set<string>();
-		let looked = false;
-		let full = false;
-		/** What the model may be sent instead of an answer this round; while there is something, the answer is held back. */
-		const nudgeFor = () => {
-			if (!looked) return nudged.has(LOOK_FIRST) ? null : LOOK_FIRST;
-			return !journal.read.size && journal.glimpsed.size && !nudged.has(READ_FIRST) ? READ_FIRST : null;
-		};
-		/** Whether an answer is sent back with `nudge`: always before looking, and from excerpts when it leans on them. */
-		const sendsBack = (nudge: string, text: string) =>
-			nudge === LOOK_FIRST || (nudge === READ_FIRST && journal.leansOnGlimpses(text));
-		/** Runs one call of a round, unless it repeats an earlier one or no room is left for its result. */
-		const answerCall = async (call: ToolCall, index: number): Promise<ToolOutcome> => {
-			const signature = `${call.name}:${JSON.stringify(call.arguments)}`;
-			const left = room();
-			if (index >= MAX_CALLS_PER_ROUND) {
-				return { status: null, content: "Too many calls at once; this one was not run. Ask again if you still need it." };
-			}
-			if (asked.has(signature)) {
-				return { status: null, content: "This call was already answered above. Use that result, or try something else." };
-			}
-			if (left < MIN_RESULT_TOKENS * CHARS_PER_TOKEN) {
-				full = true;
-				return { status: null, content: "There is no room left to read more. Answer from the notes above." };
-			}
-			asked.add(signature);
-			looked = true;
-			return journal.run(call, left);
-		};
-		const finish = (text: string): ToolRunResult => {
-			const notes = journal.sources(text);
-			return {
-				text,
-				sources: notes.map(({ key, path, link }) => ({ key, path, link })),
-				range: notes.length ? { from: notes[0].key, to: notes[notes.length - 1].key } : null,
-			};
-		};
-
-		for (let round = 0; round < MAX_ROUNDS && !full; round++) {
-			const nudge = nudgeFor();
-			let sent: { result: ChatResult; streamed: boolean };
-			try {
-				sent = await send(TOOLS, nudge === null);
-			} catch (error) {
-				// A round that ends without a word or a call, as Gemma 4's sometimes
-				// do, leaves the answer to the request without tools below.
-				if (error instanceof ProviderError && error.kind === "failed") break;
-				throw error;
-			}
-			const { result, streamed } = sent;
-			const calls = result.toolCalls.length ? result.toolCalls : callsInText(result.text);
-			if (calls.length) {
-				if (streamed) options.onReset();
-				// Calls written out as text are passed back as calls, not as that text.
-				messages.push({ role: "assistant", content: result.toolCalls.length ? result.text : "", toolCalls: calls });
-				for (const [index, call] of calls.entries()) {
-					const outcome = await answerCall(call, index);
-					if (outcome.status) options.onStatus(outcome.status);
-					messages.push({ role: "tool", content: outcome.content, toolName: call.name });
-				}
-				if (options.onSources) {
-					const { sources, range } = finish("");
-					options.onSources(sources, range);
-				}
-				continue;
-			}
-			if (!hasText(result.text)) {
-				if (streamed) options.onReset();
-				break;
-			}
-			if (nudge === null || !sendsBack(nudge, result.text)) {
-				// Held back in case it was sent back: the card gets it whole.
-				if (!streamed) options.onText(result.text);
-				return finish(result.text);
-			}
-			// Neither streamed nor kept: the model never sees it again.
-			nudged.add(nudge);
-			messages.push({ role: "user", content: nudge });
+		} catch (error) {
+			if (signal.aborted || !cut.signal.aborted) throw error;
+			// Stopped here, not by the reader: what it wrote so far stands for the answer.
+			const result: ChatResult = { text, promptTokens: null, doneReason: null, streamed: true, toolCalls: [] };
+			return { result, streamed };
+		} finally {
+			signal.removeEventListener("abort", stop);
 		}
+	};
 
-		messages.push({
-			role: "user",
-			content: `${ANSWER_NOW} ${question}\n\n${QUESTION_FORMAT}\n\n${fill(REMINDER)}`,
-		});
-		const { result, streamed } = await send(undefined, true);
+	const asked = new Set<string>();
+	const nudged = new Set<string>();
+	let looked = false;
+	let full = false;
+	/** What the model may be sent instead of an answer this round; while there is something, the answer is held back. */
+	const nudgeFor = () => {
+		if (!looked) return nudged.has(LOOK_FIRST) ? null : LOOK_FIRST;
+		return !journal.read.size && journal.glimpsed.size && !nudged.has(READ_FIRST) ? READ_FIRST : null;
+	};
+	/** Whether an answer is sent back with `nudge`: always before looking, and from excerpts when it leans on them. */
+	const sendsBack = (nudge: string, text: string) =>
+		nudge === LOOK_FIRST || (nudge === READ_FIRST && journal.leansOnGlimpses(text));
+	/** Runs one call of a round, unless it repeats an earlier one or no room is left for its result. */
+	const answerCall = async (call: ToolCall, index: number): Promise<ToolOutcome> => {
+		const signature = `${call.name}:${JSON.stringify(call.arguments)}`;
+		const left = room();
+		if (index >= MAX_CALLS_PER_ROUND) {
+			return { status: null, content: "Too many calls at once; this one was not run. Ask again if you still need it." };
+		}
+		if (asked.has(signature)) {
+			return { status: null, content: "This call was already answered above. Use that result, or try something else." };
+		}
+		if (left < MIN_RESULT_TOKENS * CHARS_PER_TOKEN) {
+			full = true;
+			return { status: null, content: "There is no room left to read more. Answer from the notes above." };
+		}
+		asked.add(signature);
+		looked = true;
+		return journal.run(call, left);
+	};
+	const finish = (text: string): ToolRunResult => {
+		const notes = journal.sources(text);
+		return {
+			text,
+			sources: notes.map(({ key, path, link }) => ({ key, path, link })),
+			range: notes.length ? { from: notes[0].key, to: notes[notes.length - 1].key } : null,
+		};
+	};
+
+	for (let round = 0; round < MAX_ROUNDS && !full; round++) {
+		const nudge = nudgeFor();
+		let sent: { result: ChatResult; streamed: boolean };
+		try {
+			sent = await send(TOOLS, nudge === null, nudge !== null && sendsBack(nudge, ""));
+		} catch (error) {
+			// A round that ends without a word or a call, as Gemma 4's sometimes
+			// do, leaves the answer to the request without tools below.
+			if (error instanceof ProviderError && error.kind === "failed") break;
+			throw error;
+		}
+		const { result, streamed } = sent;
+		const calls = result.toolCalls.length ? result.toolCalls : callsInText(result.text);
+		if (calls.length) {
+			if (streamed) options.onReset();
+			// Calls written out as text are passed back as calls, not as that text.
+			messages.push({ role: "assistant", content: result.toolCalls.length ? result.text : "", toolCalls: calls });
+			for (const [index, call] of calls.entries()) {
+				const outcome = await answerCall(call, index);
+				if (outcome.status) options.onStatus(outcome.status);
+				// Not after excerpts and lists alone, which end by saying what to read: the answer is not due yet.
+				const due = index === calls.length - 1 && journal.read.size > 0;
+				messages.push({ role: "tool", content: `${outcome.content}${due ? task : ""}`, toolName: call.name });
+			}
+			if (options.onSources) {
+				const { sources, range } = finish("");
+				options.onSources(sources, range);
+			}
+			continue;
+		}
 		if (!hasText(result.text)) {
 			if (streamed) options.onReset();
-			throw new ProviderError("failed", "The model finished without writing an answer. Try again, or choose another model.");
+			break;
 		}
-		return finish(result.text);
-	} finally {
-		release();
+		if (nudge === null || !sendsBack(nudge, result.text)) {
+			// Held back in case it was sent back: the card gets it whole.
+			if (!streamed) options.onText(result.text);
+			return finish(result.text);
+		}
+		// Neither streamed nor kept: the model never sees it again.
+		nudged.add(nudge);
+		messages.push({ role: "user", content: nudge });
 	}
+
+	messages.push({ role: "user", content: fill(`${ANSWER_NOW} ${question}\n\n${format}\n\n${REMINDER}`) });
+	const { result, streamed } = await send(undefined, true);
+	if (!hasText(result.text)) {
+		if (streamed) options.onReset();
+		throw new ProviderError("failed", "The model finished without writing an answer. Try again, or choose another model.");
+	}
+	return finish(result.text);
 }

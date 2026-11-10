@@ -6,7 +6,7 @@
 
 export interface ModelInfo {
 	name: string;
-	/** The model can call tools, which custom prompts need to choose their own notes. */
+	/** The model can call tools, which every reflection needs to read the journal. */
 	tools: boolean;
 	/** The model reasons before answering unless told not to. */
 	thinking: boolean;
@@ -80,8 +80,33 @@ export interface ReflectionProvider {
 	chat(request: ChatRequest): Promise<ChatResult>;
 }
 
+/**
+ * The model the window suggests pulling. Reflection is tuned and judged on
+ * models of about this size and up; smaller ones find and read notes too
+ * unreliably to suggest.
+ */
+export const SUGGESTED_MODEL = "gemma4:26b";
+
+/**
+ * The model reflections use while none is chosen: the suggested one when it
+ * is installed, else the first that can use tools, else the first, which a
+ * run then says cannot read the journal.
+ */
+export function defaultModel(models: readonly ModelInfo[]): ModelInfo | null {
+	return (
+		models.find((model) => model.tools && model.name === SUGGESTED_MODEL) ??
+		models.find((model) => model.tools) ??
+		models[0] ??
+		null
+	);
+}
+
 /** What to tell the reader when the server answers but has nothing to run. */
-export const NO_MODELS_MESSAGE = "Ollama answers, but no model is installed yet (try: ollama pull gemma4:e4b)";
+export const NO_MODELS_MESSAGE = `Ollama answers, but no model is installed yet (try: ollama pull ${SUGGESTED_MODEL})`;
+
+/** What to tell the reader when the model cannot call tools, which is how a reflection reads the journal. */
+export const NO_TOOLS_MESSAGE =
+	"This model cannot use tools, which a reflection needs to read your journal. Choose another model in the Reflect window's settings.";
 
 /** What to tell the reader when a request to the model server fails. */
 export function describeProviderError(error: unknown): string {

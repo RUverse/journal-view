@@ -401,12 +401,19 @@ npm run sample-journal
 That replaces the notes it wrote last time, as listed in `.sample-journal.json`,
 except any you have edited since; it never writes over a note it did not create.
 
-To run the reflection presets against local Ollama models and record the
-results under `.reflection-spike/` (hidden from Obsidian):
+To ask the journal the questions it plants answers for, and the reflection
+presets, through local Ollama models, and record every tool call and answer
+under `.reflection-spike/` (hidden from Obsidian):
 
 ```bash
-node scripts/reflection-spike.mjs --models llama3.1:8b,qwen3:8b,gemma3:4b
+node scripts/reflection-spike.mjs --models gemma4:26b
+node scripts/reflection-spike.mjs --ask "What did I cook in August?"
+node scripts/reflection-spike.mjs --call search_journal '{"query": "running"}'
 ```
+
+It runs the plugin's own reflection code (`src/reflection/tools.ts`), with
+this journal in place of the vault's. `--call` runs one tool without a model,
+to see what a model would be shown.
 
 ## Resetting
 

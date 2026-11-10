@@ -465,7 +465,7 @@ export class JournalViewSettingTab extends PluginSettingTab {
 					{
 						name: "Reflections",
 						desc:
-							"A Reflect button under today asks a model on your computer to reflect on your notes, " +
+							"A Reflect button in today's header asks a model on your computer about your journal, " +
 							"and each reflection is saved as a note and shown on its day. The button is desktop " +
 							"only; its window holds the server, model and presets.",
 						control: { type: "toggle", key: "reflectionsEnabled" },
