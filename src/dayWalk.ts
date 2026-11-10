@@ -51,23 +51,23 @@ const BEFORE_ALL = "";
 const AFTER_ALL = "\uffff";
 
 /**
- * Indexed days available for navigation: matching notes, plus file-only days
- * when both empty days and file history are enabled. A day whose note the
- * filters leave out stays out whatever files it has, since showing the day
- * would show the note.
+ * Indexed days available for navigation: matching notes, plus days without
+ * a note that hold something else the journal shows - files, while both
+ * empty days and file history are enabled, and reflections. A day whose note
+ * the filters leave out stays out whatever else it holds, since showing the
+ * day would show the note.
  */
 export class ShownDays implements DaySequence {
 	constructor(
 		private notes: DaySequence,
 		private matchingNotes: DaySequence,
-		/** Days with files, or null while those do not count. */
-		private files: () => DaySequence | null,
+		/** What else puts a day without a note in the journal, as it currently counts. */
+		private others: () => readonly DaySequence[],
 	) {}
 
 	has(key: string): boolean {
 		if (this.matchingNotes.has(key)) return true;
-		const files = this.files();
-		return !!files && files.has(key) && !this.notes.has(key);
+		return !this.notes.has(key) && this.others().some((days) => days.has(key));
 	}
 
 	next(key: string): string | null {
@@ -84,17 +84,19 @@ export class ShownDays implements DaySequence {
 		return first !== null && last !== null ? { first, last } : null;
 	}
 
-	/** The nearest shown day past `key`: a matching note, or files on a day without one. */
+	/** The nearest shown day past `key`: a matching note, or another kind of day without one. */
 	private step(key: string, direction: -1 | 1): string | null {
 		const along = (days: DaySequence, from: string) => (direction > 0 ? days.next(from) : days.prev(from));
-		const noted = along(this.matchingNotes, key);
-		const files = this.files();
-		if (!files) return noted;
-		const reached = (day: string) => noted !== null && (direction > 0 ? day >= noted : day <= noted);
-		for (let day = along(files, key); day !== null && !reached(day); day = along(files, day)) {
-			if (!this.notes.has(day)) return day;
+		let nearest = along(this.matchingNotes, key);
+		const nearer = (day: string) => nearest === null || (direction > 0 ? day < nearest : day > nearest);
+		for (const days of this.others()) {
+			for (let day = along(days, key); day !== null && nearer(day); day = along(days, day)) {
+				if (this.notes.has(day)) continue;
+				nearest = day;
+				break;
+			}
 		}
-		return noted;
+		return nearest;
 	}
 }
 

@@ -20,6 +20,8 @@ export interface AnchorHost {
 	atTimelineStart(): boolean;
 	/** Declares a scroll position the anchor wrote itself. */
 	onAnchorScroll(): void;
+	/** A reflection being written that is at least partly in view, and the day it is on. */
+	watchedReflection(): { section: DaySection; el: HTMLElement } | null;
 }
 
 /**
@@ -37,8 +39,14 @@ export interface AnchorHost {
  * lost, which the reader feels as a stutter. Resizing the spacer moves the
  * content back under the reader without touching the scroll position at all;
  * only what the spacer cannot absorb falls through to scrollTop.
+ *
+ * A reflection being written is the exception. Pinned like any other change
+ * above the day below it, it would grow upwards: the reader watching it would
+ * see its text climb and its Stop button slide away from the pointer. While
+ * one is in view its own top is pinned instead, so it grows downwards.
  */
 export class ScrollAnchor {
+	/** What is held in place: a day's card (`el` is the day), or a reflection being written. */
 	private pinned: { el: HTMLElement; section: DaySection; top: number } | null = null;
 	/** Current height (px) of the padding above the first day; null = untouched CSS. */
 	private spacerPx: number | null = null;
@@ -71,10 +79,20 @@ export class ScrollAnchor {
 			this.pinned = null;
 			return;
 		}
+		const watched = this.host.watchedReflection();
+		if (watched) {
+			this.pinned = { ...watched, top: this.topOf(watched) };
+			return;
+		}
 		const section = this.sectionNear(scrollEl.scrollTop);
 		// Date headings can move between days as notes appear or disappear. Pin
 		// the card below them so those changes count as layout drift too.
 		this.pinned = section ? { el: section.el, section, top: section.cardTop } : null;
+	}
+
+	/** Where a pinned element's top is: the day's card for a day, else the element's own. */
+	private topOf(pinned: { el: HTMLElement; section: DaySection }): number {
+		return pinned.el === pinned.section.el ? pinned.section.cardTop : pinned.section.el.offsetTop + pinned.el.offsetTop;
 	}
 
 	/** The day the anchor should pin for a viewport whose top sits at `position`. */
@@ -110,16 +128,20 @@ export class ScrollAnchor {
 			return;
 		}
 
-		const top = this.pinned.section.cardTop;
+		const top = this.topOf(this.pinned);
 		const delta = top - this.pinned.top;
-		if (delta === 0) return;
-		const absorbed = this.absorbWithSpacer(delta);
-		this.pinned.top = top - absorbed;
-		const rest = delta - absorbed;
-		if (rest !== 0) {
-			scrollEl.scrollTop += rest;
-			this.host.onAnchorScroll();
+		if (delta !== 0) {
+			const absorbed = this.absorbWithSpacer(delta);
+			this.pinned.top = top - absorbed;
+			const rest = delta - absorbed;
+			if (rest !== 0) {
+				scrollEl.scrollTop += rest;
+				this.host.onAnchorScroll();
+			}
 		}
+		// A reflection that has just started, or come into view, grows downwards from here on.
+		const watched = this.host.watchedReflection();
+		if (watched && watched.el !== this.pinned.el) this.pinned = { ...watched, top: this.topOf(watched) };
 	}
 
 	/**

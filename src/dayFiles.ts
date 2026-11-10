@@ -228,6 +228,8 @@ export class DayFileIndex implements DaySequence {
 		const config = this.daily.config();
 		const excluded = settings.dayFilesExcluded.split(",").map(asFolder);
 		excluded.push(...this.templateFolders().map(asFolder));
+		// Reflections show as cards of their own, under the day they were made.
+		excluded.push(asFolder(settings.reflectionFolder));
 		return {
 			date: settings.dayFilesDate,
 			property: settings.dayFilesProperty.trim().toLocaleLowerCase(),

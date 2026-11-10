@@ -7,6 +7,7 @@ How Journal View works in detail. For an overview, see the [README](../README.md
 - [Several notes a day](#several-notes-a-day)
 - [File modification history](#file-modification-history)
 - [Filters](#filters)
+- [Reflections](#reflections)
 - [Statistics](#statistics)
 
 ## Navigation
@@ -51,6 +52,7 @@ Some options are only available in the customization menu, opened from the journ
 | Rich editor | On | Uses Obsidian's Markdown editor; turn it off to use the plain-text fallback |
 | Autosave delay | 2000 ms | Sets how long Journal View waits after typing before saving |
 | Days kept loaded | 60 | Sets the target number of days kept in the timeline; dropped days reload when you scroll back to them |
+| Reflections | On | Shows the Reflect button in today's header on desktop, the **Create reflection** command, and the reflections on each day; see [Reflections](#reflections) |
 
 ## Several notes a day
 
@@ -121,6 +123,137 @@ all includes. On a day with several notes, the day appears when any of them matc
 that do not match are hidden within it. The funnel uses the accent color whenever a tag or property filter is active; the
 note-only toggle does not highlight it. Filtered dates are disabled in **Go to date**, **Random entry** picks
 only from the notes currently included, and **Find in journal** searches only those notes.
+
+## Reflections
+
+On desktop, a model running on your own computer can read your journal and write back what it
+notices: what you learned over the last two weeks, what this date looked like in past years, or the
+answer to a question of your own. Each reflection is saved as a note and shown on the day it was
+made, in a bordered box that sets it apart from what you wrote.
+
+[How Reflection works](reflection-how-it-works.md) shows the parts in a picture: the model, its
+tools, and the optional search by meaning.
+
+Reflections run through [Ollama](https://ollama.com). Install it, start it, and pull a model that
+can use tools, which is how it reads your journal: `gemma4:26b` suits 32 GB of memory or more.
+Smaller models find and read notes less reliably. Until Ollama answers with such a model, the
+Reflect window shows these steps.
+
+### Asking
+
+Hover today's note and select the Reflect button, a mirror in the day's header to the left of **Open
+note in a tab** (or of **Create note**, before today has a note), or run **Journal View: Create
+reflection**. The Reflect window opens:
+
+- Type a question and press Enter, or select **Reflect**. Shift+Enter starts a new line. What you
+  typed is kept while Obsidian runs, so closing the window by accident loses nothing.
+- Say in the question which notes it is about: a time (`the last two weeks`, `in August`, `on this
+  date in earlier years`), a person, or a subject. There is nothing else to choose: the model finds
+  the notes itself.
+- The model reflections use is named at the top right, next to the settings button; select it to
+  change it in the settings. A red warning icon before it means Ollama is not answering, or the
+  model is not installed or cannot use tools: hover it for the reason, and the window shows what to
+  do.
+- Select a preset to run it at once; each shows the question it asks. The bookmark button saves the
+  question you typed as a new preset.
+
+The model looks through your journal in whichever way the question needs, and the reflection says
+what it is doing while it does:
+
+| It | When |
+| --- | --- |
+| Searches for words | The question is about a person, a place or a subject. A search finds a word in any of its forms, ranks the notes that match, and shows the model the sentences around each match. Several words find the notes about all of them, and the model can try other words for the same thing. When the mentions fall within a stretch of days short enough to read, the model is given every note of that stretch instead: what happened is as often in the days between, in notes that never name it |
+| Reads chosen notes | It opens the notes a search or a list showed that matter, in full |
+| Reads a range of days | The question is about a period, such as the last two weeks |
+| Lists a period | It needs to see what a stretch of days holds before reading it |
+| Reads a date over the years | The question is about this date, or another, in every year |
+
+A reflection reads only the notes the journal's [filters](#filters) let through, so a rule such as
+excluding `#private` keeps those notes from the model. When the notes of a long range do not fit the
+model's context, whole notes are left out evenly across the range, and the model is told which, so
+it can read them by themselves.
+
+### Search by meaning
+
+A search by words finds a note only when it uses one of the words asked for, in some form. **Search
+by meaning**, in the Reflect window's settings, lets a reflection also find notes that are about
+what you asked in other words: a search for exercise finds the days you went running. It is off
+until you turn it on, because it needs two things:
+
+- **A second, small model.** An embedding model reads each note and turns it into numbers that lie
+  near those of other texts about the same thing. Pull one in a terminal, such as
+  `ollama pull embeddinggemma-2:270m` (about 400 MB, and it reads over a hundred languages). It runs
+  on the same Ollama server as everything else, so your notes still go nowhere but there.
+- **An index file.** Those numbers are kept in `reflection-index.bin` in the plugin's folder, about
+  a kilobyte a note. It is built the first time a reflection searches, which the reflection says
+  while it waits (`Indexing your notes… 120 of 800`), or with **Build now** in the settings. After
+  that only new and changed notes are read. It holds only notes your [filters](#filters) let
+  through. Turning search by meaning off, or changing its model, deletes the file.
+
+What it finds is offered to the model as excerpts marked *in other words*, for it to judge and read
+on from: an embedding model always finds something nearest, whether or not any note is about the
+subject, so these are candidates, not answers. Names and exact words are still found by the words
+themselves. When the embedding model is missing or Ollama does not answer for it, reflections go on
+searching by words, and a notice says so once.
+
+### Reading a reflection
+
+The reflection appears under today's card (above it when the journal runs newest to oldest) with a
+line saying what it reads, or what the model is looking up, then the answer as it is written. **Stop** keeps what has been written so far.
+If something goes wrong, the box says what happened and offers **Try again**; nothing is saved
+unless some text arrived.
+
+- Select a date the reflection cites to move the journal to that day. Ctrl/Cmd-select it to open
+  the note in a new tab.
+- The line at the bottom, such as `From 9 notes · 5–19 Oct · gemma4:26b`, opens into the dates the
+  reflection read; select one to move the journal there.
+- **Ask a follow-up…** at the bottom continues the conversation. The question is added to the
+  reflection's note as a quote, with the answer below it. The model is told which notes the
+  reflection drew on, reads the ones the follow-up needs again, and can look further.
+- The buttons at the top right work as a note's do. **Open note in a tab** shows while you hover the
+  reflection; **Regenerate** and **Delete** show only while you hover its header.
+- **Regenerate** opens the Reflect window on the reflection's question, without the presets. Change
+  the question if you like, and select the model's name at the top right to pick the one that
+  writes this answer; that choice holds for this answer alone, and the model in the settings stays as it is. **Regenerate** there asks as of the
+  day the reflection was made, and replaces the answer once the new one is complete, along with the
+  question and model its note records. **Stop** keeps the old answer. The window says when the
+  reflection has follow-ups, since they are cleared with the answer they followed.
+- **Delete** moves the reflection's note to the trash, as deleting a note does.
+
+A reflection keeps being written while you scroll away, and its box picks up where it is when you
+come back.
+
+### Reflection notes
+
+Reflections are saved in the **Reflections** folder, named after their day and question, such as
+`2026-10-19 What I learned.md`. Their properties record how they were made: `journal-view:
+reflection`, when they were `created` (which sets their day), the `title`, `prompt` and `preset`,
+the `model`, the `sources` it read, as links, the days those span (`from`, `to`), and the questions
+in their `follow-ups`, which tell them from quotes in the answers. They
+are ordinary notes: you can open, link, search, and edit them, and the box shows the note's current
+text.
+
+A day with reflections stays in the journal even when it has no note and **Only show days that have
+a note** is on. Reflection notes are never listed in [file history](#file-modification-history), and
+**Find in journal** does not search them.
+
+### Reflection settings
+
+Select the gear in the Reflect window for its settings. **Settings → Journal View** keeps only the
+**Reflections** toggle, which turns the whole feature off.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Server | `http://127.0.0.1:11434` | Where Ollama answers. The notes a reflection reads are sent there, and nowhere else |
+| Model | `gemma4:26b` when it is installed, else the first that can use tools | The model reflections use, named at the top of the Reflect window. Models that cannot use tools are listed, but cannot be chosen |
+| Folder | `Reflections` | Where reflection notes are saved. It cannot be the daily-note folder |
+| Maximum context | 32,768 tokens | The most a reflection asks the model to hold. More lets it read more notes for one answer, and uses more memory |
+| Search by meaning | Off | Lets a reflection's search also find notes that are about what was asked without using its words; see [Search by meaning](#search-by-meaning) |
+| Embedding model | `embeddinggemma-2:270m` when it is installed, else the first | Shown while search by meaning is on: the model that turns notes into numbers. Changing it builds the index again |
+| Index | Not built | Shown while search by meaning is on: how many notes the index holds, its size and model, and whether any are new or changed. **Build now** or **Update now** reads them without waiting for a reflection, and the arrow builds it again from nothing |
+| Presets | Six built in | Reorder, edit, delete, or add presets: each is a name, a question, and optionally the shape of its answer. **Restore built-in presets** brings back the built-in ones you edited or deleted, and keeps your own |
+
+On a computer without a capable GPU, a 90-day preset can take minutes.
 
 ## Statistics
 

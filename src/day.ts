@@ -1,4 +1,4 @@
-import { App, Notice, TFile, normalizePath, setIcon, setTooltip } from "obsidian";
+import { App, Notice, Platform, TFile, normalizePath, setIcon, setTooltip } from "obsidian";
 import type { HoverParent, WorkspaceLeaf } from "obsidian";
 import type JournalViewPlugin from "./main";
 import { DayFilesHost, DayFilesList } from "./dayFilesList";
@@ -7,6 +7,8 @@ import { createMoment } from "./moment";
 import type { Moment } from "./moment";
 import { INVALID_TITLE_CHARACTERS, renderNoteLabel } from "./noteLabel";
 import type { NoteLabel } from "./noteLabel";
+import { ReflectionCard, reflectionIdentity } from "./reflection/card";
+import type { ReflectionCardHost, ReflectionCardSource } from "./reflection/card";
 
 /** The bits of the journal view a day needs to talk to. Its page previews hang off the view. */
 export interface DayHost extends HoverParent {
@@ -34,6 +36,8 @@ export interface DayHost extends HoverParent {
 	onDayFocusSettled(day: DaySection): void;
 	/** Opens the journal-wide find UI from an embedded editor command. */
 	showFind(): void;
+	/** Moves the journal to a note a reflection cites. */
+	revealNote(path: string): void;
 }
 
 /**
@@ -46,7 +50,7 @@ export interface DayHost extends HoverParent {
  * file and stands in for the note the reader can start writing. Below its
  * notes, a day can list the other files from that date.
  */
-export class DaySection implements EntryHost, DayFilesHost {
+export class DaySection implements EntryHost, DayFilesHost, ReflectionCardHost {
 	readonly el: HTMLElement;
 	readonly key: string;
 	/** The notes shown under this date, in order. */
@@ -61,10 +65,19 @@ export class DaySection implements EntryHost, DayFilesHost {
 	private noteLabelEl: HTMLElement;
 	private actionsEl: HTMLElement;
 	private entriesEl: HTMLElement;
+	/** Today's button that opens the Reflect window, in its header, on desktop. */
+	private reflectEl: HTMLElement | null = null;
 	/** Today's button that adds another note, while the day can hold several. */
 	private addNoteEl: HTMLElement | null = null;
 	/** The files from this date, while the journal lists them. */
 	private files: DayFilesList | null;
+	/**
+	 * The reflections made on this date. They sit after the card when the
+	 * journal runs oldest first and before it when it runs newest first, so
+	 * they keep to the journal's order.
+	 */
+	private reflectionsEl: HTMLElement;
+	private reflectionCards: ReflectionCard[] = [];
 	private destroyed = false;
 	/** Set while entries are reconciled, which refreshes the day once at the end. */
 	private syncing = false;
@@ -111,6 +124,18 @@ export class DaySection implements EntryHost, DayFilesHost {
 			this.titleEl.createSpan({ cls: "journal-day-badge", text: relative });
 		}
 		this.actionsEl = this.headerEl.createDiv({ cls: "journal-day-actions" });
+		if (this.isToday && Platform.isDesktop) {
+			this.reflectEl = createEl("button", {
+				cls: "clickable-icon journal-day-action",
+				attr: { "aria-haspopup": "dialog" },
+			});
+			setIcon(this.reflectEl, "mirror-rectangular");
+			setTooltip(this.reflectEl, "Reflect on your notes");
+			this.reflectEl.addEventListener("click", (event) => {
+				event.stopPropagation();
+				this.host.plugin.openReflectModal();
+			});
+		}
 		this.entriesEl = this.cardEl.createDiv({ cls: "journal-day-entries" });
 		if (this.isToday && this.host.plugin.settings.multipleNotesPerDay) {
 			this.addNoteEl = this.cardEl.createDiv({ cls: "journal-day-add" });
@@ -122,6 +147,9 @@ export class DaySection implements EntryHost, DayFilesHost {
 				void this.addNote();
 			});
 		}
+		this.reflectionsEl = createDiv({ cls: "journal-reflections" });
+		this.reflectionsEl.hidden = true;
+		this.cardEl.insertAdjacentElement(this.newestFirst ? "beforebegin" : "afterend", this.reflectionsEl);
 		this.files = this.host.plugin.settings.showDayFiles ? new DayFilesList(this, this.el) : null;
 
 		this.el.addEventListener("focusout", () => {
@@ -139,6 +167,7 @@ export class DaySection implements EntryHost, DayFilesHost {
 
 		this.syncEntries();
 		this.refreshFiles();
+		this.refreshReflections();
 	}
 
 	get app(): App {
@@ -341,6 +370,8 @@ export class DaySection implements EntryHost, DayFilesHost {
 		this.actionsEl.empty();
 		setTooltip(this.titleEl, lead.path, { placement: "right" });
 		lead.renderActions(this.actionsEl);
+		// Today's Reflect button goes left of the note's last one: Open note in a tab, or Create note.
+		if (this.reflectEl) this.actionsEl.insertBefore(this.reflectEl, this.actionsEl.lastElementChild);
 		const label = this.labelFor(lead, false);
 		renderNoteLabel(this.noteLabelEl, label ?? { text: null, title: null }, this.retitler(lead));
 		this.noteLabelEl.hidden = label === null;
@@ -458,6 +489,55 @@ export class DaySection implements EntryHost, DayFilesHost {
 		for (const entry of this.entries) entry.refreshMetadata();
 	}
 
+	private get newestFirst(): boolean {
+		return this.host.plugin.settings.daySortDirection === "descending";
+	}
+
+	/**
+	 * Brings the day's reflection cards in line with its reflection notes and
+	 * the reflections being written, keeping every card that still applies,
+	 * and shows today's Reflect button while Reflections is on.
+	 */
+	refreshReflections(): void {
+		const { plugin } = this.host;
+		const sources: ReflectionCardSource[] = plugin.settings.reflectionsEnabled
+			? [
+					...plugin.reflections
+						.reflectionsFor(this.key)
+						.map((stored) => ({ stored, run: plugin.reflectionRuns.runFor(stored.file) })),
+					...plugin.reflectionRuns.runsFor(this.key).map((run) => ({ run })),
+				]
+			: [];
+		if (this.newestFirst) sources.reverse();
+		const existing = new Map(this.reflectionCards.map((card) => [card.identity, card]));
+		this.reflectionCards = sources.map((source) => {
+			const card = existing.get(reflectionIdentity(source));
+			if (!card) return new ReflectionCard(this, source);
+			existing.delete(card.identity);
+			card.update(source);
+			return card;
+		});
+		for (const card of existing.values()) card.destroy();
+
+		if (this.reflectEl) this.reflectEl.hidden = !plugin.settings.reflectionsEnabled;
+
+		const elements = this.reflectionCards.map((card) => card.el);
+		const current = Array.from(this.reflectionsEl.children);
+		if (current.length !== elements.length || current.some((el, index) => el !== elements[index])) {
+			this.reflectionsEl.append(...elements);
+		}
+		this.reflectionsEl.hidden = elements.length === 0;
+	}
+
+	revealNote(path: string): void {
+		this.host.revealNote(path);
+	}
+
+	/** A reflection on this day being written, if one is. */
+	writingReflection(): HTMLElement | null {
+		return this.reflectionCards.find((card) => card.writing)?.el ?? null;
+	}
+
 	/** Lists the files from this date again, after they changed. */
 	refreshFiles(): void {
 		this.files?.update(this.host.plugin.dayFiles.filesFor(this.key));
@@ -535,6 +615,7 @@ export class DaySection implements EntryHost, DayFilesHost {
 	destroy(): void {
 		this.destroyed = true;
 		for (const entry of this.entries) entry.destroy();
+		for (const card of this.reflectionCards) card.destroy();
 		this.el.remove();
 	}
 

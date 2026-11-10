@@ -97,6 +97,19 @@ word counts and, through `src/vocabulary.ts`, each note's distinct words.
 `src/statisticsView.ts` draws the year mosaic and hosts `src/newWords.ts`, the
 journal-wide mosaic of words used for the first time each month.
 
+`src/reflection/` is Reflection: a local model (Ollama, `ollama.ts`) is asked a question or a preset
+(`presets.ts`), finds the notes it is about through tools (`tools.ts`: ranked search in `search.ts`,
+optionally by meaning too in `semantic.ts`, reading chosen notes or a range of days), and writes
+back a reflection note. `tools.ts`, `search.ts`, `semantic.ts`, `context.ts` and `presets.ts` touch
+nothing of Obsidian's, so `scripts/reflection-spike.mjs` runs them as they are against local models,
+and `scripts/reflection-search-eval.mjs` measures the search alone; `journal.ts` hands them the
+vault's notes, and `semanticStore.ts` keeps the index file search by meaning reads. `store.ts` indexes
+reflection notes by day, `runner.ts` holds the ones being written so they outlive their day's cards,
+`card.ts` is the card a day shows for each, and `modal.ts` is the Reflect window with its settings,
+opened by the button `day.ts` puts in today's header. `conversation.ts` reads a reflection's
+follow-ups back from its note, for the next follow-up. `docs/plans/reflection.md` is the plan and
+the spikes' results.
+
 `src/datePicker.ts` is the toolbar's calendar: a scrolling column of months that
 hangs off the view rather than being part of it, and moves the journal by date.
 
