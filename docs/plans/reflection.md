@@ -697,17 +697,19 @@ Asked for on 2026-11-10: Regenerate asked the very same thing again, which is ra
 unhappy with an answer wants. It now opens the Reflect window on the reflection, with no presets:
 
 ```text
-Regenerate                                             ✕
+Regenerate                                gemma4:26b   ✕
 ┌──────────────────────────────────────────────────────┐
 │ What happened with the reorg at work?                │
 └──────────────────────────────────────────────────────┘
-[gemma4:26b ▾]  The new answer replaces this   [Regenerate]
-                one, and its follow-up.
+The new answer replaces this one,           [Regenerate]
+and its follow-up.
 ```
 
 - The question is the reflection's own, to change or leave; Enter asks.
-- The model picker lists the installed models, those without tools disabled, and starts on the
-  model reflections use. Picking another holds for this answer alone: the setting is not changed.
+- The model is named at the top right, as quietly as on the first page, but here selecting it
+  lists the installed models, those without tools disabled. It starts on the model reflections
+  use. It first stood beside the button as an ordinary picker, which was louder than the first
+  page's and was changed the same day. Picking another holds for this answer alone: the setting is not changed.
   A problem with the model in the settings does not stop a regenerate with another one.
 - The line beside it says the answer is replaced, and counts the follow-ups that go with it. It
   takes the place of the confirmation Regenerate used to ask for when there were follow-ups.

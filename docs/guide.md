@@ -187,8 +187,8 @@ unless some text arrived.
 - The buttons at the top right work as a note's do. **Open note in a tab** shows while you hover the
   reflection; **Regenerate** and **Delete** show only while you hover its header.
 - **Regenerate** opens the Reflect window on the reflection's question, without the presets. Change
-  the question if you like, and pick the model that writes this answer; that choice holds for this
-  answer alone, and the model in the settings stays as it is. **Regenerate** there asks as of the
+  the question if you like, and select the model's name at the top right to pick the one that
+  writes this answer; that choice holds for this answer alone, and the model in the settings stays as it is. **Regenerate** there asks as of the
   day the reflection was made, and replaces the answer once the new one is complete, along with the
   question and model its note records. **Stop** keeps the old answer. The window says when the
   reflection has follow-ups, since they are cleared with the answer they followed.

@@ -124,11 +124,6 @@ export class ReflectionModal extends Modal {
 				this.syncModelBadge();
 				break;
 			case "regenerate":
-				// Its model is chosen beside the question, for this answer alone.
-				this.titleEl.createDiv({ cls: "journal-reflect-title" }).createSpan({
-					cls: "journal-reflect-title-text",
-					text: "Regenerate",
-				});
 				this.renderRegenerate(this.page.reflection);
 				break;
 			case "settings":
@@ -418,6 +413,14 @@ export class ReflectionModal extends Modal {
 	 */
 	private renderRegenerate(reflection: StoredReflection): void {
 		const { contentEl } = this;
+		// The model sits where the first page names it, as quietly, but can be picked here.
+		const title = this.titleEl.createDiv({ cls: "journal-reflect-title" });
+		title.createSpan({ cls: "journal-reflect-title-text", text: "Regenerate" });
+		const select = title.createEl("select", {
+			cls: "journal-reflect-model-select",
+			attr: { "aria-label": "Model for this answer" },
+		});
+		setTooltip(select, "The model that writes this answer");
 		const setup = contentEl.createDiv({ cls: "journal-reflect-setup" });
 
 		const composer = contentEl.createDiv({ cls: "journal-reflect-composer" });
@@ -428,8 +431,6 @@ export class ReflectionModal extends Modal {
 		input.value = reflection.prompt;
 
 		const row = composer.createDiv({ cls: "journal-reflect-composer-row" });
-		const select = row.createEl("select", { cls: "dropdown", attr: { "aria-label": "Model for this answer" } });
-		setTooltip(select, "The model that writes this answer");
 		const note = row.createDiv({ cls: "journal-reflect-hint", text: "The new answer replaces this one." });
 		const regenerate = row.createEl("button", { cls: "mod-cta", text: "Regenerate", attr: { type: "button" } });
 

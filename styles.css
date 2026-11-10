@@ -2369,6 +2369,37 @@ button.journal-reflect-model:hover {
 	color: var(--text-muted);
 }
 
+/* The same place and the same quiet, where the model can be picked: for one
+   answer, when a reflection is asked again. */
+select.journal-reflect-model-select {
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 60%;
+	height: auto;
+	padding: var(--size-2-1) var(--size-2-3);
+	border: none;
+	border-radius: var(--radius-s);
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-normal);
+	text-align-last: right;
+	appearance: none;
+	cursor: var(--cursor);
+}
+
+select.journal-reflect-model-select:hover,
+select.journal-reflect-model-select:focus-visible {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+select.journal-reflect-model-select:disabled {
+	background-color: transparent;
+	cursor: default;
+}
+
 .journal-reflect-model-name {
 	min-width: 0;
 	overflow: hidden;
