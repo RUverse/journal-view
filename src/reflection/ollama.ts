@@ -1,7 +1,15 @@
 import { requestUrl } from "obsidian";
 import type { RequestUrlParam, RequestUrlResponse } from "obsidian";
 import { NO_TOOLS_MESSAGE, ProviderError } from "./provider";
-import type { ChatMessage, ChatRequest, ChatResult, ModelInfo, ReflectionProvider, ToolCall } from "./provider";
+import type {
+	ChatMessage,
+	ChatRequest,
+	ChatResult,
+	InstalledModels,
+	ModelInfo,
+	ReflectionProvider,
+	ToolCall,
+} from "./provider";
 
 /**
  * The most an answer may run to, in tokens: far more than any reflection
@@ -16,7 +24,12 @@ interface Described {
 	info: ModelInfo;
 	/** False for models that only embed text, which cannot write an answer. */
 	completion: boolean;
+	/** True for models that turn text into vectors. */
+	embedding: boolean;
 }
+
+/** Texts sent for embedding in one request: enough to be quick, few enough that stopping is prompt. */
+const EMBED_BATCH = 16;
 
 /** The parts of a chat answer the stream and the fallback both read. */
 interface Answer {
@@ -110,6 +123,7 @@ function describe(name: string, capabilities: string[] | null, contextLength: nu
 			contextLength,
 		},
 		completion: listed.includes("completion"),
+		embedding: listed.includes("embedding"),
 	};
 }
 
@@ -218,6 +232,10 @@ export class OllamaProvider implements ReflectionProvider {
 	}
 
 	async listModels(): Promise<ModelInfo[]> {
+		return (await this.listInstalled()).chat;
+	}
+
+	async listInstalled(): Promise<InstalledModels> {
 		const response = await this.call("/api/tags");
 		const body = parseJson(textOf(response));
 		if (response.status >= 400 || !isRecord(body) || !Array.isArray(body.models)) {
@@ -237,7 +255,34 @@ export class OllamaProvider implements ReflectionProvider {
 				}
 			}),
 		);
-		return described.flatMap((model) => (model?.completion ? [model.info] : []));
+		return {
+			chat: described.flatMap((model) => (model?.completion ? [model.info] : [])),
+			embedding: described.flatMap((model) => (model?.embedding && !model.completion ? [model.info.name] : [])),
+		};
+	}
+
+	async embed(model: string, texts: readonly string[], signal: AbortSignal): Promise<number[][]> {
+		const vectors: number[][] = [];
+		for (let start = 0; start < texts.length; start += EMBED_BATCH) {
+			if (signal.aborted) throw aborted();
+			const input = texts.slice(start, start + EMBED_BATCH);
+			// Text past the model's context is cut off rather than refused, which is Ollama's default, said here.
+			const response = await untilAborted(this.call("/api/embed", { model, input, truncate: true }), signal);
+			const body = parseJson(textOf(response));
+			const error = errorOf(body);
+			if (response.status === 404 || (error !== null && /not found/i.test(error))) {
+				throw new ProviderError("model-missing", error ?? `Ollama has no model named ${model}`);
+			}
+			if (response.status >= 400 || error !== null || !isRecord(body) || !Array.isArray(body.embeddings)) {
+				throw new ProviderError("failed", error ?? `Ollama could not embed text with ${model}`);
+			}
+			const batch = body.embeddings.filter(
+				(vector): vector is number[] => Array.isArray(vector) && vector.every((value) => typeof value === "number"),
+			);
+			if (batch.length !== input.length) throw new ProviderError("failed", `${model} returned ${batch.length} vectors for ${input.length} texts`);
+			vectors.push(...batch);
+		}
+		return vectors;
 	}
 
 	async showModel(name: string): Promise<ModelInfo> {

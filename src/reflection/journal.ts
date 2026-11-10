@@ -3,7 +3,9 @@ import { normalizeFilterTag } from "../filter";
 import type JournalViewPlugin from "../main";
 import type { Moment } from "../moment";
 import { DAY_KEY_FORMAT } from "../noteIndex";
-import { propertiesOf } from "./context";
+import { propertiesOf, propertyLine } from "./context";
+import type { IndexableNote } from "./semantic";
+import { sharedAcross } from "./tools";
 import type { JournalNote, JournalSource } from "./tools";
 
 /**
@@ -45,14 +47,43 @@ export function openJournal(
 		}
 	}
 	const release = plugin.findCorpus.retain();
-	return {
-		journal: {
-			notes,
-			body: async (note) => {
-				const file = files.get(note.path);
-				return file ? plugin.findCorpus.read(file) : null;
-			},
+	const journal: JournalSource = {
+		notes,
+		body: async (note) => {
+			const file = files.get(note.path);
+			return file ? plugin.findCorpus.read(file) : null;
 		},
-		close: release,
 	};
+	// By meaning too, once the reader has turned that on: the index is brought up to date for these notes first.
+	if (plugin.settings.reflectionSemantic) {
+		journal.nearest = (texts, signal, onStatus) =>
+			plugin.reflectionIndex.nearest(indexableNotes(plugin, notes, journal.body), texts, signal, onStatus);
+	}
+	return { journal, close: release };
+}
+
+/**
+ * A journal's notes as the index keeps them: when each last changed, what
+ * is said above its text, and how to read it. A note is embedded with its
+ * properties, which say what its text may not: its mood, its tags.
+ */
+export function indexableNotes(
+	plugin: JournalViewPlugin,
+	notes: readonly JournalNote[],
+	body: (note: JournalNote) => Promise<string | null>,
+): IndexableNote[] {
+	const shared = sharedAcross(notes);
+	const indexable: IndexableNote[] = [];
+	for (const note of notes) {
+		const file = plugin.app.vault.getAbstractFileByPath(note.path);
+		if (!(file instanceof TFile)) continue;
+		indexable.push({
+			path: note.path,
+			mtime: file.stat.mtime,
+			size: file.stat.size,
+			heading: propertyLine(note, shared),
+			body: () => body(note),
+		});
+	}
+	return indexable;
 }

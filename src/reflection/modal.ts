@@ -17,8 +17,17 @@ import {
 import { parseConversation } from "./conversation";
 import { canRestoreBuiltIns, presetRequest, presetsOf, questionRequest, restoreBuiltIns } from "./presets";
 import type { ReflectionPreset, ReflectionRequest } from "./presets";
-import { NO_MODELS_MESSAGE, ProviderError, SUGGESTED_MODEL, defaultModel, describeProviderError } from "./provider";
+import {
+	NO_MODELS_MESSAGE,
+	ProviderError,
+	SUGGESTED_EMBEDDING_MODEL,
+	SUGGESTED_MODEL,
+	defaultEmbeddingModel,
+	defaultModel,
+	describeProviderError,
+} from "./provider";
 import type { ModelInfo } from "./provider";
+import type { IndexStatus } from "./semanticStore";
 import type { StoredReflection } from "./store";
 
 export interface ReflectionModalOptions {
@@ -42,7 +51,7 @@ type Page =
 /** What the model server said when it was last asked. */
 type Connection =
 	| { state: "checking" }
-	| { state: "ready"; models: ModelInfo[] }
+	| { state: "ready"; models: ModelInfo[]; embedding: string[] }
 	| { state: "unreachable"; message: string }
 	| { state: "no-models" }
 	| { state: "failed"; message: string };
@@ -81,6 +90,9 @@ export class ReflectionModal extends Modal {
 	private onConnection: (() => void) | null = null;
 	/** The model reflections use, beside the settings button on the first page. */
 	private modelBadge: HTMLElement | null = null;
+	/** Stops hearing of the index being built, once the settings page that shows it is left. */
+	private offIndex: (() => void) | null = null;
+	private indexSerial = 0;
 
 	constructor(
 		app: App,
@@ -100,6 +112,8 @@ export class ReflectionModal extends Modal {
 	onClose(): void {
 		this.closed = true;
 		this.onConnection = null;
+		this.offIndex?.();
+		this.offIndex = null;
 		this.contentEl.empty();
 		this.options.onClose?.();
 	}
@@ -113,6 +127,8 @@ export class ReflectionModal extends Modal {
 
 	private render(): void {
 		this.onConnection = null;
+		this.offIndex?.();
+		this.offIndex = null;
 		this.modelBadge = null;
 		this.contentEl.empty();
 		this.titleEl.empty();
@@ -193,8 +209,8 @@ export class ReflectionModal extends Modal {
 		this.connectionChanged();
 		let next: Connection;
 		try {
-			const models = await this.plugin.reflectionProvider().listModels();
-			next = models.length ? { state: "ready", models } : { state: "no-models" };
+			const { chat, embedding } = await this.plugin.reflectionProvider().listInstalled();
+			next = chat.length ? { state: "ready", models: chat, embedding } : { state: "no-models" };
 		} catch (error) {
 			const message = describeProviderError(error);
 			next =
@@ -533,6 +549,7 @@ export class ReflectionModal extends Modal {
 					if (value === settings.reflectionServer) return;
 					settings.reflectionServer = value;
 					this.persist(false);
+					this.plugin.reflectionIndex.settingsChanged();
 					void this.check();
 				});
 			})
@@ -593,6 +610,9 @@ export class ReflectionModal extends Modal {
 				showSliderTooltip(slider);
 			});
 
+		contentEl.createDiv({ cls: "journal-reflect-section-title", text: "Search by meaning" });
+		const semantic = contentEl.createDiv({ cls: "journal-reflect-semantic" });
+
 		contentEl.createDiv({ cls: "journal-reflect-section-title", text: "Presets" });
 		const presets = contentEl.createDiv({ cls: "journal-reflect-preset-list" });
 		this.renderPresetList(presets);
@@ -600,6 +620,8 @@ export class ReflectionModal extends Modal {
 		this.onConnection = () => {
 			status.setText(this.connectionLine());
 			this.renderSetup(setup);
+			// Its model picker lists what the server has.
+			this.renderSemantic(semantic);
 			const select = modelSelect;
 			if (!select) return;
 			select.empty();
@@ -616,6 +638,119 @@ export class ReflectionModal extends Modal {
 			select.disabled = this.connection.state !== "ready";
 		};
 		this.onConnection();
+	}
+
+	/**
+	 * Search by meaning: its switch, and while it is on the embedding model
+	 * and the index, with what the index holds and a way to build it now
+	 * rather than at the next reflection.
+	 */
+	private renderSemantic(el: HTMLElement): void {
+		el.empty();
+		this.offIndex?.();
+		this.offIndex = null;
+		const { settings, reflectionIndex } = this.plugin;
+		new Setting(el)
+			.setName("Search by meaning")
+			.setDesc(
+				"Lets a reflection find notes that are about what you asked without using its words: a search for " +
+					"exercise also finds the days you went running. A second, small model reads each note on this " +
+					"computer and turns it into numbers, kept in an index file in the plugin's folder, about a " +
+					"kilobyte a note. The first build takes a moment; after it only new and changed notes are read. " +
+					"Turning this off deletes the index.",
+			)
+			.addToggle((toggle) =>
+				toggle.setValue(settings.reflectionSemantic).onChange((value) => {
+					settings.reflectionSemantic = value;
+					this.persist(false);
+					// Nothing is kept once it is off.
+					void (value ? Promise.resolve() : reflectionIndex.remove()).then(() => {
+						if (!this.closed && this.page.kind === "settings") this.renderSemantic(el);
+					});
+				}),
+			);
+		if (!settings.reflectionSemantic) return;
+
+		const installed = this.connection.state === "ready" ? this.connection.embedding : [];
+		const chosen = settings.reflectionEmbeddingModel;
+		const missing = this.connection.state === "ready" && chosen && !installed.includes(chosen) ? chosen : null;
+		if (this.connection.state === "ready" && (missing || !installed.length)) {
+			const box = el.createDiv({ cls: "journal-reflect-setup" });
+			box.createDiv({
+				cls: "journal-reflect-setup-title",
+				text: missing ? `${missing} is not installed.` : "No embedding model is installed yet.",
+			});
+			const steps = box.createEl("ol", { cls: "journal-reflect-setup-steps" });
+			const pull = steps.createEl("li", { text: "Pull one in a terminal: " });
+			pull.createEl("code").appendText(`${SETUP.pull}${missing ?? SUGGESTED_EMBEDDING_MODEL}`);
+			pull.appendText(missing ? "." : ", about 400 MB. It reads over a hundred languages.");
+			steps.createEl("li", { text: "Until then, reflections search by words alone." });
+			const actions = box.createDiv({ cls: "journal-reflect-setup-actions" });
+			actions.createEl("button", { text: "Try again", attr: { type: "button" } }).addEventListener("click", () => void this.check());
+		}
+
+		new Setting(el)
+			.setName("Embedding model")
+			.setDesc(
+				"The model that turns notes into numbers. EmbeddingGemma 2 (270M) is the suggestion: of those tried it " +
+					"found the most, and its larger versions add nothing for text. Changing the model builds the index again.",
+			)
+			.addDropdown((dropdown) => {
+				const select = dropdown.selectEl;
+				for (const model of installed) select.createEl("option", { value: model, text: model });
+				if (missing) select.createEl("option", { value: missing, text: `${missing} (not installed)` });
+				if (!installed.length && !missing) {
+					select.createEl("option", { value: "", text: this.connection.state === "checking" ? "Connecting…" : "No embedding models" });
+				}
+				select.value = chosen || defaultEmbeddingModel(installed) || "";
+				select.disabled = !installed.length;
+				dropdown.onChange((value) => {
+					if (value === (settings.reflectionEmbeddingModel || defaultEmbeddingModel(installed))) return;
+					settings.reflectionEmbeddingModel = value;
+					this.persist(false);
+					// Another model's numbers cannot be compared with these.
+					void reflectionIndex.remove().then(() => reflectionIndex.settingsChanged());
+				});
+			});
+
+		const index = new Setting(el).setName("Index");
+		index.settingEl.addClass("journal-reflect-index");
+		const line = index.descEl.createDiv({ cls: "journal-reflect-index-status" });
+		index.descEl.createDiv({ cls: "journal-reflect-index-path", text: `Kept in ${reflectionIndex.path()}` });
+		let build: HTMLButtonElement | null = null;
+		let rebuild: HTMLElement | null = null;
+		let building = false;
+		index.addExtraButton((button) => {
+			rebuild = button.extraSettingsEl;
+			button
+				.setIcon("rotate-ccw")
+				.setTooltip("Build the index again from nothing")
+				.onClick(() => void reflectionIndex.remove().then(() => reflectionIndex.build()));
+		});
+		index.addButton((button) => {
+			build = button.buttonEl;
+			button.onClick(() => {
+				if (building) reflectionIndex.stop();
+				else void reflectionIndex.build();
+			});
+		});
+
+		const show = async (): Promise<void> => {
+			const serial = ++this.indexSerial;
+			const status = await reflectionIndex.status();
+			if (this.closed || serial !== this.indexSerial || !line.isConnected) return;
+			building = status.state === "building";
+			line.toggleClass("journal-reflect-index-failed", status.state === "failed");
+			line.setText(indexLine(status));
+			if (rebuild) rebuild.toggleClass("journal-reflect-hidden", building || status.state === "none");
+			if (!build) return;
+			const upToDate = status.state === "ready" && status.stale === 0;
+			build.toggleClass("journal-reflect-hidden", upToDate);
+			build.setText(building ? "Stop" : status.state === "ready" ? "Update now" : status.state === "failed" ? "Try again" : "Build now");
+			build.disabled = !building && !installed.length;
+		};
+		this.offIndex = reflectionIndex.onChanged(() => void show());
+		void show();
 	}
 
 	private renderPresetList(el: HTMLElement): void {
@@ -790,6 +925,24 @@ export class ReflectionModal extends Modal {
 				console.error("Journal View: could not save the reflection settings", error);
 				new Notice("Journal view: could not save the reflection settings");
 			});
+	}
+}
+
+/** What the settings say of the index: how much it holds, what made it, and what is left to do. */
+function indexLine(status: IndexStatus): string {
+	const notes = (count: number) => `${count} ${count === 1 ? "note" : "notes"}`;
+	switch (status.state) {
+		case "none":
+			return `Not built yet: ${notes(status.notes)} to read. It is built the first time a reflection searches, or now.`;
+		case "building":
+			return `Reading ${status.done} of ${notes(status.total)}…`;
+		case "failed":
+			return status.message;
+		case "ready": {
+			const size = status.bytes < 1e6 ? `${Math.max(1, Math.round(status.bytes / 1e3))} KB` : `${(status.bytes / 1e6).toFixed(1)} MB`;
+			const rest = status.stale ? `${status.stale} new or changed, read at the next search` : "up to date";
+			return `${notes(status.indexed)} · ${size} · ${status.model} · ${rest}`;
+		}
 	}
 }
 

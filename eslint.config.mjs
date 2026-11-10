@@ -22,6 +22,7 @@ export default defineConfig(
 						"stylelint.config.mjs",
 						"manifest.json",
 						"scripts/deploy-ios-test-vault.mjs",
+						"scripts/reflection-search-eval.mjs",
 						"scripts/reflection-spike.mjs",
 						"scripts/sample-journal.mjs",
 					],

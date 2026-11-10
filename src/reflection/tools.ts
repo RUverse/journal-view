@@ -24,6 +24,8 @@ import { ProviderError } from "./provider";
 import type { ChatMessage, ChatResult, ModelInfo, ReflectionProvider, ToolCall, ToolDefinition } from "./provider";
 import { SearchIndex, excerptsOf, parseQuery } from "./search";
 import type { AlternativeCount } from "./search";
+import { fuseRankings } from "./semantic";
+import type { Chunk, SemanticHit } from "./semantic";
 
 /*
  * How a model reads the journal: the tools it is offered, what each returns,
@@ -50,7 +52,18 @@ export interface JournalSource {
 	/** Every note the journal's filters let through, up to the run's day, oldest first. */
 	notes: readonly JournalNote[];
 	/** A note's text as an editor holds it, or null when it cannot be read. */
-	body(note: JournalNote): Promise<string | null>;
+	body: (note: JournalNote) => Promise<string | null>;
+	/**
+	 * Search by meaning, when the reader has turned it on: for each of
+	 * `texts`, every note by how near it lies, nearest first. Null when it
+	 * cannot be had just now, as when its model is not installed; the search
+	 * then goes by words alone. `onStatus` hears of the notes being indexed.
+	 */
+	nearest?: (
+		texts: readonly string[],
+		signal: AbortSignal,
+		onStatus: (line: string) => void,
+	) => Promise<SemanticHit[][] | null>;
 }
 
 /** What a question needs to be answered. */
@@ -146,8 +159,25 @@ const NARROW_SHARE = 0.15;
  */
 const MAX_STORY_NOTES = 60;
 const STORY_SHARE = 0.35;
+/**
+ * Days a story runs on past its subject's last mention, when they fit: how
+ * a thing ended is often written a few days after it was last named.
+ */
+const STORY_AFTER_DAYS = 7;
 /** A story names the notes that mention its subject while they are this few. */
 const MAX_NAMED_MENTIONS = 12;
+/**
+ * The notes a search by meaning adds for each text it is given, at most, and
+ * how far above the rest a note has to stand to be one: this many standard
+ * deviations over the mean nearness of the notes searched. What counts as
+ * near differs from model to model, so it is measured against the others.
+ */
+const SEMANTIC_NOTES = 10;
+/** Notes found by meaning alone that are offered after notes passed whole. */
+const MAX_NEAR_NOTES = 8;
+const SEMANTIC_DISTANCE = 1.5;
+/** Fewer notes than this say too little about what is usual: only the nearest few are taken. */
+const SEMANTIC_SAMPLE = 8;
 /**
  * The excerpts of each note a search shows, and the characters of each, from
  * the roomiest to the tightest: tried in turn until the result fits.
@@ -170,11 +200,17 @@ const DATE_ARGUMENT = "written YYYY-MM-DD";
  * calling; the results then say what to call next, which models follow far
  * better than any instruction up front.
  */
+const SEARCH_DESCRIPTION =
+	'Find the notes that mention a word, a name or a phrase, in any of its forms: run also finds running and runs. Returns the notes that match best, each with its date, its link and the sentences around the match. Several words find the notes about all of them; commas separate other ways of saying it, such as "anxious, worried, nervous"; quotes keep words together. Use it for a question about a person, a place or a subject, then read the notes that matter with read_notes.';
+
+/** Added to the search's description when it also goes by meaning. */
+const SEMANTIC_DESCRIPTION =
+	" It also finds notes that are about the same thing in other words, so a few words that describe what you are looking for work as well as a name.";
+
 const TOOLS: ToolDefinition[] = [
 	{
 		name: "search_journal",
-		description:
-			'Find the notes that mention a word, a name or a phrase, in any of its forms: run also finds running and runs. Returns the notes that match best, each with its date, its link and the sentences around the match. Several words find the notes about all of them; commas separate other ways of saying it, such as "anxious, worried, nervous"; quotes keep words together. Use it for a question about a person, a place or a subject, then read the notes that matter with read_notes.',
+		description: SEARCH_DESCRIPTION,
 		parameters: {
 			type: "object",
 			properties: {
@@ -283,6 +319,20 @@ const READ_FIRST =
 
 /** Asks for the answer once the tools are taken away, followed by the question again. */
 const ANSWER_NOW = "Answer my question now, from the notes above.";
+
+/** A note a search found: by its words, by its meaning, or both. */
+interface Found {
+	/** The note's place in the journal. */
+	doc: number;
+	/** How well it matches, to compare with the search's other notes only. */
+	score: number;
+	/** The alternatives of the query its words match; none for a note found by meaning alone. */
+	matched: number[];
+	note: JournalNote;
+	body: string;
+	/** The stretch that lies nearest what was asked, for a note found by meaning; null for one found by its words alone. */
+	chunk: Chunk | null;
+}
 
 interface ToolOutcome {
 	/** The card's status line, or null when the call was refused before it ran. */
@@ -544,11 +594,15 @@ class JournalReader {
 	private readonly hits = new Set<string>();
 	/** Searches run, whether or not they found anything. */
 	private searches = 0;
+	/** Searches that found a note by its words, rather than only notes that may be about it. */
+	private worded = 0;
 	/** Characters passed as stories so far, against what a run may spend on them. */
 	private storyLength = 0;
 	private readonly first: string;
 	private readonly bodies = new Map<string, Promise<string | null>>();
 	private searchable: Promise<{ index: SearchIndex; texts: string[] }> | null = null;
+	/** The notes nearest a text, by the text: the question's are asked for once and kept. */
+	private readonly near = new Map<string, SemanticHit[] | null>();
 
 	constructor(
 		private readonly source: JournalSource,
@@ -558,6 +612,9 @@ class JournalReader {
 		private readonly capacity: number,
 		private readonly shortDate: (key: string, withYear: boolean) => string,
 		private readonly signal: AbortSignal,
+		/** What is being asked, which a search by meaning looks for beside the words it is given. */
+		private readonly question: string,
+		private readonly onStatus: (line: string) => void,
 	) {
 		this.notes = source.notes.filter((note) => note.key <= today);
 		this.first = this.notes[0]?.key ?? today;
@@ -570,11 +627,13 @@ class JournalReader {
 
 	/**
 	 * True when an answer written from excerpts and lists leans on them: a
-	 * search found something, the answer cites a note, or the model never
-	 * searched and so knows the notes only by their first words.
+	 * search found the words asked for, the answer cites a note, or the model
+	 * never searched and so knows the notes only by their first words. Not
+	 * when searches found only notes that might be about the subject and the
+	 * answer cites none: that it is not in the journal is then a fair answer.
 	 */
 	leansOnGlimpses(text: string): boolean {
-		return this.hits.size > 0 || this.searches === 0 || this.cites(text);
+		return this.worded > 0 || this.searches === 0 || this.cites(text);
 	}
 
 	/** True when `text` cites a note, or names one the model has seen only in a list or an excerpt. */
@@ -643,7 +702,17 @@ class JournalReader {
 		const result = index.search(alternatives, (doc) => this.notes[doc].key >= from && this.notes[doc].key <= to);
 		const quoted = quotedQuery(result.counts);
 		const status = `Searching for ${quoted}`;
-		if (!result.hits.length) {
+		const byWords: Found[] = result.hits.map((hit) => ({
+			...hit,
+			note: this.notes[hit.doc],
+			body: texts[hit.doc],
+			chunk: null,
+		}));
+		// By meaning too, when that is on: the notes nearest the words asked for, and nearest the question itself.
+		const byMeaning = await this.nearestByMeaning([asked, this.question], from, to);
+		/** Every note found, best first: by its words, by its meaning, or both. */
+		const found = byMeaning.length ? this.fused(byWords, byMeaning, texts) : byWords;
+		if (!found.length) {
 			return {
 				status,
 				content: [
@@ -652,22 +721,48 @@ class JournalReader {
 				].join("\n"),
 			};
 		}
-		const found = result.hits.map((hit) => ({ ...hit, note: this.notes[hit.doc], body: texts[hit.doc] }));
-		const foundPaths = new Set(found.map((hit) => hit.note.path));
-		for (const path of foundPaths) this.hits.add(path);
-		const byWord = wordCounts(result.counts, found.length);
+		for (const hit of found) this.hits.add(hit.note.path);
+		if (byWords.length) this.worded++;
+		const worded = new Set(byWords.map((hit) => hit.note.path));
+		/**
+		 * The notes found by their meaning alone. An embedding model always
+		 * finds something nearest, about the subject or not, so these are
+		 * offered as excerpts for the model to judge, never passed whole.
+		 */
+		const others = found.filter((hit) => !worded.has(hit.note.path));
+		const byWord = wordCounts(result.counts, byWords.length);
 		// A query of several words is matched by a note holding some of them, which "mentions" would overstate.
 		const several = result.counts.some((count) => count.parts.filter((part) => !part.common).length > 1);
-		const verb = several ? (found.length === 1 ? "matches" : "match") : found.length === 1 ? "mentions" : "mention";
+		const verb = byWords.length === 1 ? (several ? "matches" : "mentions") : several ? "match" : "mention";
 
-		const lineFor = (hit: (typeof found)[number], excerpts: number, width: number) => {
+		const lineFor = (hit: Found, excerpts: number, width: number) => {
 			const parts = [hit.note.link, longDate(hit.note.key, withYear)];
 			const properties = propertyLine(hit.note, this.shared);
 			if (properties) parts.push(properties);
 			const stretches = excerptsOf(hit.body, result.locate(hit.body), excerpts, width);
-			// Found by a tag, a property or its name, which its text does not show.
-			const text = stretches.length ? stretches.join(" ") : preview(hit.body, width);
-			return `- ${parts.join(" · ")}: ${text}`;
+			if (stretches.length) return `- ${parts.join(" · ")}: ${stretches.join(" ")}`;
+			// Found by its meaning: the stretch that lies nearest. Or by a tag, a
+			// property or its name, which its text does not show.
+			const near = hit.chunk ? hit.body.slice(hit.chunk.start, hit.chunk.end) : hit.body;
+			return `- ${parts.join(" · ")}${worded.has(hit.note.path) ? "" : " · in other words"}: ${preview(near, width * excerpts)}`;
+		};
+		/**
+		 * What follows notes passed whole, when a search by meaning found
+		 * others: their excerpts, for the model to read on from if they are
+		 * about the subject after all.
+		 */
+		const alsoNear = (passed: ReadonlySet<string>): string => {
+			const left = others.filter((hit) => !passed.has(hit.note.path) && !this.read.has(hit.note.path)).slice(0, MAX_NEAR_NOTES);
+			if (!left.length) return "";
+			this.glimpse(left.map((hit) => hit.note));
+			const size = EXCERPT_SIZES[EXCERPT_SIZES.length - 2];
+			return [
+				"",
+				"",
+				`${left.length === 1 ? "One other note" : `${left.length} other notes`} may be about it without using ${several || result.counts.length > 1 ? "these words" : "this word"}. These are only excerpts, nearest first: read the ones that are about it with read_notes, and leave the rest.`,
+				"",
+				...left.map((hit) => lineFor(hit, 1, size.width)),
+			].join("\n");
 		};
 
 		// What happened to a subject is as often in the days between its mentions,
@@ -686,7 +781,12 @@ class JournalReader {
 				if (doc > latest) latest = doc;
 			}
 			const first = this.notes[earliest].key;
-			const last = this.notes[latest].key;
+			const mentioned = this.notes[latest].key;
+			const later = addDays(mentioned, STORY_AFTER_DAYS);
+			// With the days after the last mention when they fit, and without them when they do not.
+			return daysOf(first, later < to ? later : to) ?? (later > mentioned ? daysOf(first, mentioned) : null);
+		};
+		const daysOf = (first: string, last: string): JournalNote[] | null => {
 			const notes: JournalNote[] = [];
 			// Only what was not passed yet takes room: those notes are named, not repeated.
 			let length = 0;
@@ -695,7 +795,7 @@ class JournalReader {
 				if (note.key < first || note.key > last) continue;
 				notes.push(note);
 				if (!this.read.has(note.path)) length += texts[doc].length + 160;
-				if (foundPaths.has(note.path)) mentions++;
+				if (worded.has(note.path)) mentions++;
 			}
 			const allowed = Math.min(room * 0.9, this.capacity * STORY_SHARE - this.storyLength);
 			if (notes.length <= mentions || mentions < 2 || notes.length > MAX_STORY_NOTES || !length || length > allowed) return null;
@@ -704,10 +804,11 @@ class JournalReader {
 		};
 		// Not for a query that the notes meet only in part: the days around
 		// `holiday` are not the story of a holiday in Lisbon that no note mentions.
+		// Nor for notes found by meaning alone, which may not be about it at all.
 		const met = new Set(
 			result.counts.flatMap((count, at) => (count.parts.every((part) => part.common || part.notes > 0) ? [at] : [])),
 		);
-		const told = found.filter((hit) => hit.matched.some((at) => met.has(at)));
+		const told = byWords.filter((hit) => hit.matched.some((at) => met.has(at)));
 		const searched = this.notesIn(from, to).length;
 		const narrow = new Set(
 			result.counts.flatMap((count, at) => (count.notes <= Math.max(3, searched * NARROW_SHARE) ? [at] : [])),
@@ -721,47 +822,62 @@ class JournalReader {
 		if (days) {
 			const first = days[0].key;
 			const last = days[days.length - 1].key;
-			const inside = found.filter((hit) => hit.note.key >= first && hit.note.key <= last);
+			const inside = byWords.filter((hit) => hit.note.key >= first && hit.note.key <= last);
 			const between = `between ${longDate(first, withYear)} and ${longDate(last, withYear)}`;
 			// The ones left out match least: a word in passing, far from the rest.
 			const where =
-				inside.length === found.length ? `all ${between}` : `most strongly ${between}, where ${inside.length} of them are`;
+				inside.length === byWords.length
+					? `all ${between}`
+					: `most strongly ${between}, where ${inside.length} of them are`;
 			const mentions = [...inside].sort((left, right) => left.doc - right.doc).map((hit) => hit.note.link);
 			const content = await this.pass(days, withYear, room, (passed, total) =>
 				[
 					...notices,
-					`${plural(found.length, "note")}${span} ${verb} ${quoted}, ${where}.${byWord ? ` ${byWord}` : ""}`,
+					`${plural(byWords.length, "note")}${span} ${verb} ${quoted}, ${where}.${byWord ? ` ${byWord}` : ""}`,
 					// Which of the days below name it, while that is few enough to be worth saying.
 					...(mentions.length <= MAX_NAMED_MENTIONS ? [`They are ${mentions.join(", ")}.`] : []),
 					`What happened is as often in the days between, in notes that never name it, so here is every note of those days in full, oldest first (${counted(passed, total)}):`,
 				].join("\n"),
 			);
-			return { status, content };
+			// Said, since a model takes the last note it is shown for the last note there is.
+			const earlier = this.notes.filter((note) => note.key < first).length;
+			const after = this.notes.filter((note) => note.key > last).length;
+			const beyond =
+				earlier || after
+					? `\n\nThese are only the days from ${first} to ${last}. The journal holds ${[
+							...(earlier ? [`${plural(earlier, "note")} before them`] : []),
+							...(after ? [`${plural(after, "note")} after them`] : []),
+						].join(" and ")}: read on with read_journal if what came ${earlier && after ? "before or after" : earlier ? "before" : "after"} matters.`
+					: "";
+			return { status, content: `${content}${beyond}${alsoNear(new Set(days.map((note) => note.path)))}` };
 		}
 
 		// A handful of short notes is shown whole: reading them would be the next call anyway.
-		const whole = found.reduce((sum, hit) => sum + hit.body.length + 160, 0);
-		if (found.length <= WHOLE_SEARCH_NOTES && whole <= glance * 0.9) {
-			const notes = [...found].sort((left, right) => left.doc - right.doc).map((hit) => hit.note);
+		const whole = byWords.reduce((sum, hit) => sum + hit.body.length + 160, 0);
+		if (byWords.length && byWords.length <= WHOLE_SEARCH_NOTES && whole <= glance * 0.9) {
+			const notes = [...byWords].sort((left, right) => left.doc - right.doc).map((hit) => hit.note);
 			const content = await this.pass(notes, withYear, glance, () =>
 				[
 					...notices,
-					`Only ${plural(found.length, "note")}${span} ${verb} ${quoted}${byWord ? `. ${byWord}` : "."} ${found.length === 1 ? "Here it is in full:" : "Here they are in full, oldest first:"}`,
+					`Only ${plural(byWords.length, "note")}${span} ${verb} ${quoted}${byWord ? `. ${byWord}` : "."} ${byWords.length === 1 ? "Here it is in full:" : "Here they are in full, oldest first:"}`,
 				].join("\n"),
 			);
-			return { status, content };
+			return { status, content: `${content}${alsoNear(new Set(notes.map((note) => note.path)))}` };
 		}
 
 		/** The `count` best notes, and always the first and the last mention, in the journal's order. */
 		const shown = (count: number) => {
 			const best = found.slice(0, count);
-			if (count < found.length && count >= 3) {
-				const byDay = [...found].sort((left, right) => left.doc - right.doc);
-				for (const edge of [byDay[0], byDay[byDay.length - 1]]) {
-					if (best.includes(edge)) continue;
+			if (count < found.length && count >= 3 && byWords.length > 1) {
+				const byDay = [...byWords].sort((left, right) => left.doc - right.doc);
+				const edges = [byDay[0], byDay[byDay.length - 1]].map((edge) => edge.note.path);
+				for (const path of edges) {
+					if (best.some((hit) => hit.note.path === path)) continue;
+					const edge = found.find((hit) => hit.note.path === path);
+					if (!edge) continue;
 					// In place of the weakest shown that is not itself an edge.
 					for (let index = best.length - 1; index >= 0; index--) {
-						if (best[index] === byDay[0] || best[index] === byDay[byDay.length - 1]) continue;
+						if (edges.includes(best[index].note.path)) continue;
 						best[index] = edge;
 						break;
 					}
@@ -769,6 +885,10 @@ class JournalReader {
 			}
 			return best.sort((left, right) => left.doc - right.doc);
 		};
+		/** What was found, in a sentence: by its words, and beside them by its meaning. */
+		const summary = !byWords.length
+			? `No note${span} uses ${several || result.counts.length > 1 ? "the words" : "the word"} ${quoted}, but ${plural(others.length, "note")} may be about it in other words`
+			: `${plural(byWords.length, "note")}${span} ${verb} ${quoted}${others.length ? `, and ${others.length} more may be about it in other words` : ""}`;
 		const compose = (count: number, excerpts: number, width: number) => {
 			const notes = shown(count);
 			const some = notes.length < found.length;
@@ -776,13 +896,15 @@ class JournalReader {
 			const example = best.sort((left, right) => left.doc - right.doc).map((hit) => `"${hit.note.key}"`);
 			return [
 				...notices,
-				`${plural(found.length, "note")}${span} ${verb} ${quoted}${some ? `; the ${notes.length} that match best are shown` : ""}, oldest first.`,
+				`${summary}${some ? `; the ${notes.length} that match best are shown` : ""}, oldest first.`,
 				...(byWord ? [byWord] : []),
-				...(some ? [`All of them, ${spreadOf(found.map((hit) => hit.note.key).sort())}. Search a shorter range to see the others.`] : []),
+				...(some && byWords.length ? [`All that ${verb} it, ${spreadOf(byWords.map((hit) => hit.note.key).sort())}. Search a shorter range to see the others.`] : []),
 				"",
 				...notes.map((hit) => lineFor(hit, excerpts, width)),
 				"",
-				`These are only excerpts, and only of the notes that use these words: too thin to answer from. Now read the notes that matter in full, with read_notes and their dates, such as {"dates": [${example.join(", ")}]}.`,
+				others.length
+					? `These are only excerpts: too thin to answer from, and the ones marked "in other words" may not be about it at all. Now read the notes that matter in full, with read_notes and their dates, such as {"dates": [${example.join(", ")}]}.`
+					: `These are only excerpts, and only of the notes that use these words: too thin to answer from. Now read the notes that matter in full, with read_notes and their dates, such as {"dates": [${example.join(", ")}]}.`,
 			].join("\n");
 		};
 		let count = Math.min(found.length, MAX_SEARCH_NOTES);
@@ -798,6 +920,68 @@ class JournalReader {
 		}
 		this.glimpse(shown(count).map((hit) => hit.note));
 		return { status, content };
+	}
+
+	/**
+	 * The notes from `from` to `to` that lie nearest each of `texts` by
+	 * meaning, when the journal offers that: the few that stand well clear of
+	 * the rest, nearest first, a list for each text. None when it is off, or
+	 * cannot be had.
+	 */
+	private async nearestByMeaning(texts: readonly string[], from: string, to: string): Promise<SemanticHit[][]> {
+		if (!this.source.nearest) return [];
+		const wanted = [...new Set(texts.map((text) => text.trim()).filter(Boolean))];
+		const unknown = wanted.filter((text) => !this.near.has(text));
+		if (unknown.length) {
+			let hits: SemanticHit[][] | null = null;
+			try {
+				hits = await this.source.nearest(unknown, this.signal, this.onStatus);
+			} catch (error) {
+				// Stopped by the reader; anything else leaves the search to its words.
+				if (this.signal.aborted) throw aborted();
+				console.warn("Journal View: search by meaning failed, searching by words alone", error);
+			}
+			for (const [at, text] of unknown.entries()) this.near.set(text, hits?.[at] ?? null);
+		}
+		const inRange = new Set(this.notesIn(from, to).map((note) => note.path));
+		const lists: SemanticHit[][] = [];
+		for (const text of wanted) {
+			const hits = (this.near.get(text) ?? []).filter((hit) => inRange.has(hit.path));
+			if (!hits.length) continue;
+			if (hits.length < SEMANTIC_SAMPLE) {
+				lists.push(hits.slice(0, Math.ceil(hits.length / 3)));
+				continue;
+			}
+			const mean = hits.reduce((sum, hit) => sum + hit.score, 0) / hits.length;
+			const spread = Math.sqrt(hits.reduce((sum, hit) => sum + (hit.score - mean) ** 2, 0) / hits.length);
+			const floor = mean + SEMANTIC_DISTANCE * spread;
+			lists.push(hits.filter((hit) => hit.score >= floor).slice(0, SEMANTIC_NOTES));
+		}
+		return lists.filter((list) => list.length > 0);
+	}
+
+	/**
+	 * What a search found by its words and by its meaning, as one list, best
+	 * first. The two cannot be compared by their scores, so a note counts for
+	 * its place in each list it is in: one high in any of them is kept, and
+	 * one high in several comes first.
+	 */
+	private fused(byWords: readonly Found[], byMeaning: ReadonlyArray<readonly SemanticHit[]>, texts: readonly string[]): Found[] {
+		const docs = new Map(this.notes.map((note, doc) => [note.path, doc]));
+		const scores = fuseRankings([byWords.map((hit) => hit.note.path), ...byMeaning.map((list) => list.map((hit) => hit.path))]);
+		const found = new Map<string, Found>(byWords.map((hit) => [hit.note.path, { ...hit }]));
+		for (const list of byMeaning) {
+			for (const hit of list) {
+				const doc = docs.get(hit.path);
+				if (doc === undefined) continue;
+				const known = found.get(hit.path);
+				if (known) known.chunk ??= hit.chunk;
+				else found.set(hit.path, { doc, score: 0, matched: [], note: this.notes[doc], body: texts[doc], chunk: hit.chunk });
+			}
+		}
+		// Each keeps the score its words gave it, which says how strongly it is about the subject.
+		const order = (hit: Found) => scores.get(hit.note.path) ?? 0;
+		return [...found.values()].sort((first, second) => order(second) - order(first) || second.doc - first.doc);
 	}
 
 	private async readNotes(args: Record<string, unknown>, room: number): Promise<ToolOutcome> {
@@ -1135,7 +1319,7 @@ function counted(passed: number, total: number): string {
  * `type: daily`. One odd note would keep it on every other, so nearly every
  * note is enough.
  */
-function sharedAcross(notes: readonly JournalNote[]): Map<string, Set<string>> {
+export function sharedAcross(notes: readonly JournalNote[]): Map<string, Set<string>> {
 	const shared = new Map<string, Set<string>>();
 	if (notes.length < 2) return shared;
 	const counts = new Map<string, Map<string, number>>();
@@ -1213,10 +1397,11 @@ function conversationLength(messages: readonly ChatMessage[], tools: readonly To
  *
  * The context is asked for whole, since how much the model will read is not
  * known up front, and every result is cut to the room the conversation has
- * left. A model that answers before reading anything, or from search
- * excerpts alone, is sent back once for each; while an answer would be sent
- * back it is not streamed, so the card does not show an answer and take it
- * away. Throws `ProviderError("no-tools")` from the provider when the model
+ * left. A model that answers before reading anything is sent back, and has
+ * the search run for it when it answers again without looking; one that
+ * answers from search excerpts alone is sent back once. While an answer
+ * would be sent back it is not streamed, so the card does not show an answer
+ * and take it away. Throws `ProviderError("no-tools")` from the provider when the model
  * cannot call tools, and `ProviderError("failed")` when it ends without an
  * answer.
  */
@@ -1232,7 +1417,15 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 		limit * CHARS_PER_TOKEN,
 		options.shortDate ?? englishShortDate,
 		signal,
+		options.followUp?.question ?? options.question,
+		options.onStatus,
 	);
+	// The search says what else it finds when it also goes by meaning.
+	const tools: ToolDefinition[] = options.journal.nearest
+		? TOOLS.map((tool) =>
+				tool.name === "search_journal" ? { ...tool, description: `${SEARCH_DESCRIPTION}${SEMANTIC_DESCRIPTION}` } : tool,
+			)
+		: TOOLS;
 	const latest = journal.latest;
 	if (!latest) throw new ProviderError("failed", "There are no notes to read yet");
 	// Models cannot count back from today, so a date a preset's shape names is written in.
@@ -1274,7 +1467,7 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 	let ratio = ESTIMATE_MARGIN;
 	/** The characters a tool result may take: what is left once the answer and the next call have room. */
 	const room = () => {
-		const used = estimateTokens(conversationLength(messages, TOOLS) + MESSAGE_OVERHEAD) * ratio;
+		const used = estimateTokens(conversationLength(messages, tools) + MESSAGE_OVERHEAD) * ratio;
 		return Math.floor(((limit - used - ANSWER_TOKENS - ROUND_RESERVE) / ratio) * CHARS_PER_TOKEN);
 	};
 	if (room() < MIN_RESULT_TOKENS * CHARS_PER_TOKEN) {
@@ -1346,7 +1539,8 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 	let full = false;
 	/** What the model may be sent instead of an answer this round; while there is something, the answer is held back. */
 	const nudgeFor = () => {
-		if (!looked) return nudged.has(LOOK_FIRST) ? null : LOOK_FIRST;
+		// As long as nothing was looked at: an answer then is made up, however often it is given.
+		if (!looked) return LOOK_FIRST;
 		return !journal.read.size && journal.glimpsed.size && !nudged.has(READ_FIRST) ? READ_FIRST : null;
 	};
 	/** Whether an answer is sent back with `nudge`: always before looking, and from excerpts when it leans on them. */
@@ -1383,7 +1577,7 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 		const nudge = nudgeFor();
 		let sent: { result: ChatResult; streamed: boolean };
 		try {
-			sent = await send(TOOLS, nudge === null, nudge !== null && sendsBack(nudge, ""));
+			sent = await send(tools, nudge === null, nudge !== null && sendsBack(nudge, ""));
 		} catch (error) {
 			// A round that ends without a word or a call, as Gemma 4's sometimes
 			// do, leaves the answer to the request without tools below.
@@ -1417,6 +1611,19 @@ export async function reflectWithTools(options: ToolRunOptions): Promise<ToolRun
 			// Held back in case it was sent back: the card gets it whole.
 			if (!streamed) options.onText(result.text);
 			return finish(result.text);
+		}
+		// Told to look once already, and it answered again without looking: gemma4:26b
+		// said twice that the journal holds nothing on a subject it had never searched
+		// for. The search is run for it, with the question as what to find.
+		if (nudge === LOOK_FIRST && nudged.has(LOOK_FIRST)) {
+			const call: ToolCall = { name: "search_journal", arguments: { query: question } };
+			const outcome = await answerCall(call, 0);
+			if (outcome.status) options.onStatus(outcome.status);
+			messages.push(
+				{ role: "assistant", content: "", toolCalls: [call] },
+				{ role: "tool", content: `${outcome.content}${journal.read.size > 0 ? task : ""}`, toolName: call.name },
+			);
+			continue;
 		}
 		// Neither streamed nor kept: the model never sees it again.
 		nudged.add(nudge);

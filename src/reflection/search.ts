@@ -39,6 +39,21 @@ const COMMON_SHARE = 0.4;
 const PARTIAL_FLOOR = 0.5;
 /** What the words of a query standing together, in order, multiply a note's score by. */
 const ADJACENT_BONUS = 1.5;
+/**
+ * English words that carry no subject. A query written as a phrase, "the
+ * teacher who inspired me", is searched for its other words; one made of
+ * nothing else is searched as it stands. Other languages are left to
+ * `COMMON_SHARE`, which drops whatever most of the notes hold.
+ */
+const STOP_WORDS = new Set(
+	(
+		"a an the and or but of in on at to for from by with about as into over after before " +
+		"i me my mine we our you your he him his she her it its they them their this that these those " +
+		"is are was were be been am do does did have has had will would can could should " +
+		"what when where which who whom whose why how not no so if than then there here"
+	).split(" "),
+);
+
 /** The most alternatives and words a query is read for; models rarely write more. */
 const MAX_ALTERNATIVES = 12;
 const MAX_PARTS = 8;
@@ -162,7 +177,8 @@ export function parseQuery(query: string): QueryAlternative[] {
 		const parts: QueryPart[] = [];
 		const terms = new Set<string>();
 		for (const match of piece.matchAll(/["“]([^"“”]+)["”]|([^\s"“”]+)/g)) {
-			if (parts.length >= MAX_PARTS) break;
+			// Read well past the cap, which counts the words left once those that say nothing are gone.
+			if (parts.length >= MAX_PARTS * 4) break;
 			if (match[1] !== undefined) {
 				const words = wordsOf(match[1]);
 				const phrase = words.map(termOf);
@@ -177,11 +193,15 @@ export function parseQuery(query: string): QueryAlternative[] {
 			if (/^(AND|&&?|\+)$/.test(match[2])) continue;
 			for (const word of wordsOf(match[2])) {
 				const term = termOf(word);
-				if (terms.has(term) || parts.length >= MAX_PARTS) continue;
+				if (terms.has(term)) continue;
 				terms.add(term);
 				parts.push({ kind: "word", text: word, term });
 			}
 		}
+		// What is left once the words that say nothing are gone, unless that is nothing.
+		const telling = parts.filter((part) => part.kind !== "word" || !STOP_WORDS.has(part.text.toLowerCase()));
+		if (telling.length) parts.splice(0, parts.length, ...telling);
+		parts.splice(MAX_PARTS);
 		const text = piece.replace(/\s+/g, " ").trim();
 		const signature = parts.map((part) => (part.kind === "word" ? part.term : `"${part.terms.join(" ")}"`)).join(" ");
 		if (!parts.length || seen.has(signature) || alternatives.length >= MAX_ALTERNATIVES) continue;

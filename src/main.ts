@@ -34,6 +34,7 @@ import { ReflectionRunner } from "./reflection/runner";
 import { ReflectionModal } from "./reflection/modal";
 import type { ReflectionModalOptions } from "./reflection/modal";
 import { presetsSetting } from "./reflection/presets";
+import { ReflectionIndexStore } from "./reflection/semanticStore";
 import { ReflectionStore } from "./reflection/store";
 import type { StoredReflection } from "./reflection/store";
 
@@ -63,6 +64,8 @@ export default class JournalViewPlugin extends Plugin {
 	reflections!: ReflectionStore;
 	/** Reflections being written. */
 	reflectionRuns!: ReflectionRunner;
+	/** The index a reflection's search by meaning reads, kept in a file in the plugin's folder. */
+	reflectionIndex!: ReflectionIndexStore;
 	/** The open Reflect window, which talks to this instance and so closes with it. */
 	private reflectModal: ReflectionModal | null = null;
 	readonly workspaceEditors = new WorkspaceEditorBridge(this.app);
@@ -122,6 +125,7 @@ export default class JournalViewPlugin extends Plugin {
 		// After the index, which it asks so a daily note is never taken for a reflection.
 		this.reflections = this.addChild(new ReflectionStore(this.app, this));
 		this.reflectionRuns = this.addChild(new ReflectionRunner(this));
+		this.reflectionIndex = this.addChild(new ReflectionIndexStore(this));
 		this.filteredIndex = new FilteredDailyNoteIndex(this.app, this.index, () => this.settings.filterRules);
 		this.dayFiles = new DayFileIndex(this.app, this.index, this.daily, () => this.settings);
 		// File history never makes an empty day eligible in note-only mode.
@@ -476,6 +480,8 @@ export default class JournalViewPlugin extends Plugin {
 				typeof saved.reflectionMaxContext === "number" && Number.isFinite(saved.reflectionMaxContext)
 					? clampReflectionContext(saved.reflectionMaxContext)
 					: DEFAULT_SETTINGS.reflectionMaxContext,
+			reflectionSemantic: booleanSetting(saved.reflectionSemantic, DEFAULT_SETTINGS.reflectionSemantic),
+			reflectionEmbeddingModel: stringSetting(saved.reflectionEmbeddingModel, DEFAULT_SETTINGS.reflectionEmbeddingModel).trim(),
 			reflectionPresets: presetsSetting(saved.reflectionPresets),
 		};
 	}

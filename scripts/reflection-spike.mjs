@@ -16,6 +16,7 @@
 //   node scripts/reflection-spike.mjs [--models a,b] [--questions id,id]
 //     [--today YYYY-MM-DD] [--folder path] [--server url] [--max-context tokens]
 //     [--exclude-tag tag] [--runs n] [--label name] [--timeout seconds]
+//     [--semantic [embedding-model]]
 //   node scripts/reflection-spike.mjs --ask "What did I cook in August?" [--shape "One line per dish."]
 //     [--follow-up "And in September?"]
 //   node scripts/reflection-spike.mjs --list
@@ -23,10 +24,12 @@
 //
 // --ask puts a question of your own, in the shape given or the one for
 // questions, and --follow-up then asks its answer a follow-up, as the card does. --list names the built-in questions. --call runs one tool as a
-// model would and prints what it returns, without a model. Results of the
-// other runs land in test-vault/.reflection-spike/<run>/, which Obsidian hides.
+// model would and prints what it returns, without a model. --semantic turns
+// search by meaning on, with the embedding model named or the suggested one;
+// its index is kept beside the results. Results of the other runs land in
+// test-vault/.reflection-spike/<run>/, which Obsidian hides.
 
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -53,7 +56,10 @@ async function loadEngine() {
 				'export { reflectWithTools } from "./src/reflection/tools";',
 				'export { BUILT_IN_PRESETS, QUESTION_FORMAT } from "./src/reflection/presets";',
 				'export { ProviderError } from "./src/reflection/provider";',
-				'export { repairCitations } from "./src/reflection/context";',
+				'export { propertyLine, repairCitations } from "./src/reflection/context";',
+				'export { sharedAcross } from "./src/reflection/tools";',
+				'export { SUGGESTED_EMBEDDING_MODEL } from "./src/reflection/provider";',
+				'export { SemanticIndex, embeddingPrompts, updateIndex } from "./src/reflection/semantic";',
 			].join("\n"),
 			resolveDir: root,
 			loader: "ts",
@@ -123,9 +129,12 @@ function readJournal(folder, excludeTag) {
 			const inline = [...body.matchAll(/(?:^|\s)#([\p{L}\p{N}_/-]+)/gu)].map((match) => match[1]);
 			const path = `Journal/${name}`;
 			bodies.set(path, body);
+			const stat = statSync(join(folder, name));
 			return {
 				key: base.slice(0, 10),
 				path,
+				mtime: Math.round(stat.mtimeMs),
+				size: stat.size,
 				link: `[[${base}]]`,
 				name: base,
 				properties,
@@ -134,6 +143,51 @@ function readJournal(folder, excludeTag) {
 		})
 		.filter((note) => !excludeTag || !note.tags.some((tag) => tag === excludeTag || tag.startsWith(`${excludeTag}/`)));
 	return { notes, body: async (note) => bodies.get(note.path) ?? null };
+}
+
+/**
+ * Search by meaning over a journal, as the plugin's semanticStore.ts gives the
+ * vault's: the index is kept in a file beside the results, brought up to
+ * date before each search, and asked for the notes nearest each text.
+ */
+function searchByMeaning(engine, journal, server, model) {
+	const file = join(RESULTS_FOLDER, `index-${model.replace(/[^\w.-]/g, "_")}.bin`);
+	let index = null;
+	const embed = async (texts) => {
+		const response = await fetch(`${server}/api/embed`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model, input: texts, truncate: true }),
+		});
+		if (!response.ok) throw new Error(`${model}: /api/embed answered ${response.status}: ${await response.text()}`);
+		return (await response.json()).embeddings;
+	};
+	return async (texts, signal, onStatus) => {
+		if (!index) {
+			const saved = existsSync(file) ? engine.SemanticIndex.parse(readFileSync(file).buffer.slice(0)) : null;
+			index = saved?.model === model ? saved : new engine.SemanticIndex(model);
+		}
+		const shared = engine.sharedAcross(journal.notes);
+		const notes = journal.notes.map((note) => ({
+			path: note.path,
+			mtime: note.mtime,
+			size: note.size,
+			heading: engine.propertyLine(note, shared),
+			body: () => journal.body(note),
+		}));
+		await engine.updateIndex(index, notes, embed, {
+			signal,
+			progress: (done, total) => onStatus(`Indexing your notes… ${done} of ${total}`),
+			save: async () => {
+				writeFileSync(file, new Uint8Array(index.serialize()));
+				index.dirty = false;
+			},
+		});
+		const prompts = engine.embeddingPrompts(model);
+		const vectors = await embed(texts.map((text) => prompts.query(text)));
+		const allowed = new Set(journal.notes.map((note) => note.path));
+		return vectors.map((vector) => index.search(vector, (path) => allowed.has(path)));
+	};
 }
 
 // --- Ollama ---------------------------------------------------------------------
@@ -326,6 +380,12 @@ const QUESTIONS = [
 	{ id: "bookshelf", text: "Did I ever build the bookshelf for the hallway?" },
 	{ id: "last-month-theo", text: "What did Theo and I do together over the last month?" },
 	{ id: "august", text: "What were the best days of August?" },
+	// Questions whose notes share few of their words, which a search by meaning is for.
+	{ id: "job-worry", text: "When was I worried about losing my job, and how did it end?" },
+	{ id: "career", text: "Who influenced my choice of career?" },
+	{ id: "support", text: "What did I learn about how to support someone who is upset?" },
+	{ id: "health", text: "What health problems did I have?" },
+	{ id: "bookings", text: "How was I doing when I was working on the Bookings team?" },
 ];
 
 function parseArgs(argv) {
@@ -334,7 +394,12 @@ function parseArgs(argv) {
 		return index === -1 ? fallback : argv[index + 1];
 	};
 	const call = argv.indexOf("--call");
+	const semantic = argv.indexOf("--semantic");
+	// The model's name follows the flag, unless the next thing is another flag or the end.
+	const embedding = semantic !== -1 && argv[semantic + 1] && !argv[semantic + 1].startsWith("--") ? argv[semantic + 1] : "";
 	return {
+		semantic: semantic !== -1,
+		embedding,
 		models: value("--models", DEFAULT_MODELS.join(",")).split(","),
 		questions: value("--questions", "").split(",").filter(Boolean),
 		today: value("--today", ""),
@@ -398,6 +463,9 @@ async function main() {
 	if (!journal.notes.length) throw new Error(`No notes in ${options.folder}; run npm run sample-journal`);
 	// The sample journal's own today is its last note, so its planted dates line up.
 	const today = options.today || journal.notes[journal.notes.length - 1].key;
+	if (options.semantic) {
+		journal.nearest = searchByMeaning(engine, journal, options.server, options.embedding || engine.SUGGESTED_EMBEDDING_MODEL);
+	}
 
 	if (options.call) {
 		const log = { results: [] };

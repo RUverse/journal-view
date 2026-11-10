@@ -100,6 +100,13 @@ export interface JournalViewSettings {
 	reflectionFolder: string;
 	/** The most context a reflection asks a model for, in tokens. */
 	reflectionMaxContext: number;
+	/**
+	 * Lets a reflection's search also go by meaning: an embedding model turns
+	 * the notes into vectors, kept in an index file in the plugin's folder.
+	 */
+	reflectionSemantic: boolean;
+	/** The embedding model search by meaning uses. Empty = the suggested one when installed, else the first. */
+	reflectionEmbeddingModel: string;
 	/** The presets, in order. Null until the reader changes them: the built-in ones, as shipped. */
 	reflectionPresets: ReflectionPreset[] | null;
 }
@@ -136,6 +143,8 @@ export const DEFAULT_SETTINGS: JournalViewSettings = {
 	reflectionModel: "",
 	reflectionFolder: "Reflections",
 	reflectionMaxContext: 32768,
+	reflectionSemantic: false,
+	reflectionEmbeddingModel: "",
 	reflectionPresets: null,
 };
 

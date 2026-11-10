@@ -2479,6 +2479,20 @@ textarea.journal-reflect-question {
 	color: var(--text-muted);
 }
 
+/* The index's state, and under it where its file is. */
+.journal-reflect-index-failed {
+	color: var(--text-error);
+}
+
+.journal-reflect-index-path {
+	color: var(--text-faint);
+	overflow-wrap: anywhere;
+}
+
+.journal-reflect-hidden {
+	display: none;
+}
+
 .journal-reflect-section-title {
 	margin: var(--size-4-5) 0 var(--size-4-2);
 	font-size: var(--font-ui-smaller);

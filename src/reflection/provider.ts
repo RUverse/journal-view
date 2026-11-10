@@ -71,9 +71,23 @@ export class ProviderError extends Error {
 	}
 }
 
+/** What the server has installed: the models that write answers, and by name those that only embed text. */
+export interface InstalledModels {
+	chat: ModelInfo[];
+	embedding: string[];
+}
+
 export interface ReflectionProvider {
-	/** The models installed on the server. Throws `ProviderError("unreachable")` when nothing answers. */
+	/** The models installed on the server that write answers. Throws `ProviderError("unreachable")` when nothing answers. */
 	listModels(): Promise<ModelInfo[]>;
+	/** Every model installed on the server, by what it does. Throws as `listModels` does. */
+	listInstalled(): Promise<InstalledModels>;
+	/**
+	 * Turns texts into vectors with an embedding model, one for each, for
+	 * search by meaning. Throws `ProviderError("model-missing")` when the
+	 * model is not installed, and `ProviderError("aborted")` when the signal fires.
+	 */
+	embed(model: string, texts: readonly string[], signal: AbortSignal): Promise<number[][]>;
 	/** One model's capabilities and context length. Throws `ProviderError("model-missing")` when it is not installed. */
 	showModel(name: string): Promise<ModelInfo>;
 	/** Streams one answer. Throws `ProviderError("aborted")` when the signal fires. */
@@ -99,6 +113,19 @@ export function defaultModel(models: readonly ModelInfo[]): ModelInfo | null {
 		models[0] ??
 		null
 	);
+}
+
+/**
+ * The embedding model the settings suggest pulling for search by meaning.
+ * Of those compared on the sample journal it found the most, reads over a
+ * hundred languages, and is small; its larger tags add only encoders for
+ * images and sound, which a journal's text does not use.
+ */
+export const SUGGESTED_EMBEDDING_MODEL = "embeddinggemma-2:270m";
+
+/** The embedding model search by meaning uses while none is chosen: the suggested one when installed, else the first. */
+export function defaultEmbeddingModel(models: readonly string[]): string | null {
+	return models.find((model) => model === SUGGESTED_EMBEDDING_MODEL) ?? models[0] ?? null;
 }
 
 /** What to tell the reader when the server answers but has nothing to run. */
