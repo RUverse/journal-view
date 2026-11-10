@@ -46,7 +46,9 @@ an account, or access files outside your vault.
 
 Its only network requests are reflections, which you start yourself: a reflection sends the notes it
 reads to the Ollama server set in the Reflect window's settings, which by default runs on your own
-computer, and to nothing else. Turn off **Reflections** in Settings → Journal View to keep the feature
+computer, and to nothing else. If you turn on search by meaning there, your notes are also sent to
+that server's embedding model, and an index made from them is kept in the plugin's folder until you
+turn it off. Turn off **Reflections** in Settings → Journal View to keep the feature
 out of sight.
 
 ## Contributing

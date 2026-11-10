@@ -54,7 +54,7 @@ Agreed with the user on 2026-10-19:
 | --- | --- | --- |
 | Context | The model finds the notes itself, through tools, for presets and questions alike; a preset's question says what it is about ("the last two weeks"). Decided 2026-11-10. Until then presets fixed their own range, and a question came with a picker of what to read | Choosing a range was effort the question already made unnecessary, and a fixed range cannot follow a question about a person or a subject |
 | Models | A model has to support tools, and the feature is tuned and judged on models of about 26B parameters and up. Decided 2026-11-10 | Smaller models chose and read notes too unreliably to be worth supporting |
-| Search | Ranked keyword search, without embeddings. Decided 2026-11-10 | It needs no second model or index on disk, and the model can try other words for the same thing |
+| Search | Ranked keyword search. Search by meaning, with an embedding model, can be turned on in the settings and is off until then. Decided 2026-11-10, the second part later that day ([step 8](#8-search-by-meaning)) | By words needs no second model or index on disk, and is what finds names; by meaning finds the notes that share none of the words asked for |
 | Storage | One Markdown note per reflection in a configurable `Reflections` folder | Searchable, linkable, and kept without the plugin; no lock-in |
 | Composer | The button opens the Reflect window: a question of your own, and the presets below it, each a click away. Changed from a menu on 2026-10-20 | A question of your own belongs next to the presets, not behind a menu item |
 | Settings | Server, model, folder, context and presets live on the window's settings page; the plugin's tab keeps one **Reflections** toggle. Decided 2026-10-20 | The settings sit where they are used |
@@ -191,15 +191,17 @@ stays behind small host interfaces, as with the view's other collaborators.
 | `ollama.ts` | Ollama implementation. `/api/tags` and `/api/show` go through `requestUrl`; `/api/chat` streams with `fetch` and falls back to a non-streaming `requestUrl` |
 | `context.ts` | Dates as the model reads them, notes as it is shown them, the token budget, and mending citations |
 | `search.ts` | The index of the journal's words, and ranked search over it with excerpts |
+| `semantic.ts` | Search by meaning: the vectors of the notes, how a note is cut up for them, the file they are kept in, and joining two rankings |
 | `tools.ts` | The tools a model reads the journal with, what each returns, and the bounded loop that runs them |
 | `journal.ts` | The vault's journal, as `tools.ts` reads it: the notes the filters let through, and their text |
+| `semanticStore.ts` | The index file of search by meaning: reading and writing it, bringing it up to date, and what the settings say of it |
 | `presets.ts` | Built-in presets, and merging them with the user's |
 | `store.ts` | Indexes the Reflections folder by date, follows vault events, creates, rewrites and trashes reflection files |
 | `card.ts` | The bordered card: skeleton, streaming, Stop, Regenerate, follow-ups, sources, errors |
 | `conversation.ts` | A reflection's follow-ups as its note keeps them, read back into a conversation |
 | `modal.ts` | The Reflect window: the question, the presets, and the settings page with the connection, the model and preset management |
 
-`context.ts`, `search.ts`, `tools.ts` and `presets.ts` import nothing of Obsidian's at run time, so
+`context.ts`, `search.ts`, `semantic.ts`, `tools.ts` and `presets.ts` import nothing of Obsidian's at run time, so
 the spike script bundles them as they are and runs them against local models: what is tuned there
 is what ships.
 
@@ -314,6 +316,8 @@ a second for 3,300 notes, after which a search takes a few milliseconds.
   them ranks above one with some; commas, `OR` and `|` separate other ways of saying a thing; quotes
   keep words together, and fall back to the words apart when they stand together nowhere. A word in
   most of the notes (`to` in `trip to Lisbon`) is not searched for beside rarer ones.
+- **By meaning**, when it is turned on: the notes nearest the words asked for, and nearest the
+  question itself, join those found by their words; see [step 8](#8-search-by-meaning).
 - **Ranking** is BM25. When a query has several words, the result says how many notes each is in:
   a search for `trip to Lisbon` that finds a note about tripping says that no note mentions Lisbon.
 - **What a search returns** depends on what it found:
@@ -686,10 +690,10 @@ Tested in the test vault on `gemma4:26b`, with the journal moved up to 10 Novemb
   presets were disabled, the model picker listed it as unable to use tools, and a run started
   anyway failed with the message saying so.
 
-Not done: embeddings. A search by meaning would find a note about a subject that shares none of
-its words, wherever it lies, which the days between mentions do only for a subject that fits in a
-stretch short enough to read. It needs a second model pulled and an index kept on disk, so it was
-left for when keyword search is seen to fall short on a real journal.
+Left out of this step: embeddings. A search by meaning finds a note about a subject that shares
+none of its words, wherever it lies, which the days between mentions do only for a subject that
+fits in a stretch short enough to read. It needs a second model pulled and an index kept on disk;
+[step 8](#8-search-by-meaning) added it as something to turn on.
 
 ### 7. Regenerate opens the question
 
@@ -723,6 +727,160 @@ answer and its follow-up would be replaced. With the question changed and `qwen3
 picked, the run used that model and the new question, the note's `title`, `prompt` and `model`
 were rewritten and its follow-up removed, the card showed the new title and model, and the
 setting still read `gemma4:26b`.
+
+### 8. Search by meaning
+
+Asked for on 2026-11-10: an optional search by meaning, turned on in the Reflect window's settings,
+which say what it costs: a second model, and an index file.
+
+#### Which model
+
+`scripts/reflection-search-eval.mjs` asks twenty questions of the sample journal whose answering
+entries are known (*When was I worried about losing my job?*, *Who influenced my choice of
+career?*), and counts how many of them each way of searching puts in its first ten. It needs no
+chat model. By words it searches with the keywords a chat model would pick, which are written
+beside each question.
+
+| Search | Answers in the first ten | nDCG@10 | A note costs |
+| --- | --- | --- | --- |
+| By words: the question as asked | 0.34 | 0.34 | |
+| By words: a chat model's keywords | 0.59 | 0.56 | |
+| By meaning, `embeddinggemma-2:270m` | 0.76 | 0.73 | 13 ms, 788 bytes |
+| Both, `embeddinggemma-2:270m` | 0.76 | 0.76 | |
+| By meaning, `embeddinggemma-2` (740M) | 0.76 | 0.73 | 48 ms, 788 bytes |
+| Both, `embeddinggemma-2` (740M) | 0.76 | 0.76 | |
+| By meaning, `qwen3-embedding:0.6b` | 0.72 | 0.72 | 28 ms, 1,044 bytes |
+| Both, `qwen3-embedding:0.6b` | 0.77 | 0.77 | |
+| By meaning, `nomic-embed-text` | 0.66 | 0.64 | 6 ms, 788 bytes |
+| Both, `nomic-embed-text` | 0.72 | 0.72 | |
+| By meaning, `bge-m3` | 0.62 | 0.63 | 29 ms, 1,044 bytes |
+| Both, `bge-m3` | 0.69 | 0.69 | |
+
+"By meaning" is of the keywords, which found as much as the question did or more; "both" joins the
+notes found by the keywords with the ten nearest the keywords and the ten nearest the question, as
+the plugin does. Run on 2026-11-10 with Ollama 0.40.16; twenty questions, so a figure can move by a
+few hundredths.
+
+What it showed:
+
+- **`embeddinggemma-2:270m` is the suggestion.** It and `qwen3-embedding:0.6b` found the most, and
+  it is the smaller and quicker, and reads over a hundred languages. The 740M `embeddinggemma-2`
+  scored the same to the last digit: its text model is the same 270M, and the rest are encoders
+  for images and sound.
+- **Both together beat either alone**, for every model. By words alone the search finds names and
+  exact words and misses what is said otherwise; by meaning alone it is the other way round.
+- **A note's properties belong in what is embedded.** With `mood: anxious · tags: work, sleep`
+  above the text, `embeddinggemma-2:270m` scored 0.76 where the text alone scored 0.68.
+- **The words a model wants before its texts matter, and differ.** `embeddinggemma-2` found more
+  with `task: search result | query: ` and `title: none | text: `; `nomic-embed-text` found more
+  without its `search_query: ` and `search_document: `, through Ollama, so it is given none.
+- **No score says whether anything was found.** For questions the journal has nothing on (*a
+  skiing holiday*, *my wedding day*), the nearest note stood as far above the rest as for real
+  ones, and its nearness overlapped theirs. This decided how the results are used, below.
+
+#### How it works
+
+- **The index** (`semantic.ts`). A note is embedded with its properties above its text, whole when
+  it is short and in pieces of about 1,400 characters, cut at paragraphs, when it is long; a note
+  counts for its nearest piece. Each number of a vector is kept as one byte, so a note costs about
+  a kilobyte, and the order of the nearest notes comes out the same. The file is a header, the
+  notes with when they last changed, and the vectors: `reflection-index.bin` in the plugin's
+  folder. A file that is cut short, of another version or of another model reads as no index.
+- **Keeping it current** (`semanticStore.ts`). Before a search, the notes that are new or changed
+  since, by their modification time and size, are embedded, sixteen pieces at a time, and the file
+  saved every 200 notes, so a first build that is stopped keeps what it did. One build runs at a
+  time. Only notes the filters let through are embedded, as only those are read. Notes deleted
+  from the vault leave the index. Changing the model or turning the feature off deletes the file.
+- **Searching** (`tools.ts`). `search_journal` asks for the notes nearest the words it was given,
+  and nearest the question itself, which is kept for the run. Of each it takes at most ten, and
+  only those that stand 1.5 standard deviations above the mean nearness of the notes searched,
+  since what counts as near differs from model to model.
+- **Candidates, not answers.** Notes found by their words are passed as before: the story between
+  them, a handful whole, or excerpts of the best. Notes found by meaning alone never are. They
+  follow as excerpts marked *in other words*, at most eight, for the chat model to judge and read
+  on from with `read_notes`; they do not stretch a story, and they are not what an answer may lean
+  on unread. When nothing was found by words, they are all there is: `No note uses the words …,
+  but 3 notes may be about it in other words`. Where the two lists are shown as one, they are
+  ordered by reciprocal rank, since their scores cannot be compared.
+- **When it cannot be had**: no embedding model, a model not installed, Ollama not answering. The
+  search goes by words, a notice says so once, and the settings show why.
+
+#### The settings
+
+A **Search by meaning** section on the settings page: the switch, with what it does and what it
+costs; and, while it is on, the embedding model, and the index with what it holds
+(`68 notes · 56 KB · embeddinggemma-2:270m · up to date`, or `1 new or changed, read at the next
+search`, or `Not built yet: 68 notes to read`), where its file is, **Build now** or **Update now**,
+**Stop** while it reads, and an arrow that builds it again from nothing. With no embedding model
+installed it shows the command that pulls one.
+
+#### What else changed on the way
+
+- **An answer given without looking, twice.** `gemma4:26b` answered *Who influenced my choice of
+  career?* with "your journal does not contain this" before searching, was told to look, and said
+  it again; the second answer was accepted. Now the search is run for it, with the question as
+  what to find.
+- **Queries written as phrases.** A model that is told a description works writes one, so English
+  words that carry no subject (`who`, `me`, `about`) are left out of a query that has others;
+  `teacher who inspired me` matched seventeen notes by `who`.
+- **"Not in the journal" stands** when a search found only notes that might be about the subject
+  and the answer cites none, as it does when a search finds nothing.
+
+#### Results
+
+**With a chat model**, through `scripts/reflection-spike.mjs --semantic`, on `gemma4:26b`. With the
+whole 32k context the sample journal is small enough to be read nearly whole, which hides what a
+search finds, so seven questions were asked twice each with a context of 8k, as if the journal
+were four times its size. For each, the notes that hold the answer are known: 28 in all.
+
+| | Notes holding the answer that were cited |
+| --- | --- |
+| By words | 16 of 28 |
+| With search by meaning | 21 of 28 |
+
+*Who influenced my choice of career?* went from never finding the note about the art teacher to
+finding it both times, reading that one note; the reorg's outcome and the worry about the job were
+found each time rather than some of the time. *What did I learn about how to support someone who is
+upset?* was not helped: the note is not among the nearest to that question for any model tried.
+*How was I doing when I was working on the Bookings team?* was the same either way, since the
+team's name finds its days, and it is reading those days that answers it.
+
+With the whole context, all 23 questions and presets ran on `gemma4:26b` with search by meaning
+on, and five on `qwen3.8:27b-mlx`: every citation but one was to a note read in full (`gemma4:26b`
+once wrote 2016 for 2026), and both said the notes do not cover Lisbon, `qwen3.8:27b-mlx` after
+naming the candidates it was offered and why they were not about it.
+
+One fault found on the way and mended, which was not search by meaning's: `qwen3.8:27b-mlx`, given
+the days of the job worry up to its last mention, wrote that "the notes stop at 14 September" and
+that how it ended was not recorded; it was, six days later. A story now runs a week past the last
+mention when that fits, and says how many notes the journal holds before and after it.
+
+**In the test vault**, on `gemma4:26b` with `embeddinggemma-2:270m`:
+
+- The settings showed the section with the switch off. Switched on, the model picker listed the
+  five embedding models installed with `embeddinggemma-2:270m` chosen, and the index read
+  `Not built yet: 68 notes to read`.
+- **Build now** counted from `Reading 0 of 68 notes…` to `68 notes · 56 KB · embeddinggemma-2:270m ·
+  up to date` in about a second, with **Stop** in its place meanwhile, and wrote
+  `reflection-index.bin` (55,852 bytes) into the plugin's folder.
+- *Who influenced my choice of career?* searched, read the note of 14 October, and answered from
+  it alone.
+- After a line was added to one note, the index read `1 new or changed, read at the next search`,
+  with **Update now**.
+- With an embedding model named that is not installed, a reflection searched by words and
+  answered, one notice said that search by meaning was not available and why, and the index line
+  showed the same; with the setting put back, the index was as it had been.
+- Switched off, the file was gone and only the switch showed; switched on again, it read
+  `Not built yet`.
+- `dev:errors` stayed empty.
+
+`semantic.ts` was also run by itself: a long note cut into pieces that follow one another without
+a gap; an index with notes of several pieces, one replaced and one deleted, written to a file and
+read back with the same nearest notes; a file cut short or of the wrong kind read as none; and a
+build stopped part-way that kept what it had done and went on from there.
+
+Not exercised in Obsidian: a first build of thousands of notes, **Stop** part-way through one, the
+arrow that builds again from nothing, and a journal in a language other than English.
 
 ## Testing with Ollama on a Mac
 
@@ -789,10 +947,12 @@ the plugin has to be disabled and re-enabled to load a new build.
   round, since what the model will read is not known up front.
 - **Speed.** On a machine without a GPU, a reflection that reads three months can take minutes.
   The card says what is being read, and Stop always works.
-- **What a search cannot find.** Search is by words, so a note about a subject that uses none of
-  the words asked for is found only when it lies between notes that do, or when the model tries
-  the right other words. Embeddings would find more, at the cost of a second model and an index on
-  disk; see step 6.
+- **What a search cannot find.** By words, a note about a subject that uses none of the words asked
+  for is found only when it lies between notes that do, or when the model tries the right other
+  words. Search by meaning finds more of them, not all: see step 8 for what it missed.
+- **What a search by meaning finds that is not there.** An embedding model always finds some notes
+  nearest, about the subject or not, and no score told the two apart on the sample journal. So
+  those notes are only ever offered as excerpts for the chat model to judge.
 - **Scroll position.** Text streaming into a card above the reader (newest first) must not move what
   they are reading, and a card being watched must not climb away from them. See step 5 for how the
   anchor tells the two apart.
@@ -811,6 +971,6 @@ Not yet confirmed with the user; change them here if they turn out wrong.
 - A preset's reflection keeps the preset's name and answer shape when its question is changed for
   a regenerate; a question of your own takes the new question as its title.
 - **Find in journal** does not search reflections in the first version.
-- **Reflections** is on by default.
+- **Reflections** is on by default, and search by meaning off.
 - There is one model for every reflection, chosen on the settings page; the window only shows it.
   A regenerate can name another, for that answer alone.

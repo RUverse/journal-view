@@ -99,9 +99,11 @@ journal-wide mosaic of words used for the first time each month.
 
 `src/reflection/` is Reflection: a local model (Ollama, `ollama.ts`) is asked a question or a preset
 (`presets.ts`), finds the notes it is about through tools (`tools.ts`: ranked search in `search.ts`,
-reading chosen notes or a range of days), and writes back a reflection note. `tools.ts`, `search.ts`,
-`context.ts` and `presets.ts` touch nothing of Obsidian's, so `scripts/reflection-spike.mjs` runs
-them as they are against local models; `journal.ts` hands them the vault's notes. `store.ts` indexes
+optionally by meaning too in `semantic.ts`, reading chosen notes or a range of days), and writes
+back a reflection note. `tools.ts`, `search.ts`, `semantic.ts`, `context.ts` and `presets.ts` touch
+nothing of Obsidian's, so `scripts/reflection-spike.mjs` runs them as they are against local models,
+and `scripts/reflection-search-eval.mjs` measures the search alone; `journal.ts` hands them the
+vault's notes, and `semanticStore.ts` keeps the index file search by meaning reads. `store.ts` indexes
 reflection notes by day, `runner.ts` holds the ones being written so they outlive their day's cards,
 `card.ts` is the card a day shows for each, and `modal.ts` is the Reflect window with its settings,
 opened by the button `day.ts` puts in today's header. `conversation.ts` reads a reflection's

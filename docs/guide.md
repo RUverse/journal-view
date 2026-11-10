@@ -170,6 +170,29 @@ excluding `#private` keeps those notes from the model. When the notes of a long 
 model's context, whole notes are left out evenly across the range, and the model is told which, so
 it can read them by themselves.
 
+### Search by meaning
+
+A search by words finds a note only when it uses one of the words asked for, in some form. **Search
+by meaning**, in the Reflect window's settings, lets a reflection also find notes that are about
+what you asked in other words: a search for exercise finds the days you went running. It is off
+until you turn it on, because it needs two things:
+
+- **A second, small model.** An embedding model reads each note and turns it into numbers that lie
+  near those of other texts about the same thing. Pull one in a terminal, such as
+  `ollama pull embeddinggemma-2:270m` (about 400 MB, and it reads over a hundred languages). It runs
+  on the same Ollama server as everything else, so your notes still go nowhere but there.
+- **An index file.** Those numbers are kept in `reflection-index.bin` in the plugin's folder, about
+  a kilobyte a note. It is built the first time a reflection searches, which the reflection says
+  while it waits (`Indexing your notes… 120 of 800`), or with **Build now** in the settings. After
+  that only new and changed notes are read. It holds only notes your [filters](#filters) let
+  through. Turning search by meaning off, or changing its model, deletes the file.
+
+What it finds is offered to the model as excerpts marked *in other words*, for it to judge and read
+on from: an embedding model always finds something nearest, whether or not any note is about the
+subject, so these are candidates, not answers. Names and exact words are still found by the words
+themselves. When the embedding model is missing or Ollama does not answer for it, reflections go on
+searching by words, and a notice says so once.
+
 ### Reading a reflection
 
 The reflection appears under today's card (above it when the journal runs newest to oldest) with a
@@ -222,6 +245,9 @@ Select the gear in the Reflect window for its settings. **Settings → Journal V
 | Model | `gemma4:26b` when it is installed, else the first that can use tools | The model reflections use, named at the top of the Reflect window. Models that cannot use tools are listed, but cannot be chosen |
 | Folder | `Reflections` | Where reflection notes are saved. It cannot be the daily-note folder |
 | Maximum context | 32,768 tokens | The most a reflection asks the model to hold. More lets it read more notes for one answer, and uses more memory |
+| Search by meaning | Off | Lets a reflection's search also find notes that are about what was asked without using its words; see [Search by meaning](#search-by-meaning) |
+| Embedding model | `embeddinggemma-2:270m` when it is installed, else the first | Shown while search by meaning is on: the model that turns notes into numbers. Changing it builds the index again |
+| Index | Not built | Shown while search by meaning is on: how many notes the index holds, its size and model, and whether any are new or changed. **Build now** or **Update now** reads them without waiting for a reflection, and the arrow builds it again from nothing |
 | Presets | Six built in | Reorder, edit, delete, or add presets: each is a name, a question, and optionally the shape of its answer. **Restore built-in presets** brings back the built-in ones you edited or deleted, and keeps your own |
 
 On a computer without a capable GPU, a 90-day preset can take minutes.
