@@ -52,6 +52,8 @@ interface RunSpec {
 	kind: RunKind;
 	target: TFile | null;
 	question: string | null;
+	/** The model to ask, when it is not the one the settings choose: a regenerate can name its own. */
+	model?: string;
 }
 
 interface ActiveRun extends ReflectionRun {
@@ -129,17 +131,26 @@ export class ReflectionRunner extends Component {
 	}
 
 	/**
-	 * Asks a reflection's question again, as of its own day. The new answer
-	 * replaces the old one, and its follow-ups, once it is complete.
+	 * Asks a reflection again, as of its own day: its question, or the one it
+	 * was changed to, of the model given or the one the settings choose. The
+	 * new answer replaces the old one, and its follow-ups, once it is complete.
 	 */
-	regenerate(reflection: StoredReflection): void {
+	regenerate(reflection: StoredReflection, changes: { prompt?: string; model?: string } = {}): void {
 		if (this.runFor(reflection.file)) return;
+		const request = this.requestOf(reflection);
+		const prompt = changes.prompt?.trim();
+		if (prompt && prompt !== request.prompt) {
+			request.prompt = prompt;
+			// A question of the reader's own is its own title; a preset keeps its name and its shape.
+			if (!request.presetId) request.title = prompt;
+		}
 		this.launch({
 			key: reflection.key,
-			request: this.requestOf(reflection),
+			request,
 			kind: "regenerate",
 			target: reflection.file,
 			question: null,
+			model: changes.model || undefined,
 		});
 	}
 
@@ -228,7 +239,7 @@ export class ReflectionRunner extends Component {
 					"The Reflections folder is the daily-note folder. Choose another in the Reflect window's settings.",
 				);
 			}
-			let model = plugin.settings.reflectionModel;
+			let model = run.spec.model ?? plugin.settings.reflectionModel;
 			if (!model) {
 				const first = defaultModel(await provider.listModels());
 				if (!first) throw new ProviderError("model-missing", NO_MODELS_MESSAGE);
@@ -361,6 +372,9 @@ export class ReflectionRunner extends Component {
 					run.target,
 					() => text,
 					(frontmatter) => {
+						// The question may have been changed for this answer.
+						frontmatter.title = run.request.title;
+						frontmatter.prompt = run.request.prompt;
 						frontmatter.model = model;
 						if (run.range) {
 							frontmatter.from = run.range.from;

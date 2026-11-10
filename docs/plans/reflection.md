@@ -138,6 +138,8 @@ States, in order:
    - Top right, matching a note's header buttons: **Regenerate**, **Delete**, and **Open note in a
      tab**. As on a note, Open shows while the card is hovered, and the other two only while its
      header is (changed on 2026-10-27; all three showed on card hover, without Open).
+   - **Regenerate** opens the Reflect window on the reflection's question, to change it or the
+     model before asking again; see [step 7](#7-regenerate-opens-the-question).
    - At the bottom, an **Ask a follow-up…** box continues the same conversation inside the card.
 4. **Error:** Ollama stopped answering, the model is missing, or the notes did not fit. The card
    says what happened and offers **Retry**. Nothing is saved unless some text arrived.
@@ -260,9 +262,10 @@ sources: ["[[2026-10-05]]", "[[2026-10-09]]", "[[2026-10-14]]"]
   2026-11-10 a `scope` property recorded what Regenerate and follow-ups read again; it is no longer
   written, and Regenerate removes it.
 - The file is written once the stream ends, or on **Stop** if some text arrived. Regenerate rewrites
-  the body in place with `vault.process` once the new answer is complete, and asks first when there
-  are follow-ups, which it clears; **Stop** or an error keeps the old answer. It then rewrites
-  `model`, `from`, `to` and `sources` with `processFrontMatter`, and removes `follow-ups`.
+  the body in place with `vault.process` once the new answer is complete, which clears its
+  follow-ups; **Stop** or an error keeps the old answer. It then rewrites `title`, `prompt`,
+  `model`, `from`, `to` and `sources` with `processFrontMatter`, and removes `follow-ups`. The
+  file keeps its name when the question changes.
   A follow-up adds its quote and answer to the end, its question to `follow-ups`, and its notes to
   `sources`, and widens `from` and `to`.
 - Delete reuses the note flow: `fileManager.promptForDeletion`, then `trashFile`
@@ -688,6 +691,37 @@ its words, wherever it lies, which the days between mentions do only for a subje
 stretch short enough to read. It needs a second model pulled and an index kept on disk, so it was
 left for when keyword search is seen to fall short on a real journal.
 
+### 7. Regenerate opens the question
+
+Asked for on 2026-11-10: Regenerate asked the very same thing again, which is rarely what a reader
+unhappy with an answer wants. It now opens the Reflect window on the reflection, with no presets:
+
+```text
+Regenerate                                             ✕
+┌──────────────────────────────────────────────────────┐
+│ What happened with the reorg at work?                │
+└──────────────────────────────────────────────────────┘
+[gemma4:26b ▾]  The new answer replaces this   [Regenerate]
+                one, and its follow-up.
+```
+
+- The question is the reflection's own, to change or leave; Enter asks.
+- The model picker lists the installed models, those without tools disabled, and starts on the
+  model reflections use. Picking another holds for this answer alone: the setting is not changed.
+  A problem with the model in the settings does not stop a regenerate with another one.
+- The line beside it says the answer is replaced, and counts the follow-ups that go with it. It
+  takes the place of the confirmation Regenerate used to ask for when there were follow-ups.
+- `runner.ts`'s `regenerate` takes the changed question and the model. The run asks as of the
+  reflection's own day, and on saving writes the note's `title`, `prompt` and `model`. A preset's
+  reflection keeps its name and answer shape; a question of your own becomes its own title.
+
+Tested in the test vault: Regenerate on a card opened the window on its question,
+with no presets, no settings button, `gemma4:26b` selected and `gemma3:4b` disabled, saying the
+answer and its follow-up would be replaced. With the question changed and `qwen3.8:27b-mlx`
+picked, the run used that model and the new question, the note's `title`, `prompt` and `model`
+were rewritten and its follow-up removed, the card showed the new title and model, and the
+setting still read `gemma4:26b`.
+
 ## Testing with Ollama on a Mac
 
 ```bash
@@ -769,9 +803,12 @@ Not yet confirmed with the user; change them here if they turn out wrong.
   keeps those notes from the model. The card notes when filters are on.
 - Days kept for their reflections stay even under an include filter; a day whose note a filter
   leaves out stays out, as a day with files does, since showing it would show the note.
-- Regenerate replaces the first answer and clears follow-ups, asking first when there are some.
-- Regenerate and follow-ups use the model currently chosen, not the one that wrote the reflection,
-  and read as of the reflection's own day.
+- Regenerate replaces the first answer and clears follow-ups, which its window says beforehand.
+- Follow-ups use the model currently chosen, not the one that wrote the reflection, and Regenerate
+  offers it first. Both read as of the reflection's own day.
+- A preset's reflection keeps the preset's name and answer shape when its question is changed for
+  a regenerate; a question of your own takes the new question as its title.
 - **Find in journal** does not search reflections in the first version.
 - **Reflections** is on by default.
 - There is one model for every reflection, chosen on the settings page; the window only shows it.
+  A regenerate can name another, for that answer alone.

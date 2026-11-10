@@ -1,10 +1,10 @@
-import { Component, MarkdownRenderer, Modal, Platform, TFile, setIcon, setTooltip } from "obsidian";
+import { Component, MarkdownRenderer, Platform, TFile, setIcon, setTooltip } from "obsidian";
 import type { App } from "obsidian";
 import { openFileInTab } from "../entry";
 import type JournalViewPlugin from "../main";
 import { createMoment } from "../moment";
 import { noteBody } from "../noteBody";
-import { parseConversation, questionQuote } from "./conversation";
+import { questionQuote } from "./conversation";
 import type { ReflectionRun } from "./runner";
 import type { StoredReflection } from "./store";
 
@@ -234,7 +234,7 @@ export class ReflectionCard {
 		this.draw(this.actionsEl, "stored", () => {
 			// As on a note, what changes the reflection shows only while its header is hovered.
 			if (Platform.isDesktop) {
-				this.addAction(this.actionsEl, "refresh-cw", "Regenerate reflection", () => void this.regenerate(), true);
+				this.addAction(this.actionsEl, "refresh-cw", "Regenerate reflection", () => this.regenerate(), true);
 			}
 			this.addAction(
 				this.actionsEl,
@@ -269,20 +269,10 @@ export class ReflectionCard {
 		await this.body.show(noteBody(text), file.path);
 	}
 
-	/** Asks first when the new answer would clear follow-ups. */
-	private async regenerate(): Promise<void> {
+	/** Opens the Reflect window on this reflection, where its question and model can be changed before it is asked again. */
+	private regenerate(): void {
 		if (!("stored" in this.source) || this.source.run) return;
-		const reflection = this.source.stored;
-		const { app, plugin } = this.host;
-		let followUps = 0;
-		try {
-			const body = noteBody(await app.vault.cachedRead(reflection.file));
-			followUps = parseConversation(body, reflection.followUps).followUps.length;
-		} catch (error) {
-			console.error(`Journal View: could not read ${reflection.file.path}`, error);
-		}
-		if (followUps && !(await confirmRegenerate(app, followUps))) return;
-		if (!this.destroyed) plugin.reflectionRuns.regenerate(reflection);
+		this.host.plugin.openRegenerateModal(this.source.stored);
 	}
 
 	private askFollowUp(): void {
@@ -521,27 +511,6 @@ export class ReflectionCard {
 		}
 		void app.workspace.openLinkText(file.path, sourcePath, newTab);
 	}
-}
-
-/** Asks before Regenerate clears a reflection's follow-ups. */
-function confirmRegenerate(app: App, followUps: number): Promise<boolean> {
-	return new Promise((resolve) => {
-		const modal = new Modal(app);
-		let confirmed = false;
-		modal.titleEl.setText("Regenerate this reflection?");
-		const cleared = followUps === 1 ? "its follow-up" : `its ${followUps} follow-ups`;
-		modal.contentEl.createEl("p", { text: `The new answer replaces this one, and ${cleared} will be cleared.` });
-		const buttons = modal.contentEl.createDiv({ cls: "modal-button-container" });
-		const regenerate = buttons.createEl("button", { cls: "mod-warning", text: "Regenerate" });
-		regenerate.addEventListener("click", () => {
-			confirmed = true;
-			modal.close();
-		});
-		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => modal.close());
-		modal.onClose = () => resolve(confirmed);
-		modal.open();
-		regenerate.focus();
-	});
 }
 
 /** The link text inside `[[…]]`. */

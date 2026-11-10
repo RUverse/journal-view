@@ -186,9 +186,12 @@ unless some text arrived.
   reflection drew on, reads the ones the follow-up needs again, and can look further.
 - The buttons at the top right work as a note's do. **Open note in a tab** shows while you hover the
   reflection; **Regenerate** and **Delete** show only while you hover its header.
-- **Regenerate** asks the same question again, as of the day the reflection was made, and replaces
-  the answer once the new one is complete. **Stop** keeps the old answer. When
-  the reflection has follow-ups, you are asked first, since they are cleared.
+- **Regenerate** opens the Reflect window on the reflection's question, without the presets. Change
+  the question if you like, and pick the model that writes this answer; that choice holds for this
+  answer alone, and the model in the settings stays as it is. **Regenerate** there asks as of the
+  day the reflection was made, and replaces the answer once the new one is complete, along with the
+  question and model its note records. **Stop** keeps the old answer. The window says when the
+  reflection has follow-ups, since they are cleared with the answer they followed.
 - **Delete** moves the reflection's note to the trash, as deleting a note does.
 
 A reflection keeps being written while you scroll away, and its box picks up where it is when you

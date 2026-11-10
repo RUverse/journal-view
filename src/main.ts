@@ -32,8 +32,10 @@ import { OllamaProvider } from "./reflection/ollama";
 import type { ReflectionProvider } from "./reflection/provider";
 import { ReflectionRunner } from "./reflection/runner";
 import { ReflectionModal } from "./reflection/modal";
+import type { ReflectionModalOptions } from "./reflection/modal";
 import { presetsSetting } from "./reflection/presets";
 import { ReflectionStore } from "./reflection/store";
+import type { StoredReflection } from "./reflection/store";
 
 type EntryDirection = -1 | 0 | 1;
 
@@ -280,9 +282,18 @@ export default class JournalViewPlugin extends Plugin {
 	 * `onStart` follows it there, for a window opened outside the journal.
 	 */
 	openReflectModal(onStart?: () => void): void {
+		this.showReflectModal({ onStart });
+	}
+
+	/** Opens the Reflect window on a reflection, to change its question or its model and ask it again. */
+	openRegenerateModal(reflection: StoredReflection): void {
+		this.showReflectModal({ regenerate: reflection });
+	}
+
+	private showReflectModal(options: ReflectionModalOptions): void {
 		this.reflectModal?.close();
 		const modal = new ReflectionModal(this.app, this, {
-			onStart,
+			...options,
 			onClose: () => {
 				if (this.reflectModal === modal) this.reflectModal = null;
 			},

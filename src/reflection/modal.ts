@@ -3,6 +3,7 @@ import type { App } from "obsidian";
 import type JournalViewPlugin from "../main";
 import { createMoment } from "../moment";
 import type { Moment } from "../moment";
+import { noteBody } from "../noteBody";
 import {
 	DEFAULT_REFLECTION_SERVER,
 	MAX_REFLECTION_CONTEXT,
@@ -13,20 +14,28 @@ import {
 	reflectionServerSetting,
 	showSliderTooltip,
 } from "../settings";
+import { parseConversation } from "./conversation";
 import { canRestoreBuiltIns, presetRequest, presetsOf, questionRequest, restoreBuiltIns } from "./presets";
 import type { ReflectionPreset, ReflectionRequest } from "./presets";
 import { NO_MODELS_MESSAGE, ProviderError, SUGGESTED_MODEL, defaultModel, describeProviderError } from "./provider";
 import type { ModelInfo } from "./provider";
+import type { StoredReflection } from "./store";
 
 export interface ReflectionModalOptions {
 	/** Called once a reflection has started, after the window closes. */
 	onStart?: () => void;
 	onClose?: () => void;
+	/**
+	 * A reflection to ask again: the window opens on its question, to change
+	 * it or the model before the new answer replaces the old one.
+	 */
+	regenerate?: StoredReflection;
 }
 
-/** Where the window is: asking, its settings, or one preset being edited. */
+/** Where the window is: asking, asking a reflection again, its settings, or one preset being edited. */
 type Page =
 	| { kind: "ask" }
+	| { kind: "regenerate"; reflection: StoredReflection }
 	| { kind: "settings" }
 	| { kind: "preset"; preset: ReflectionPreset; isNew: boolean; back: "ask" | "settings" };
 
@@ -56,9 +65,12 @@ const draft = { question: "" };
  * click; either way the model finds the notes the question is about. Its
  * settings page holds the connection, the model, the folder and the
  * presets, which the plugin's settings tab leaves to it.
+ *
+ * Opened from a reflection's Regenerate button, it holds that reflection's
+ * question instead, and the model to ask it of, and no presets.
  */
 export class ReflectionModal extends Modal {
-	private page: Page = { kind: "ask" };
+	private page: Page;
 	private connection: Connection = { state: "checking" };
 	/** Bumped by every check, so an older answer arriving late is dropped. */
 	private checkSerial = 0;
@@ -76,6 +88,7 @@ export class ReflectionModal extends Modal {
 		private options: ReflectionModalOptions = {},
 	) {
 		super(app);
+		this.page = options.regenerate ? { kind: "regenerate", reflection: options.regenerate } : { kind: "ask" };
 	}
 
 	onOpen(): void {
@@ -109,6 +122,14 @@ export class ReflectionModal extends Modal {
 				this.renderTitle("Reflect", null);
 				this.renderAsk();
 				this.syncModelBadge();
+				break;
+			case "regenerate":
+				// Its model is chosen beside the question, for this answer alone.
+				this.titleEl.createDiv({ cls: "journal-reflect-title" }).createSpan({
+					cls: "journal-reflect-title-text",
+					text: "Regenerate",
+				});
+				this.renderRegenerate(this.page.reflection);
 				break;
 			case "settings":
 				this.renderTitle("Reflection settings", "ask");
@@ -386,6 +407,97 @@ export class ReflectionModal extends Modal {
 		this.onConnection = sync;
 		sync();
 		window.setTimeout(() => input.focus(), 0);
+	}
+
+	/* ----------------------------------------------------------- regenerate */
+
+	/**
+	 * A reflection's question, to change before it is asked again, and the
+	 * model to ask: the one reflections use unless another is picked, which
+	 * holds for this answer alone.
+	 */
+	private renderRegenerate(reflection: StoredReflection): void {
+		const { contentEl } = this;
+		const setup = contentEl.createDiv({ cls: "journal-reflect-setup" });
+
+		const composer = contentEl.createDiv({ cls: "journal-reflect-composer" });
+		const input = composer.createEl("textarea", {
+			cls: "journal-reflect-question",
+			attr: { placeholder: "Ask your journal a question…", rows: "3", "aria-label": "The question" },
+		});
+		input.value = reflection.prompt;
+
+		const row = composer.createDiv({ cls: "journal-reflect-composer-row" });
+		const select = row.createEl("select", { cls: "dropdown", attr: { "aria-label": "Model for this answer" } });
+		setTooltip(select, "The model that writes this answer");
+		const note = row.createDiv({ cls: "journal-reflect-hint", text: "The new answer replaces this one." });
+		const regenerate = row.createEl("button", { cls: "mod-cta", text: "Regenerate", attr: { type: "button" } });
+
+		// Follow-ups are answers to the old answer, so they go with it.
+		void this.app.vault
+			.cachedRead(reflection.file)
+			.then((text) => {
+				const followUps = parseConversation(noteBody(text), reflection.followUps).followUps.length;
+				if (this.closed || !followUps) return;
+				note.setText(
+					`The new answer replaces this one, and its ${followUps === 1 ? "follow-up" : `${followUps} follow-ups`}.`,
+				);
+			})
+			.catch((error: unknown) => console.error(`Journal View: could not read ${reflection.file.path}`, error));
+
+		/** The model picked here, by name; until one is, the one reflections use. */
+		let picked: string | null = null;
+		const chosen = (): ModelInfo | null => {
+			const models = this.models;
+			const usual = this.model?.tools ? this.model : (models.find((model) => model.tools) ?? null);
+			return (picked ? models.find((model) => model.name === picked && model.tools) : null) ?? usual;
+		};
+
+		const sync = (): void => {
+			const model = chosen();
+			const ready = this.connection.state === "ready" && model !== null;
+			// What is wrong with the model reflections use does not matter once another is picked here.
+			if (ready || this.connection.state === "checking") setup.hidden = true;
+			else this.renderSetup(setup);
+			select.empty();
+			for (const candidate of this.models) {
+				const option = select.createEl("option", { value: candidate.name, text: modelLabel(candidate) });
+				option.disabled = !candidate.tools;
+			}
+			if (!this.models.length) {
+				select.createEl("option", { value: "", text: this.connection.state === "checking" ? "Connecting…" : "No models" });
+			}
+			select.value = model?.name ?? "";
+			select.disabled = !this.models.length;
+			regenerate.disabled = !ready || !input.value.trim();
+		};
+
+		select.addEventListener("change", () => {
+			picked = select.value;
+			sync();
+		});
+		input.addEventListener("input", () => {
+			regenerate.disabled = !(this.connection.state === "ready" && chosen()) || !input.value.trim();
+		});
+		input.addEventListener("keydown", (event) => {
+			if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+			event.preventDefault();
+			if (!regenerate.disabled) regenerate.click();
+		});
+		regenerate.addEventListener("click", () => {
+			const model = chosen();
+			const prompt = input.value.trim();
+			if (!model || !prompt) return;
+			this.plugin.reflectionRuns.regenerate(reflection, { prompt, model: model.name });
+			this.close();
+		});
+
+		this.onConnection = sync;
+		sync();
+		window.setTimeout(() => {
+			input.focus();
+			input.setSelectionRange(input.value.length, input.value.length);
+		}, 0);
 	}
 
 	private start(request: ReflectionRequest): void {
