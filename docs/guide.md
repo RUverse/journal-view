@@ -131,8 +131,9 @@ notices: what you learned over the last two weeks, what this date looked like in
 answer to a question of your own. Each reflection is saved as a note and shown on the day it was
 made, in a bordered box that sets it apart from what you wrote.
 
-Reflections run through [Ollama](https://ollama.com). Install it, start it, and pull a model:
-`gemma4:26b` with 32 GB of memory or more, or `gemma4:e4b` with 16 GB. Until Ollama answers, the
+Reflections run through [Ollama](https://ollama.com). Install it, start it, and pull a model that
+can use tools, which is how it reads your journal: `gemma4:26b` suits 32 GB of memory or more.
+Smaller models find and read notes less reliably. Until Ollama answers with such a model, the
 Reflect window shows these steps.
 
 ### Asking
@@ -143,25 +144,31 @@ reflection**. The Reflect window opens:
 
 - Type a question and press Enter, or select **Reflect**. Shift+Enter starts a new line. What you
   typed is kept while Obsidian runs, so closing the window by accident loses nothing.
-- Choose what the question reads. The line below says how much that is, such as
-  `Reads 12 notes · ~3k words`.
+- Say in the question which notes it is about: a time (`the last two weeks`, `in August`, `on this
+  date in earlier years`), a person, or a subject. There is nothing else to choose: the model finds
+  the notes itself.
 - The model reflections use is named at the top right, next to the settings button; select it to
-  change it in the settings. A red warning icon before it means Ollama is not answering or the model
-  is not installed: hover it for the reason, and the window shows what to do.
-- Select a preset to run it at once. Each shows how much it reads, so a slow run is no surprise. The
-  bookmark button saves the question you typed, and what it reads, as a new preset.
+  change it in the settings. A red warning icon before it means Ollama is not answering, or the
+  model is not installed or cannot use tools: hover it for the reason, and the window shows what to
+  do.
+- Select a preset to run it at once; each shows the question it asks. The bookmark button saves the
+  question you typed as a new preset.
 
-| Reads | What the model is given |
+The model looks through your journal in whichever way the question needs, and the reflection says
+what it is doing while it does:
+
+| It | When |
 | --- | --- |
-| Let the model choose | The model searches, lists and reads your notes itself, which takes longer. It needs a model that can use tools; any other reads the last 14 days instead, and says so |
-| Last 7, 14, 30 or 90 days | The notes from those days, today included |
-| This day over the years | This date in every earlier year, and today |
-| Dates… | The notes between two dates |
+| Searches for words | The question is about a person, a place or a subject. A search finds a word in any of its forms, ranks the notes that match, and shows the model the sentences around each match. Several words find the notes about all of them, and the model can try other words for the same thing. When the mentions fall within a stretch of days short enough to read, the model is given every note of that stretch instead: what happened is as often in the days between, in notes that never name it |
+| Reads chosen notes | It opens the notes a search or a list showed that matter, in full |
+| Reads a range of days | The question is about a period, such as the last two weeks |
+| Lists a period | It needs to see what a stretch of days holds before reading it |
+| Reads a date over the years | The question is about this date, or another, in every year |
 
 A reflection reads only the notes the journal's [filters](#filters) let through, so a rule such as
-excluding `#private` keeps those notes from the model. When the notes do not fit the model's
-context, whole notes are left out evenly across the range, and the reflection says how many it
-reads while it reads them.
+excluding `#private` keeps those notes from the model. When the notes of a long range do not fit the
+model's context, whole notes are left out evenly across the range, and the model is told which, so
+it can read them by themselves.
 
 ### Reading a reflection
 
@@ -175,12 +182,12 @@ unless some text arrived.
 - The line at the bottom, such as `From 9 notes · 5–19 Oct · gemma4:26b`, opens into the dates the
   reflection read; select one to move the journal there.
 - **Ask a follow-up…** at the bottom continues the conversation. The question is added to the
-  reflection's note as a quote, with the answer below it. A follow-up reads the same notes as the
-  reflection; when the model chose its own, it looks through the journal again.
+  reflection's note as a quote, with the answer below it. The model is told which notes the
+  reflection drew on, reads the ones the follow-up needs again, and can look further.
 - The buttons at the top right work as a note's do. **Open note in a tab** shows while you hover the
   reflection; **Regenerate** and **Delete** show only while you hover its header.
-- **Regenerate** asks the same question again over the same notes, as of the day the reflection was
-  made, and replaces the answer once the new one is complete. **Stop** keeps the old answer. When
+- **Regenerate** asks the same question again, as of the day the reflection was made, and replaces
+  the answer once the new one is complete. **Stop** keeps the old answer. When
   the reflection has follow-ups, you are asked first, since they are cleared.
 - **Delete** moves the reflection's note to the trash, as deleting a note does.
 
@@ -192,8 +199,8 @@ come back.
 Reflections are saved in the **Reflections** folder, named after their day and question, such as
 `2026-10-19 What I learned.md`. Their properties record how they were made: `journal-view:
 reflection`, when they were `created` (which sets their day), the `title`, `prompt` and `preset`,
-what they read (`scope`, `from`, `to`), the `model`, the `sources` they read, as links, and the
-questions in their `follow-ups`, which tell them from quotes in the answers. They
+the `model`, the `sources` it read, as links, the days those span (`from`, `to`), and the questions
+in their `follow-ups`, which tell them from quotes in the answers. They
 are ordinary notes: you can open, link, search, and edit them, and the box shows the note's current
 text.
 
@@ -209,10 +216,10 @@ Select the gear in the Reflect window for its settings. **Settings → Journal V
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Server | `http://127.0.0.1:11434` | Where Ollama answers. The notes a reflection reads are sent there, and nowhere else |
-| Model | The first installed | The model reflections use, named at the top of the Reflect window. Models that cannot use tools are marked |
+| Model | `gemma4:26b` when it is installed, else the first that can use tools | The model reflections use, named at the top of the Reflect window. Models that cannot use tools are listed, but cannot be chosen |
 | Folder | `Reflections` | Where reflection notes are saved. It cannot be the daily-note folder |
-| Maximum context | 32,768 tokens | The most a reflection asks the model to hold. More reads more notes at once but uses more memory; *Let the model choose* asks for all of it |
-| Presets | Six built in | Reorder, edit, delete, or add presets. **Restore built-in presets** brings back the built-in ones you edited or deleted, and keeps your own |
+| Maximum context | 32,768 tokens | The most a reflection asks the model to hold. More lets it read more notes for one answer, and uses more memory |
+| Presets | Six built in | Reorder, edit, delete, or add presets: each is a name, a question, and optionally the shape of its answer. **Restore built-in presets** brings back the built-in ones you edited or deleted, and keeps your own |
 
 On a computer without a capable GPU, a 90-day preset can take minutes.
 

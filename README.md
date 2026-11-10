@@ -19,10 +19,11 @@ Open Journal View from the sidebar or run **Open journal** from the command pale
   rules.
 - **See what else each day held.** Optionally list the files you created or edited on each day,
   alongside that day's note.
-- **Reflect on what you wrote.** On desktop, a model on your own computer (through Ollama) can read
-  the last weeks, or this date in past years, and write back what it notices, citing the days it
-  draws on. Pick a preset or ask a question of your own, then ask follow-ups or regenerate it. Each
-  reflection is saved as a note of its own.
+- **Reflect on what you wrote.** On desktop, ask a model on your own computer (through Ollama) about
+  your journal: the last weeks, this date in past years, a person, a subject. It searches and reads
+  the notes the question is about, and writes back what it finds, citing the days it draws on. Pick
+  a preset or ask a question of your own, then ask follow-ups or regenerate it. Each reflection is
+  saved as a note of its own.
 - **Stay responsive across years of notes.** Journal View keeps the days around you ready to edit
   while efficiently handling the rest of your timeline.
 

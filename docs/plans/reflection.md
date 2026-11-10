@@ -1,7 +1,10 @@
 # Reflection: feature plan
 
-Planned 2026-10-19; every step was built by 2026-10-27 and awaits review. This is a working plan for contributors, not user
-documentation: once the feature lands, its behavior belongs in [the guide](../guide.md).
+Planned 2026-10-19; every step was built by 2026-10-27 and awaits review. On 2026-11-10 the ranges
+a reflection used to be given went: the model finds the notes every question is about
+([step 6](#6-every-reflection-finds-its-own-notes)), and the sections below describe that design.
+This is a working plan for contributors, not user documentation: once the feature lands, its
+behavior belongs in [the guide](../guide.md).
 
 Reflection lets a local model read the journal and write back something worth reading: what you
 learned over the last two weeks, what this date looked like in past years, plans that went quiet.
@@ -49,9 +52,11 @@ Agreed with the user on 2026-10-19:
 
 | Topic | Decision | Why |
 | --- | --- | --- |
-| Context | Presets fix their own range and the plugin hands those notes over. Custom prompts give the model tools; models without tools get a range picker | Presets must work with any model; small local models call tools unreliably |
+| Context | The model finds the notes itself, through tools, for presets and questions alike; a preset's question says what it is about ("the last two weeks"). Decided 2026-11-10. Until then presets fixed their own range, and a question came with a picker of what to read | Choosing a range was effort the question already made unnecessary, and a fixed range cannot follow a question about a person or a subject |
+| Models | A model has to support tools, and the feature is tuned and judged on models of about 26B parameters and up. Decided 2026-11-10 | Smaller models chose and read notes too unreliably to be worth supporting |
+| Search | Ranked keyword search, without embeddings. Decided 2026-11-10 | It needs no second model or index on disk, and the model can try other words for the same thing |
 | Storage | One Markdown note per reflection in a configurable `Reflections` folder | Searchable, linkable, and kept without the plugin; no lock-in |
-| Composer | The button opens the Reflect window: a question of your own over a chosen scope, and the presets below it, each a click away. Changed from a menu on 2026-10-20 | A question of your own belongs next to the presets, not behind a menu item |
+| Composer | The button opens the Reflect window: a question of your own, and the presets below it, each a click away. Changed from a menu on 2026-10-20 | A question of your own belongs next to the presets, not behind a menu item |
 | Settings | Server, model, folder, context and presets live on the window's settings page; the plugin's tab keeps one **Reflections** toggle. Decided 2026-10-20 | The settings sit where they are used |
 | Days | A day with reflections stays in the journal when it has no note, even with **Only show days that have a note** on. Decided 2026-10-20 | A reflection made yesterday must not vanish because yesterday had no note |
 | Card | Read-only Markdown with linked source dates, **Regenerate**, **Ask a follow-up**, and **Delete** | Lets the reader check a reflection against what they wrote and keep talking to it |
@@ -86,35 +91,36 @@ Reflect                                  gemma4:26b  ⚙  ✕
 ┌──────────────────────────────────────────────────────┐
 │ Ask your journal a question…                         │
 └──────────────────────────────────────────────────────┘
-[Let the model choose ▾]                         🔖 [Reflect]
-The model searches and reads your notes itself, which takes longer.
+The model finds the notes itself: name a time,   🔖 [Reflect]
+a person or a subject.
 
 Presets
-This day over the years                           4 notes
-What I learned                        14 days · ~3k words
-Week in review                        7 days · ~620 words
+This day over the years
+Look at what I wrote on this date in earlier years, and …
+What I learned
+What did I learn or realize over the last two weeks?
 …
 ```
 
 - **Question:** a text box; Enter asks, Shift+Enter starts a new line. What was typed is kept while
-  the plugin runs, so closing the window by accident loses nothing.
-- **Scope:** *Let the model choose* (needs a model with tools), *Last 7 / 14 / 30 / 90 days*, *This
-  day over the years*, or *Dates…*, a from–to range. Under it, how much it reads: `Reads 12 notes ·
-  ~3k words`. Without tool support, *Let the model choose* is disabled and says it needs a model with
-  tools; a scope left at it falls back to *Last 14 days*.
+  the plugin runs, so closing the window by accident loses nothing. The question says which notes it
+  is about, and the model finds them; until 2026-11-10 a picker beside it chose what to read (*Let
+  the model choose*, *Last 7 / 14 / 30 / 90 days*, *This day over the years*, *Dates…*).
 - **Model:** shown quietly beside the gear, and chosen only on the settings page (changed on
   2026-10-27; the window had its own picker). While Ollama does not answer, or the chosen model is
-  not installed, a red warning icon comes before the name, its tooltip says why, and the setup box
-  above the question says what to do. Selecting the name opens the settings.
-- **Presets:** run at a click, each showing how much it would read, so a slow run is not a surprise.
-  The bookmark button saves the typed question and its scope as a new preset.
-- Until Ollama answers, the window says so above the question, with the setup steps: install Ollama,
-  pull a model (`gemma4:26b` with 32 GB of memory or more, `gemma4:e4b` otherwise), **Try again**.
+  not installed or cannot use tools, a red warning icon comes before the name, its tooltip says why,
+  and the setup box above the question says what to do. Selecting the name opens the settings.
+- **Presets:** run at a click, each showing the question it asks. The bookmark button saves the
+  typed question as a new preset.
+- Until Ollama answers with a model that can use tools, the window says so above the question, with
+  the setup steps: install Ollama, pull a model (`gemma4:26b`, with 32 GB of memory or more),
+  **Try again**.
 
 The settings page holds the server address and the connection's status, the model, the folder,
 **Maximum context**, and the presets: reorder, edit, delete, **New preset**, and **Restore built-in
 presets**, which brings back edited and deleted ones and keeps the reader's own. A preset's editor
-has its name, question, an optional answer shape, and what it reads. The plugin's settings tab keeps
+has its name, question and an optional answer shape. Models that cannot use tools are listed in the
+model picker, but cannot be chosen. The plugin's settings tab keeps
 a single **Reflections** toggle, which turns the whole feature off: the button, the command, the cards,
 and the days kept for their reflections.
 
@@ -122,8 +128,8 @@ and the days kept for their reflections.
 
 States, in order:
 
-1. **Reading:** the card appears next to the button with the drafted skeleton and a status line:
-   `Reading 5–19 Oct · 9 notes`, or each tool call as it happens (`Searching for "running"`).
+1. **Reading:** the card appears next to the button with the drafted skeleton and a status line
+   for each tool call as it happens: `Searching for "running"`, `Reading 5 Oct – 19 Oct`.
 2. **Writing:** the first words replace the skeleton and the text streams in. **Stop** keeps what has
    been written so far.
 3. **Ready:** the reflection renders as Markdown, read-only.
@@ -142,18 +148,18 @@ when its day loads again.
 
 ## Presets
 
-Each preset fixes the notes it reads, so it works with every model. The spike (step 0) tuned the
-wording; `PRESETS` in `scripts/reflection-spike.mjs` holds each preset's exact request and the shape
-of its answer, and `presets.ts` should start from those.
+Each preset is a question that says which notes it is about, and an answer shape; the model finds
+the notes as it does for any question. `BUILT_IN_PRESETS` in `presets.ts` holds the exact wording,
+which `scripts/reflection-spike.mjs` runs as it is.
 
-| Preset | Reads | Asks for, in this shape |
+| Preset | Its question is about | Asks for, in this shape |
 | --- | --- | --- |
-| This day over the years | This date in every earlier year, and today | A paragraph per note, starting with its link, then the first note's hopes set against today |
-| What I learned | Last 14 days | One to three lessons as bullets, each in close to the note's own words, with its link |
-| Week in review | Last 7 days | **High points** and **Low points** as cited bullets, **Energy** day by day, and one question |
-| Open loops | The 30 days before today | Each plan once, under **Still open** (where it was written) or **Followed up** (where it was) |
-| Recurring themes | Last 90 days | Three to five topics, each with its first and last mention, saying when one stopped appearing |
-| Questions to sit with | Last 14 days | Three numbered questions, each after an entry's link and what it says, about what it leaves open |
+| This day over the years | This date in earlier years, and today | A paragraph per note, starting with its link, then the first note's hopes set against today |
+| What I learned | The last two weeks | One to three lessons as bullets, each in close to the note's own words, with its link |
+| Week in review | The last seven days | **High points** and **Low points** as cited bullets, **Energy** day by day, and one question |
+| Open loops | The 30 days up to yesterday | Each plan once, under **Still open** (where it was written) or **Followed up** (where it was) |
+| Recurring themes | The last three months | Three to five topics, each with its first and last mention, saying when one stopped appearing |
+| Questions to sit with | The last two weeks | Three numbered questions, each after an entry's link and what it says, about what it leaves open |
 
 Open loops ends yesterday because the models list today's to-dos however they are told not to; a plan
 written today is not an open loop yet.
@@ -166,10 +172,11 @@ The shared system prompt is what separates an insight from a horoscope:
 - Write to the reader in the second person, in the language their notes are written in.
 - Keep it to about 150–300 words unless the prompt asks otherwise.
 
-Small models stop following the system prompt a few thousand tokens later, so the request ends with
-a short reminder after the notes: write to me as "you", cite only with the links in the headings, one
-date per link, use only what the notes say, and no praise, advice or closing summary. Without it, and
-without the preset's answer shape, 8B models cited nothing at all.
+Small models stop following the system prompt a few thousand tokens later, so the question, its
+answer shape and a short reminder are repeated after the notes, at the end of the tool results that
+pass them: write to me as "you", cite only with the links in the headings, one date per link, use
+only what the notes say, and no praise, advice or closing summary. Without it, and without the
+preset's answer shape, 8B models cited nothing at all.
 
 ## Architecture
 
@@ -180,13 +187,19 @@ stays behind small host interfaces, as with the view's other collaborators.
 | --- | --- |
 | `provider.ts` | The provider interface: list models, report tool support, stream a chat with tools, cancel |
 | `ollama.ts` | Ollama implementation. `/api/tags` and `/api/show` go through `requestUrl`; `/api/chat` streams with `fetch` and falls back to a non-streaming `requestUrl` |
-| `context.ts` | Reads notes for a range or for this date over the years, formats them, and budgets tokens |
-| `tools.ts` | The tools offered to custom prompts, and the bounded tool loop |
+| `context.ts` | Dates as the model reads them, notes as it is shown them, the token budget, and mending citations |
+| `search.ts` | The index of the journal's words, and ranked search over it with excerpts |
+| `tools.ts` | The tools a model reads the journal with, what each returns, and the bounded loop that runs them |
+| `journal.ts` | The vault's journal, as `tools.ts` reads it: the notes the filters let through, and their text |
 | `presets.ts` | Built-in presets, and merging them with the user's |
 | `store.ts` | Indexes the Reflections folder by date, follows vault events, creates, rewrites and trashes reflection files |
 | `card.ts` | The bordered card: skeleton, streaming, Stop, Regenerate, follow-ups, sources, errors |
 | `conversation.ts` | A reflection's follow-ups as its note keeps them, read back into a conversation |
-| `modal.ts` | The Reflect window: the question, its scope and model, the presets, and the settings page with the connection and preset management |
+| `modal.ts` | The Reflect window: the question, the presets, and the settings page with the connection, the model and preset management |
+
+`context.ts`, `search.ts`, `tools.ts` and `presets.ts` import nothing of Obsidian's at run time, so
+the spike script bundles them as they are and runs them against local models: what is tuned there
+is what ships.
 
 Changes to existing code:
 
@@ -221,9 +234,8 @@ for a second one the same day. Custom prompts are named from the prompt's first 
 journal-view: reflection
 created: 2026-10-19T15:32
 preset: what-i-learned
-prompt: Summarize what I learned during the last 2 weeks
-scope: range
-model: llama3.1:8b
+prompt: What did I learn or realize over the last two weeks?
+model: gemma4:26b
 from: 2026-10-05
 to: 2026-10-19
 sources: ["[[2026-10-05]]", "[[2026-10-09]]", "[[2026-10-14]]"]
@@ -244,13 +256,13 @@ sources: ["[[2026-10-05]]", "[[2026-10-09]]", "[[2026-10-14]]"]
   2026-10-27 each question was a `> [!question]` callout instead, which still reads as one.
 
 - The day a reflection belongs to is the date in `created`.
-- `scope` is what Regenerate and follow-ups read again: `range` (the days from `from` to `to`),
-  `this-day`, or `model` (the model chooses through tools). Notes written before it was recorded
-  go by their preset's scope, else by `from` and `to`.
+- `sources` are the notes passed to the model whole, and `from` and `to` the days they span. Until
+  2026-11-10 a `scope` property recorded what Regenerate and follow-ups read again; it is no longer
+  written, and Regenerate removes it.
 - The file is written once the stream ends, or on **Stop** if some text arrived. Regenerate rewrites
   the body in place with `vault.process` once the new answer is complete, and asks first when there
   are follow-ups, which it clears; **Stop** or an error keeps the old answer. It then rewrites
-  `model`, `from`, `to`, `sources` and `scope` with `processFrontMatter`, and removes `follow-ups`.
+  `model`, `from`, `to` and `sources` with `processFrontMatter`, and removes `follow-ups`.
   A follow-up adds its quote and answer to the end, its question to `follow-ups`, and its notes to
   `sources`, and widens `from` and `to`.
 - Delete reuses the note flow: `fileManager.promptForDeletion`, then `trashFile`
@@ -258,40 +270,89 @@ sources: ["[[2026-10-05]]", "[[2026-10-09]]", "[[2026-10-14]]"]
 
 ## Context and tools
 
-- Each note is passed oldest first under a heading that carries its exact link:
-  `### [[2026-10-05]] · Monday, 5 October`. The model is told to cite with those links, so citations
-  resolve whatever the date format is.
-- Below the heading goes one line of the note's properties, such as `mood: awful · tags: work`,
-  leaving out empty values, values that every note in the range shares (`type: daily`, the tag
-  `journal`), and values that restate the note's date. The YAML itself is not passed. Moods are the
-  best signal *Week in review* has for energy, and stripping all properties lost them.
-- The note's own headings are pushed below that `###`, so a `## Log` cannot read as a new note.
-- The system message states today's date. The user message names the range, lists the notes, and
-  ends with the preset's request, its answer shape, and the reminder.
-- **Budget:** estimate tokens at about four characters each, then set Ollama's `options.num_ctx` to
-  fit the prompt plus room for the answer, capped by the model's own limit and by the *Maximum
-  context* setting. Without this, Ollama silently cuts prompts at its default context size. For
-  English the estimate came within 5% of Ollama's count but ran low on Gemma, so add 10%. Scripts
-  such as Persian or Chinese take more tokens per character; check the first response's
-  `prompt_eval_count` against the estimate, and leave more room when they differ.
-- When the notes do not fit, drop whole notes evenly across the range rather than only the oldest,
-  and say so on the card: `Read 20 of 31 notes; the rest did not fit`.
-- **Citations as written:** models sometimes put two dates in one link (`[[2024-10-19, 2025-10-19]]`)
-  or write a bare `2026-10-05`. Before rendering, split such links into one per date, and link bare
-  dates that match a note that was read. Leave dates that match no note as plain text.
-
-Tools offered to custom prompts on models that support them:
+Every reflection reads the journal through tools, in a loop: the model calls one or more, reads
+what they return, and calls again or answers. Step 6 has how this came about and how it scored.
 
 | Tool | Returns |
 | --- | --- |
-| `list_journal(from, to)` | Dates, note labels, word counts and tags: a cheap overview |
-| `read_journal(from, to, tag?)` | The notes themselves, within the budget |
-| `on_this_day(date?)` | This date in every earlier year |
-| `search_journal(query, from?, to?)` | Matching days with short excerpts |
+| `search_journal(query, from?, to?)` | The notes that match words, a name or a phrase, ranked; see below for what it shows of them |
+| `read_notes(dates)` | Chosen notes in full: the ones a search or a list showed that matter |
+| `read_journal(from, to, tag?)` | Every note of a range of days in full, within the budget |
+| `list_journal(from, to)` | One line a note: link, date, words, mood and tags, first words. By month past 120 notes |
+| `on_this_day(date?)` | A date in every year, in full |
 
-The loop stops after about six rounds and then asks for the answer. Each call shows in the card's
-status line. Read note bodies through the existing `FindCorpus` or statistics reads where they fit,
-rather than adding another cache.
+### What the model is shown
+
+- Each note passed in full comes under a heading that carries its exact link:
+  `### [[2026-10-05]] · Monday, 5 October`. The model is told to cite with those links, so citations
+  resolve whatever the date format is.
+- Below the heading goes one line of the note's properties, such as `mood: awful · tags: work`,
+  leaving out empty values, values that nearly every note in the journal shares (`type: daily`, the
+  tag `journal`), and values that restate the note's date. The YAML itself is not passed. Moods are
+  the best signal *Week in review* has for energy, and stripping all properties lost them.
+- The note's own headings are pushed below that `###`, so a `## Log` cannot read as a new note.
+- The system message states today's date and the days the usual periods start on (`the last two
+  weeks (14 days) began on 2026-10-06`), since models cannot count back from today, and how many
+  notes the journal holds, from when to when.
+- Dates in arguments are read leniently: `YYYY-MM-DD`, `today`, `yesterday`, `2 weeks ago`,
+  `19 October`, a month (`2026-08`) or a year alone. Any other error says how to call again.
+- Notes already passed are named rather than repeated.
+
+### Search
+
+`search.ts` indexes every note's words the first time a run searches, a batch at a time: about half
+a second for 3,300 notes, after which a search takes a few milliseconds.
+
+- **Matching.** Words are compared by their stems (`run` finds `running`), without case or accents.
+  A longer word also finds the words that start with it, and those that share most of their start
+  with it, so `reorganization` finds `reorganising` and `reorg`. A note's tags, properties and name
+  count as its words. A word that the index does not hold as a word is looked for as text.
+- **Queries**, as models write them: several words are looked for together, and a note with all of
+  them ranks above one with some; commas, `OR` and `|` separate other ways of saying a thing; quotes
+  keep words together, and fall back to the words apart when they stand together nowhere. A word in
+  most of the notes (`to` in `trip to Lisbon`) is not searched for beside rarer ones.
+- **Ranking** is BM25. When a query has several words, the result says how many notes each is in:
+  a search for `trip to Lisbon` that finds a note about tripping says that no note mentions Lisbon.
+- **What a search returns** depends on what it found:
+  1. **The story.** When the days from the first mention to the last are few enough to read (60
+     notes and 35% of the context at most), every note of those days is passed in full, and the
+     ones that mention the subject named. What happened to a subject is as often in the days
+     between, in notes that never name it: the reorganization's outcome is in a note that says
+     only "Names, finally", which no search for it finds, and models asked to read on did not. When
+     every mention's days are too many, the days of the notes that match best are tried, which
+     leaves out a stray mention years away.
+  2. **A handful.** Up to six notes too far apart for that are passed in full.
+  3. **Excerpts.** Otherwise the 20 notes that match best, always with the first and the last
+     mention, oldest first: each with its date, link, properties and the sentences around its
+     matches, the spread of all the matches by month or year, and the `read_notes` call that reads
+     the ones that matter.
+
+### The loop
+
+- Up to eight rounds with tools, then one request without them. `num_ctx` is the whole context
+  limit from the first round, since changing it makes Ollama load the model again, and each tool
+  result is cut to the room left, measured against `prompt_eval_count` as the rounds go. A search
+  or a list takes 30% of the context at most, to leave the room to read in.
+- **Budget:** tokens are estimated at about four characters each, plus 10%, since Gemma counted
+  more. Scripts such as Persian or Chinese take more tokens per character; the first response's
+  `prompt_eval_count` corrects the estimate. Without `num_ctx`, Ollama silently cuts prompts at its
+  default context size.
+- When the notes of a range do not fit, whole notes are dropped evenly across it, search hits last,
+  and the dropped ones named as dates, so the model can read them by themselves.
+- After a round that passed notes in full, the question, its answer shape and the reminder are
+  repeated at the end of the results.
+- **Two guards, each used once.** An answer written before any tool call is dropped unseen and the
+  model told to look first: shown its own answer, a model goes looking for the notes it invented.
+  An answer that leans on excerpts or a list alone is sent back to read in full. While either
+  could fire the text is held back from the card; and when the answer would be sent back whatever
+  it says, it is stopped after its first words rather than written out and dropped, which saved
+  `gemma4:26b` three seconds a run.
+- A follow-up is told which days the reflection's notes were on, since their text is not kept, and
+  reads the ones it needs again or looks further.
+- **Citations as written:** models sometimes put two dates in one link (`[[2024-10-19, 2025-10-19]]`)
+  or write a bare `2026-10-05`. Before rendering, such links are split into one per date, and bare
+  dates that match a note that was read are linked, unless their own link follows them. Dates that
+  match no note stay plain text.
 
 ## Order of work
 
@@ -350,7 +411,9 @@ friend, Dana their manager. Planted patterns, by days ago:
 
 #### Results
 
-Run on 2026-10-19 on an M5 Max with 128 GB, Ollama 0.40.6, through `scripts/reflection-spike.mjs`.
+Run on 2026-10-19 on an M5 Max with 128 GB, Ollama 0.40.6, through `scripts/reflection-spike.mjs`
+as it was then: a copy of the prompt-building code, which handed each preset the notes of a fixed
+range. [Step 6](#6-every-reflection-finds-its-own-notes) replaced both.
 The prompts went through four rounds. Separate grading agents read every answer against the notes
 and the key above, checking each claim and whether each cited note supports the sentence it is
 attached to, and scored it from 1 (wrong or generic) to 5 (grounded, specific, accurate). One sample
@@ -431,8 +494,10 @@ What carries into the implementation:
 
 Done on 2026-10-20, with the changes asked for that day: the window replaces the menu, its settings
 page replaces the settings tab's section, and days with reflections stay in the journal.
-`scripts/reflection-tools-spike.mjs` mirrors `tools.ts` over the sample journal, and tuned the tools,
-the prompts and the loop; change them there first. Its runs are in `test-vault/.reflection-spike/`.
+`scripts/reflection-tools-spike.mjs` mirrored `tools.ts` over the sample journal, and tuned the
+tools, the prompts and the loop. Its runs are in `test-vault/.reflection-spike/`. What follows is
+how the tools stood then; [step 6](#6-every-reflection-finds-its-own-notes) rebuilt them, and
+[Context and tools](#context-and-tools) describes them as they are.
 
 #### The tools, as tuned
 
@@ -486,18 +551,17 @@ Done on 2026-10-27. A regenerate or a follow-up is a run in `runner.ts` that nam
 writes back to; the day shows it inside that note's card rather than as a card of its own. Both ask
 again as of the reflection's own day, with the window's current model:
 
-- **Regenerate** rebuilds the request from the note: its `prompt`, the format of its `preset` when it
-  still exists (else the one for questions of your own), and its `scope`. The card shows the
-  skeleton and the new answer in place of the old one; a regenerate that fails shows the old answer
-  again with the error above it.
-- **Follow-ups** read the note's conversation back with `parseConversation`. Over fixed notes, the
-  context is built as before and the answer, the earlier follow-ups and the new question come after
-  it, the notes making room for them. With tools, the conversation follows the first question, and
-  the model looks through the journal again, since what it read before is not kept: the guard that
-  drops an answer written before looking applies to follow-ups too. A model without tools reads
-  the reflection's `from`–`to` instead. The question shows as its quote at the bottom of the
-  card, with its own status line, **Stop**, and on failure **Try again** and **Dismiss**, which puts
-  the question back in the box.
+- **Regenerate** rebuilds the request from the note: its `prompt`, and the format of its `preset`
+  when it still exists (else the one for questions of your own). The card shows the skeleton and
+  the new answer in place of the old one; a regenerate that fails shows the old answer again with
+  the error above it.
+- **Follow-ups** read the note's conversation back with `parseConversation`: it follows the first
+  question, and the model looks through the journal again, since what it read before is not kept.
+  Since step 6 it is told which days the reflection's `sources` were on, to read them again. The
+  guard that drops an answer written before looking applies to follow-ups too. The question shows
+  as its quote at the bottom of the card, with its own status line, **Stop**, and on failure **Try
+  again** and **Dismiss**, which puts the question back in the box. Until step 6, a reflection over
+  fixed notes was followed up over the same notes, passed again.
 - The footer opens into a chip per source, sorted by date, that moves the journal there; a source
   no longer in the journal is a disabled chip. Ctrl/Cmd on a chip or a citation opens the note in a
   new tab.
@@ -521,12 +585,114 @@ the text so far. In both day orders a follow-up in view held still while it stre
 step up as it replaced the box it was typed in; with the reflection streaming out of view above,
 the note being read stayed where it was.
 
+### 6. Every reflection finds its own notes
+
+Asked for on 2026-11-10: the picker of what a question reads was effort the question already made
+unnecessary, so it went, and the presets became questions that say what they are about. The model
+finds the notes for all of them, and has more ways to: a ranked search with the sentences around
+each match, and reading the notes it picks. A model has to support tools, and the work was tuned
+and judged only on models of about 26B parameters and up.
+
+What changed:
+
+- **One path.** `buildContext`, the scopes, the window's picker, a preset's *Reads* and the
+  14-day fallback are gone. `runner.ts` refuses a model without tools with a message saying so, and
+  the window shows it before a run is started. While no model is chosen, `gemma4:26b` is used when
+  it is installed.
+- **The engine runs outside Obsidian.** `tools.ts`, `search.ts`, `context.ts` and `presets.ts` no
+  longer touch the vault: `journal.ts` hands them the notes. `scripts/reflection-spike.mjs` bundles
+  and runs them as they are, in place of two scripts that each kept a copy of the prompts and the
+  tools by hand. It asks the questions below and the presets, takes a question of your own
+  (`--ask`), and runs one tool without a model (`--call`), to see what a model would be shown.
+- **Search** is ranked and reads queries as models write them; see
+  [Context and tools](#context-and-tools). Before, it matched a query as one phrase, so `running
+  knee` found only those two words side by side, showed the matches thinned evenly rather than the
+  best ones, and the only way to read on was a whole range of days.
+- **`read_notes`** opens chosen notes by date.
+- **Dates.** The system message gives the days the usual periods start on, and arguments are read
+  leniently.
+- **Presets** carry their period in the question. *Open loops* asks about "the 30 days up to
+  yesterday": worded as "the last 30 days… leave today out", `gemma4:26b` filed the bike's brakes
+  under both headings in three runs of three. *Recurring themes* starts "Read my notes from the
+  last three months": without that, `gemma4:26b` once guessed at themes with a search for ninety
+  words instead of reading.
+
+What the spike showed along the way, each of which changed the design:
+
+- **A search for a subject misses how it ended.** Asked what happened with the reorg, both models
+  searched, read the notes that matched, and `gemma4:26b` answered without the outcome: the note
+  where the names are announced never uses the word. Told at the end of the results, twice, that
+  the days between might say more, it still did not read them. So the search now passes those days
+  itself when they are few enough, and the answer has the outcome every time.
+- **Finding related notes by the words they share with the matches does not work** on a journal:
+  with 70 notes the words shared by the best matches were `brought`, `right` and `were`. Not built.
+- **Answers from excerpts.** `gemma4:26b` answers from a page of excerpts every time, however the
+  results end, and is sent back to read. Stopping that answer after its first words, since it
+  will be dropped whatever it says, took such runs from 13 s to 10 s.
+- **`three months` is not `90 days`.** With the periods listed by their days alone,
+  `qwen3.8:27b-mlx` read the last month for *Recurring themes*; they are now named both ways.
+
+#### Results
+
+Run on 2026-11-10 on the same machine, through `scripts/reflection-spike.mjs`: twelve questions
+(the seven of step 4, the doctor's visit, and *When was I worried about money, and what did I do
+about it?*, the bookshelf, *What did Theo and I do together over the last month?* and *What were
+the best days of August?*) and the six presets, once each. A grading agent checked every claim and
+citation against the notes and the answer key, and scored each answer from 1 to 5:
+
+| Model | Questions | Presets | Rounds | Time per answer | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `gemma4:26b` | 4.25 | 3.67 | 2, at most 4 | 1–10 s | Terse and reliable on lookups; drops the end of an arc, or a last-note link, when it has to sum up many notes |
+| `qwen3.8:27b-mlx` | 4.25 | 3.83 | 2–4 | 3–32 s, and 52 and 96 s for two presets | Better at arcs, quotes the notes, says when they are silent; over-includes and embellishes small details |
+
+Every citation in all 36 answers was to a note the model had read in full, and none to a note that
+does not exist. Both said the notes do not cover Lisbon. Both gave the reorg's outcome, and both
+planted lessons for *What I learned*. *Open loops* had both open plans and no decoy as open on
+both models, though neither listed helping Mina move as followed up.
+
+The slips left, none of them in finding the notes:
+
+- **Misreadings.** `gemma4:26b` read "she's been here four months" as visits, and "everything is
+  unpacked except the box marked MISC" as very little unpacked. `qwen3.8:27b-mlx` gave the narrator
+  an argument that was Ines's and Theo's.
+- ***Recurring themes*** is still the weakest preset: `gemma4:26b` had four of five last-mention
+  links wrong, and `qwen3.8:27b-mlx` gave six themes for five.
+- ***Questions to sit with*** was generic on `gemma4:26b` and built on premises the notes do not
+  hold on `qwen3.8:27b-mlx`.
+- **Leaked reasoning.** Twice `qwen3.8:27b-mlx` wrote its answer, then `</think>`, then the answer
+  again. The loop now keeps only what follows `</think>`, and takes the draft back from the card.
+
+The scores are about those of step 4 (4.4 and 4.6 on seven questions), on a wider set and with the
+presets now finding their own notes: those had scored 4.4 and 3.75 on the short presets when the
+notes were handed to them. One sample each, so a score can move by about a point.
+
+Tested in the test vault on `gemma4:26b`, with the journal moved up to 10 November:
+
+- The window has no picker and no date fields; each preset shows its question.
+- *What happened with the reorg at work?*, typed and asked with the **Reflect** button, searched
+  for `reorg`, `reorganization` and `work`, read 38 notes and gave the outcome. The note records no
+  `scope`, 38 `sources`, and the days they span; its card's footer says the same.
+- *What I learned*, from its preset, read 28 Oct – 10 Nov and found both lessons.
+- A follow-up, *Who is Ines, and how is working with her going?*, searched for her and was added to
+  the note as a quote with its answer, the sources widened.
+- **Regenerate** on a reflection of 19 October that asked about "these two weeks" read 6–19 Oct, as
+  of its own day.
+- *What did I write about Mina?* got excerpts, was stopped as it began to answer from them, read
+  the 19 notes by their dates, and answered.
+- With `gemma3:4b` chosen, the window showed the warning and the setup box, **Reflect** and the
+  presets were disabled, the model picker listed it as unable to use tools, and a run started
+  anyway failed with the message saying so.
+
+Not done: embeddings. A search by meaning would find a note about a subject that shares none of
+its words, wherever it lies, which the days between mentions do only for a subject that fits in a
+stretch short enough to read. It needs a second model pulled and an index kept on disk, so it was
+left for when keyword search is seen to fall short on a real journal.
+
 ## Testing with Ollama on a Mac
 
 ```bash
-ollama pull gemma4:e4b         # the suggestion for 16 GB; tools and thinking
-ollama pull gemma4:26b         # the suggestion for 32 GB or more
-ollama pull gemma3:4b          # no tools: tests the range-picker fallback
+ollama pull gemma4:26b         # the suggestion, for 32 GB or more; tools and thinking
+ollama pull gemma3:4b          # no tools: tests what the window and a run say about that
 curl http://127.0.0.1:11434/api/tags
 ```
 
@@ -549,8 +715,8 @@ Worth exercising for each step:
   the reader, and the scroll anchor (`src/anchor.ts`) has to absorb that growth without the text
   jumping.
 - Stop part-way, Regenerate with and without follow-ups, and Delete.
-- Ollama quit mid-run, a model removed after it was chosen, and a 90-day preset on the smallest
-  model.
+- Ollama quit mid-run, a model removed after it was chosen, a model without tools chosen in the
+  settings file, and *Recurring themes*, which reads the most.
 - Disabling the plugin mid-run: the request is cancelled and nothing half-written is saved.
 
 The traps in AGENTS.md apply: focus events need focus emulation when driven from the terminal, and
@@ -569,9 +735,10 @@ the plugin has to be disabled and re-enabled to load a new build.
   2026-10-19 with Ollama 0.40.6, where a `GET /api/tags` and a JSON `POST /api/chat` from the test
   vault both got through, preflight included. Other versions or a custom `OLLAMA_ORIGINS` may differ;
   the fallback keeps the feature working either way.
-- **Tool calling.** Small models often skip tools or call them with bad arguments. Validate arguments,
-  return clear errors the model can recover from, and fall back to the range picker when a model has
-  no tool support.
+- **Tool calling.** Small models often skip tools or call them with bad arguments, which is why the
+  feature is tuned for models of about 26B parameters and up. Arguments are validated and read
+  leniently, and every error says how to call again. A model without tool support cannot write a
+  reflection: the window says so, and so does a run started some other way.
 - **Thinking models.** `qwen3` and `gemma4` report the `thinking` capability and by default reason
   before answering, in a separate `message.thinking` field. Decided in the spike: send `think: false`
   for presets. Thinking helped only *Open loops*, and only on the smaller models, at 5–25 s extra;
@@ -582,10 +749,14 @@ the plugin has to be disabled and re-enabled to load a new build.
 - **Answers that never end.** Gemma 4, `gemma4:12b` most, sometimes loops after a tool result and
   sends nothing until `num_ctx` fills, minutes later. Every chat caps the answer with
   `options.num_predict` at 2048 tokens, which ends such a loop in about 20 s.
-- **Memory of tool runs.** A question the model answers with tools asks for the whole *Maximum
-  context* (32k by default) from its first round.
-- **Speed.** On a machine without a GPU, a 90-day preset can take minutes. The window shows the size
-  up front, and Stop always works.
+- **Memory.** Every reflection asks for the whole *Maximum context* (32k by default) from its first
+  round, since what the model will read is not known up front.
+- **Speed.** On a machine without a GPU, a reflection that reads three months can take minutes.
+  The card says what is being read, and Stop always works.
+- **What a search cannot find.** Search is by words, so a note about a subject that uses none of
+  the words asked for is found only when it lies between notes that do, or when the model tries
+  the right other words. Embeddings would find more, at the cost of a second model and an index on
+  disk; see step 6.
 - **Scroll position.** Text streaming into a card above the reader (newest first) must not move what
   they are reading, and a card being watched must not climb away from them. See step 5 for how the
   anchor tells the two apart.
