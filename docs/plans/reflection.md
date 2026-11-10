@@ -4,7 +4,8 @@ Planned 2026-10-19; every step was built by 2026-10-27 and awaits review. On 202
 a reflection used to be given went: the model finds the notes every question is about
 ([step 6](#6-every-reflection-finds-its-own-notes)), and the sections below describe that design.
 This is a working plan for contributors, not user documentation: once the feature lands, its
-behavior belongs in [the guide](../guide.md).
+behavior belongs in [the guide](../guide.md). [How Reflection works](../reflection-how-it-works.md)
+has the parts and one question's path in two diagrams.
 
 Reflection lets a local model read the journal and write back something worth reading: what you
 learned over the last two weeks, what this date looked like in past years, plans that went quiet.

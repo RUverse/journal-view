@@ -131,6 +131,9 @@ notices: what you learned over the last two weeks, what this date looked like in
 answer to a question of your own. Each reflection is saved as a note and shown on the day it was
 made, in a bordered box that sets it apart from what you wrote.
 
+[How Reflection works](reflection-how-it-works.md) shows the parts in a picture: the model, its
+tools, and the optional search by meaning.
+
 Reflections run through [Ollama](https://ollama.com). Install it, start it, and pull a model that
 can use tools, which is how it reads your journal: `gemma4:26b` suits 32 GB of memory or more.
 Smaller models find and read notes less reliably. Until Ollama answers with such a model, the
