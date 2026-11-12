@@ -763,6 +763,14 @@ export class JournalView extends ItemView implements DayHost, AnchorHost, Editor
 	/* ------------------------------------------------------------ scrolling */
 
 	private onScroll(): void {
+		// The timeline never scrolls sideways, but `overflow-x: hidden` only
+		// keeps the reader from doing it: the browser still scrolls there to
+		// keep a caret in view, wherever anything in a loaded day is wider
+		// than the pane, and nothing would bring it back. Text typed in by an
+		// Android keyboard's clipboard suggestion sits unwrapped for a moment,
+		// which is enough.
+		if (this.scrollEl.scrollLeft !== 0) this.scrollEl.scrollLeft = 0;
+
 		// Taken before anything below moves the position: this is the reader's
 		// own step, and it is roughly per frame - the browser fires at most one
 		// scroll event per frame.
