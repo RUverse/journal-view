@@ -1019,6 +1019,11 @@ button.journal-day-metadata-value-button:focus-visible,
 	font-family: var(--font-text);
 	font-size: var(--font-text-size);
 	line-height: var(--line-height-normal);
+	/* Obsidian's reading view breaks a word too long for the line, such as a
+	   bare link, but its rule hangs off .markdown-preview-view, which this
+	   container is not. Without it the word runs past the pane's edge, and a
+	   live editor, which does break it, wraps the same note differently. */
+	overflow-wrap: break-word;
 }
 
 .journal-day-preview > :first-child,
