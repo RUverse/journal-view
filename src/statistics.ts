@@ -47,14 +47,18 @@ async function countWords(content: string, current: () => boolean): Promise<numb
 		const last = content.charCodeAt(end - 1);
 		if (end < content.length && last >= 0xd800 && last <= 0xdbff) end--;
 		const chunk = content.slice(offset, end);
-		const tokens = /\s+|[^\s]+/gu;
-		for (const match of chunk.matchAll(tokens)) {
-			if (/^\s/u.test(match[0])) countedToken = false;
-			else if (!countedToken && /[\p{L}\p{N}]/u.test(match[0])) {
+		const tokens = /\S+/gu;
+		let previousEnd = 0;
+		let match: RegExpExecArray | null;
+		while ((match = tokens.exec(chunk)) !== null) {
+			if (match.index > previousEnd) countedToken = false;
+			if (!countedToken && /[\p{L}\p{N}]/u.test(match[0])) {
 				words++;
 				countedToken = true;
 			}
+			previousEnd = tokens.lastIndex;
 		}
+		if (previousEnd < chunk.length) countedToken = false;
 		offset = end;
 		if (offset < content.length) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 	}
@@ -131,6 +135,11 @@ export class JournalStatistics extends Component {
 			}
 		}
 		for (const listener of this.listeners) listener(paths, true);
+	}
+
+	/** One more than the largest word id handed out so far. */
+	get wordCount(): number {
+		return this.words.length;
 	}
 
 	/** One more than the largest stem id handed out so far. */

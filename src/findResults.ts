@@ -54,7 +54,22 @@ export class FindResults {
 
 	/** Records how many times the note matches, replacing whatever it had. */
 	set(key: string, path: string, order: number, count: number, generation: number): void {
-		this.delete(path);
+		const previousKey = this.noteKeys.get(path);
+		if (previousKey !== undefined) {
+			if (previousKey === key && count > 0) {
+				const day = this.days.get(key);
+				const note = day?.notes.find((candidate) => candidate.path === path);
+				if (day && note && note.order === order) {
+					const delta = count - note.count;
+					note.count = count;
+					note.generation = generation;
+					day.count += delta;
+					this.total += delta;
+					return;
+				}
+			}
+			this.delete(path);
+		}
 		if (count <= 0) return;
 		let day = this.days.get(key);
 		if (!day) {
@@ -98,11 +113,26 @@ export class FindResults {
 
 	/** Drops every note no pass since `generation` counted: deleted, renamed away, or filtered out. */
 	prune(generation: number): void {
-		const stale: string[] = [];
-		for (const day of this.days.values()) {
-			for (const note of day.notes) if (note.generation < generation) stale.push(note.path);
+		let removedDay = false;
+		for (const [key, day] of this.days) {
+			let kept = 0;
+			for (const note of day.notes) {
+				if (note.generation < generation) {
+					this.noteKeys.delete(note.path);
+					day.count -= note.count;
+					this.total -= note.count;
+				} else {
+					day.notes[kept++] = note;
+				}
+			}
+			if (kept === day.notes.length) continue;
+			day.notes.length = kept;
+			if (!kept) {
+				this.days.delete(key);
+				removedDay = true;
+			}
 		}
-		for (const path of stale) this.delete(path);
+		if (removedDay) this.keys = this.keys.filter((key) => this.days.has(key));
 	}
 
 	/** Where `at` falls among all matches, from 0 at the top of the timeline; -1 when it is not one. */
@@ -111,10 +141,15 @@ export class FindResults {
 		const note = day?.notes.find((candidate) => candidate.path === at.path);
 		if (!day || !note || at.index < 0 || at.index >= note.count) return -1;
 		let index = 0;
-		for (const key of this.keys) {
-			const before = step > 0 ? key < at.key : key > at.key;
-			if (before) index += this.days.get(key)!.count;
+		// Sum the shorter side, then use the total to get the other side if needed.
+		const fromStart = at.key < this.keys[this.keys.length >> 1];
+		const stride = fromStart ? 1 : -1;
+		for (let i = fromStart ? 0 : this.keys.length - 1; i >= 0 && i < this.keys.length; i += stride) {
+			const key = this.keys[i];
+			if (key === at.key) break;
+			index += this.days.get(key)!.count;
 		}
+		if ((step > 0) !== fromStart) index = this.total - day.count - index;
 		for (const other of day.notes) {
 			if (other === note) break;
 			index += other.count;

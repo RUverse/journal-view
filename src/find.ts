@@ -375,13 +375,17 @@ export class JournalFind {
 	 */
 	private syncLive(): void {
 		const pass = this.pass;
+		const { filteredIndex, settings } = this.host.plugin;
+		const filtering = settings.filterRules.length > 0;
 		const live = new Map<string, LiveNote>();
 		const liveKeys = new Set<string>();
 		for (const section of this.host.sections) {
 			liveKeys.add(section.key);
 			section.entries.forEach((entry, order) => {
-				const ranges =
-					pass && !section.isHidden && !entry.isHidden ? rangesOf(entry.searchText(), pass.expression) : [];
+				// The rules can change before the rebuilt timeline replaces its loaded notes.
+				const searchable = pass && !section.isHidden && !entry.isHidden &&
+					(!filtering || !entry.file || filteredIndex.matchesPath(entry.file.path));
+				const ranges = searchable ? rangesOf(entry.searchText(), pass.expression) : [];
 				live.set(entry.path, { section, entry, key: section.key, order, ranges });
 				if (pass) this.results.set(section.key, entry.path, order, ranges.length, pass.generation);
 			});

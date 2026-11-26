@@ -72,11 +72,16 @@ export function keysAround(keys: readonly string[], key: string, direction: -1 |
 	let earlier = keys[later - 1] === key ? later - 2 : later - 1;
 	const origin = dayNumber(key);
 	const around: string[] = [];
+	let back = earlier >= 0 ? origin - dayNumber(keys[earlier]) : Infinity;
+	let ahead = later < keys.length ? dayNumber(keys[later]) - origin : Infinity;
 	while (earlier >= 0 || later < keys.length) {
-		const back = earlier >= 0 ? origin - dayNumber(keys[earlier]) : Infinity;
-		const ahead = later < keys.length ? dayNumber(keys[later]) - origin : Infinity;
-		if (back < ahead || (back === ahead && direction < 0)) around.push(keys[earlier--]);
-		else around.push(keys[later++]);
+		if (back < ahead || (back === ahead && direction < 0)) {
+			around.push(keys[earlier--]);
+			back = earlier >= 0 ? origin - dayNumber(keys[earlier]) : Infinity;
+		} else {
+			around.push(keys[later++]);
+			ahead = later < keys.length ? dayNumber(keys[later]) - origin : Infinity;
+		}
 	}
 	return around;
 }
