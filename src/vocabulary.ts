@@ -168,7 +168,7 @@ export function proseOf(content: string): string {
 	for (const pattern of NOT_PROSE) text = text.replace(pattern, " ");
 	if (labels.size) text = text.replace(BRACKETED, (match, label: string) => labels.has(label.toLowerCase()) ? " " : match);
 	// Email addresses and handles: any whitespace-separated token with an @.
-	return text.replace(/\S+/g, (token) => token.includes("@") ? " " : token);
+	return text.includes("@") ? text.replace(/\S+/g, (token) => token.includes("@") ? " " : token) : text;
 }
 
 /**
